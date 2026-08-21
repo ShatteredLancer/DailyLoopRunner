@@ -124,6 +124,7 @@ describe('dynamic EA player-group policy', () => {
     const { api } = await loadUserscript({ club: [clubTotw] });
     const loopDef = {
       name: 'Ledger-backed Storage pressure squad',
+      runtimeProtectionRating: 95,
       expectedPlayerCount: 1,
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
@@ -977,5 +978,69 @@ describe('dynamic EA player-group policy', () => {
     expect(fallbackSelection.selected.map((item) => item.id)).toContain(64);
     expect(fallbackSelection.plan.details.policy.usedSoftProtectedFallback).toBe(true);
     expect(fallbackValidation.ok).toBe(true);
+  });
+
+  it('propagates the Rolling all-card maximum through the userscript rating planner', async () => {
+    const required98 = makePlayer({
+      id: 65,
+      definitionId: 605,
+      rating: 98,
+      rareflag: 3,
+      groups: [83],
+      name: 'Required Special 98',
+    });
+    const { api } = await loadUserscript({ storage: [required98] });
+    const loopDef = {
+      name: 'Role-aware Dynamic 85x10 hard cap',
+      expectedPlayerCount: 1,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'TEAM_RATING', values: [98], count: 1 },
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 96 },
+      ratingSbcFill: { priorityPiles: ['storage'] },
+    };
+    const challenge = {
+      requiredPlayerCount: 1,
+      squad: { getNumOfRequiredPlayers: () => 1 },
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [98]),
+        requirement('PLAYER_RARITY_GROUP', [83], 1),
+      ],
+    };
+    const model = api.parseRatingSbcChallenge(loopDef, challenge);
+    const exclusiveRoles = [{
+      id: 'required-special',
+      constraintId: 'challenge-0',
+      minCount: 1,
+      maxCount: 1,
+    }];
+    const candidates = api.buildRatingSbcCandidateEntries(loopDef, model, { exclusiveRoles });
+    const selection = await api.findOptimalRatingSbcSelection(
+      candidates.entries,
+      model,
+      candidates.piles,
+      {
+        selectionPolicy: {
+          exclusiveRoles,
+          maxPlayerRating: 96,
+          maxOrdinaryRating: 96,
+          protectionPolicy: { allowOtherSpecialAsOrdinary: true },
+        },
+      },
+    );
+
+    expect(candidates.entries.map((entry) => entry.item.id)).toEqual([65]);
+    expect(selection).toMatchObject({
+      ok: false,
+      reasonCode: 'REQUIRED_SPECIAL_SHORTAGE',
+      details: {
+        policy: {
+          counts: { overMaxPlayerRating: 1, eligible: 0 },
+        },
+      },
+    });
   });
 });

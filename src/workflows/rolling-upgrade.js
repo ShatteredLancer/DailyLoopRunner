@@ -131,6 +131,10 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     30,
   );
   const budgets = recoveryBudgets(options.recoveryBudgets);
+  const maxDuplicateTransactionReplans = Math.max(
+    0,
+    Math.min(5, Number(options.maxDuplicateTransactionReplans ?? 3) || 0),
+  );
   const result = {
     status: 'completed',
     phase: ROLLING_UPGRADE_PHASES.PREFLIGHT,
@@ -164,6 +168,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     requiredSpecial: 0,
     storageMaintenance: 0,
   };
+  let duplicateTransactionReplans = 0;
 
   function rememberReceipt(receipt) {
     if (!receipt || (receipt.status === 'replan' && receipt.submitted !== true)) return;
@@ -198,6 +203,36 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     if (isStopped(await options.shouldStop?.({ result, phase: result.phase }))) return true;
     if (isStopped(await options.stopPoint?.({ result, phase: result.phase }))) return true;
     return false;
+  }
+
+  async function hasActiveDuplicateTransaction() {
+    return options.hasActiveDuplicateTransaction?.() === true;
+  }
+
+  async function finishAfterDuplicateTransactionAbort(
+    trigger,
+    value,
+    successStatus,
+    fallbackReason,
+    fallbackCode,
+    details = {},
+  ) {
+    if (!await hasActiveDuplicateTransaction()) {
+      return finish(successStatus, value, fallbackReason, fallbackCode);
+    }
+    const aborted = await options.abortActiveDuplicateTransaction?.({
+      trigger,
+      value,
+      replans: duplicateTransactionReplans,
+      ...details,
+    }) || value;
+    const compensationSucceeded = aborted?.details?.compensationSucceeded === true;
+    return finish(
+      compensationSucceeded ? successStatus : 'blocked',
+      aborted,
+      fallbackReason,
+      reasonCode(aborted) || fallbackCode,
+    );
   }
 
   async function runRecovery(kind, phase, callback, context = {}) {
@@ -419,6 +454,21 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     );
   }
 
+  if (typeof options.recoverDuplicateTransaction === 'function') {
+    const recovered = await options.recoverDuplicateTransaction({ result });
+    if (isStopped(recovered)) {
+      return finish('stopped', recovered, 'stopped while recovering a duplicate materialization transaction');
+    }
+    if (isBlocked(recovered)) {
+      return finish(
+        recovered?.status === 'unavailable' ? 'unavailable' : 'blocked',
+        recovered,
+        'duplicate materialization transaction could not be recovered safely',
+        'DUPLICATE_MATERIALIZATION_RECOVERY_REQUIRED',
+      );
+    }
+  }
+
   if (typeof options.resumePendingPlayerPick === 'function') {
     await enter(ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK, {
       recovery: 'storageSink',
@@ -459,9 +509,28 @@ export async function runRollingUpgradeWorkflow(options = {}) {
   }
 
   while (maxCompletions === 0 || result.completions < maxCompletions) {
-    if (await stopRequested()) return finish('stopped', null, 'stopped by user', 'USER_STOPPED');
+    if (await stopRequested()) {
+      return finishAfterDuplicateTransactionAbort(
+        'user-stop',
+        { status: 'stopped', reason: 'stopped by user', reasonCode: 'USER_STOPPED' },
+        'stopped',
+        'stopped by user',
+        'USER_STOPPED',
+      );
+    }
     if (result.iterations >= maxIterations) {
-      return finish('blocked', null, `Rolling safety limit reached after ${maxIterations} iteration(s)`, 'SAFETY_LIMIT_REACHED');
+      return finishAfterDuplicateTransactionAbort(
+        'safety-limit',
+        {
+          status: 'blocked',
+          reason: `Rolling safety limit reached after ${maxIterations} iteration(s)`,
+          reasonCode: 'SAFETY_LIMIT_REACHED',
+        },
+        'blocked',
+        `Rolling safety limit reached after ${maxIterations} iteration(s)`,
+        'SAFETY_LIMIT_REACHED',
+        { maxIterations },
+      );
     }
     result.iterations++;
     let progressed = false;
@@ -516,7 +585,56 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     let plan = null;
     let primaryDuplicateReserveResolved = !pack || !surplusCraftingEnabled;
     while (!plan) {
-      if (await stopRequested()) return finish('stopped', null, 'stopped by user', 'USER_STOPPED');
+      if (await stopRequested()) {
+        return finishAfterDuplicateTransactionAbort(
+          'user-stop',
+          { status: 'stopped', reason: 'stopped by user', reasonCode: 'USER_STOPPED' },
+          'stopped',
+          'stopped by user',
+          'USER_STOPPED',
+        );
+      }
+
+      if (await hasActiveDuplicateTransaction()) {
+        await enter(ROLLING_UPGRADE_PHASES.PLAN_PRIMARY_SQUAD, {
+          bootstrap: !pack && !resumedPrimary,
+          resumedPrimary,
+          duplicateTransactionReplan: true,
+        });
+        const transactionPlan = await options.planPrimarySquad({
+          result,
+          iteration: result.iterations,
+          bootstrap: !pack && !resumedPrimary,
+          resumedPrimary,
+          duplicateTransactionReplan: true,
+        });
+        result.lastPlan = transactionPlan || null;
+        if (isStopped(transactionPlan)) {
+          return finishAfterDuplicateTransactionAbort(
+            'primary-replan-stopped',
+            transactionPlan,
+            'stopped',
+            'stopped while replanning an active duplicate transaction',
+            reasonCode(transactionPlan) || 'USER_STOPPED',
+            { plan: transactionPlan },
+          );
+        }
+        if (transactionPlan?.ok || transactionPlan?.status === 'ready') {
+          plan = transactionPlan;
+          break;
+        }
+        const aborted = await options.abortActiveDuplicateTransaction?.({
+          trigger: 'primary-replan-failed',
+          plan: transactionPlan,
+          replans: duplicateTransactionReplans,
+        }) || transactionPlan;
+        return finish(
+          'blocked',
+          aborted,
+          'active duplicate transaction could not be replanned in its current Challenge',
+          reasonCode(aborted) || reasonCode(transactionPlan) || 'DUPLICATE_TRANSACTION_REPLAN_BLOCKED',
+        );
+      }
 
       await enter(ROLLING_UPGRADE_PHASES.RESOLVE_PROTECTED_STORAGE);
       const storage = await options.resolveProtectedStorage?.({
@@ -814,6 +932,23 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     rememberReceipt(submission?.receipt || submission);
     if (submission?.inventoryDelta) result.inventoryDelta = submission.inventoryDelta;
     if (submission?.status === 'replan') {
+      if (await hasActiveDuplicateTransaction()) {
+        duplicateTransactionReplans++;
+        if (duplicateTransactionReplans > maxDuplicateTransactionReplans) {
+          const aborted = await options.abortActiveDuplicateTransaction?.({
+            trigger: 'primary-replan-limit',
+            submission,
+            replans: duplicateTransactionReplans,
+            maxReplans: maxDuplicateTransactionReplans,
+          }) || submission;
+          return finish(
+            'blocked',
+            aborted,
+            `active duplicate transaction exceeded ${maxDuplicateTransactionReplans} replans`,
+            reasonCode(aborted) || 'DUPLICATE_TRANSACTION_REPLAN_LIMIT',
+          );
+        }
+      }
       resumedPrimaryPending = true;
       await emit(options, 'replan', {
         kind: 'primary',
@@ -832,6 +967,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       return finish('blocked', submission, 'primary SBC submission did not complete', 'PRIMARY_SUBMISSION_BLOCKED');
     }
     result.completions++;
+    duplicateTransactionReplans = 0;
     if (bootstrap) result.bootstrapSubmissions++;
     if (resumedPrimary) resumedPrimaryPending = false;
     progressed = true;

@@ -160,6 +160,27 @@ describe('submitSbcAttempt', () => {
     expect(options.submitTransport).not.toHaveBeenCalled();
   });
 
+  it('returns to the planner when player preparation materializes inventory', async () => {
+    const options = baseOptions({
+      preparePlayers: async () => ({
+        ok: true,
+        replan: true,
+        reason: 'duplicate materialized; old squad plan invalidated',
+        reasonCode: 'DUPLICATE_MATERIALIZED_REPLAN',
+      }),
+      preSaveValidators: [vi.fn(async () => {})],
+    });
+
+    await expect(submitSbcAttempt(options)).resolves.toMatchObject({
+      status: 'replan',
+      submitted: false,
+      reasonCode: 'DUPLICATE_MATERIALIZED_REPLAN',
+    });
+    expect(options.preSaveValidators[0]).not.toHaveBeenCalled();
+    expect(options.saveSquad).not.toHaveBeenCalled();
+    expect(options.submitTransport).not.toHaveBeenCalled();
+  });
+
   it('blocks before save when runtime inventory validation fails', async () => {
     const options = baseOptions({
       prepareRuntimeAccess: async () => ({ ok: false, reason: 'Club item #10 is stale' }),
@@ -187,11 +208,22 @@ describe('submitSbcAttempt', () => {
 
   it('uses the same squad provider and validators in dry run without saving or submitting', async () => {
     const pre = vi.fn(async () => {});
+    const preparePlayers = vi.fn(async () => ({
+      ok: true,
+      changed: true,
+      replan: true,
+    }));
     const prepareRuntimeAccess = vi.fn(async () => ({ ok: true }));
-    const options = baseOptions({ dryRun: true, preSaveValidators: [pre], prepareRuntimeAccess });
+    const options = baseOptions({
+      dryRun: true,
+      preSaveValidators: [pre],
+      prepareRuntimeAccess,
+      preparePlayers,
+    });
     const result = await submitSbcAttempt(options);
     expect(result.status).toBe('planned');
     expect(pre).toHaveBeenCalledOnce();
+    expect(preparePlayers).not.toHaveBeenCalled();
     expect(options.saveSquad).not.toHaveBeenCalled();
     expect(options.submitTransport).not.toHaveBeenCalled();
     expect(prepareRuntimeAccess).not.toHaveBeenCalled();
@@ -214,6 +246,33 @@ describe('submitSbcAttempt', () => {
     const options = baseOptions({ isSubmitReady: async () => false });
     const result = await submitSbcAttempt(options);
     expect(result).toMatchObject({ status: 'blocked', submitted: false, reason: 'saved squad is not submit ready' });
+    expect(options.submitTransport).not.toHaveBeenCalled();
+  });
+
+  it('re-reads and validates the final squad after readiness and before transport', async () => {
+    const calls = [];
+    const finalPlayers = [{ id: 20 }];
+    const result = await submitSbcAttempt(baseOptions({
+      isSubmitReady: async () => { calls.push('ready'); return true; },
+      readFinalPlayers: async () => { calls.push('read-final'); return finalPlayers; },
+      finalValidators: [async ({ finalPlayers: actual }) => {
+        calls.push('final');
+        expect(actual).toBe(finalPlayers);
+      }],
+      submitTransport: async () => { calls.push('submit'); return { submitted: true }; },
+    }));
+
+    expect(result).toMatchObject({ submitted: true });
+    expect(calls).toEqual(['ready', 'read-final', 'final', 'submit']);
+  });
+
+  it('never reaches transport when the final saved-squad guard rejects', async () => {
+    const options = baseOptions({
+      readFinalPlayers: async () => [{ id: 99 }],
+      finalValidators: [async () => { throw new Error('final squad identity drift'); }],
+    });
+
+    await expect(submitSbcAttempt(options)).rejects.toThrow('final squad identity drift');
     expect(options.submitTransport).not.toHaveBeenCalled();
   });
 
@@ -283,6 +342,23 @@ describe('submitSbcAttempt', () => {
       ['after'],
       ['commit-end', 'submitted'],
     ]);
+  });
+
+  it('preserves a confirmed submission while exposing a blocked post-submit finalizer', async () => {
+    const result = await submitSbcAttempt(baseOptions({
+      afterSubmit: async () => ({
+        ok: false,
+        reason: 'protected counterpart could not return to Club',
+        reasonCode: 'DUPLICATE_COUNTERPART_RESTORE_BLOCKED',
+      }),
+    }));
+
+    expect(result).toMatchObject({
+      status: 'submitted',
+      submitted: true,
+      postSubmitBlocked: true,
+      reasonCode: 'DUPLICATE_COUNTERPART_RESTORE_BLOCKED',
+    });
   });
 
   it('rechecks submit readiness when the saved squad button appears late', async () => {

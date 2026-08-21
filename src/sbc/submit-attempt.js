@@ -102,6 +102,17 @@ export async function submitSbcAttempt(options = {}) {
           reason: prepared.reason || 'SBC player preparation failed',
         }), { phase: 'player-preparation', context });
       }
+      if (prepared?.replan === true || prepared?.status === 'replan') {
+        return publishResult(options, createSubmissionResult({
+          status: 'replan',
+          submitted: false,
+          challengeRef: context.challengeRef || { id: context.challenge?.id || null },
+          consumedItemRefs: context.squadPlan.itemRefs || [],
+          reason: prepared.reason || 'inventory changed during player preparation; replan required',
+          reasonCode: prepared.reasonCode || 'PLAYER_PREPARATION_REPLAN',
+          details: prepared.details,
+        }), { phase: 'player-preparation-replan', context });
+      }
       if (Array.isArray(prepared?.players)) {
         context.players = prepared.players;
         context.squadPlan = {
@@ -139,6 +150,11 @@ export async function submitSbcAttempt(options = {}) {
       }), { phase: 'readiness', context });
     }
 
+    if (options.readFinalPlayers) {
+      context.finalPlayers = await options.readFinalPlayers(context);
+    }
+    await runValidators(options.finalValidators, context, 'final');
+
     const runCommittedSubmit = typeof options.runCommittedSubmit === 'function'
       ? options.runCommittedSubmit
       : async (operation) => operation();
@@ -164,7 +180,18 @@ export async function submitSbcAttempt(options = {}) {
         rewardPackId: transportResult?.rewardPackId,
       });
       await publishResult(options, result, { phase: 'submitted', context, transportResult });
-      if (options.afterSubmit) await options.afterSubmit({ ...context, result, transportResult });
+      if (options.afterSubmit) {
+        const afterSubmit = await options.afterSubmit({ ...context, result, transportResult });
+        if (afterSubmit?.ok === false) {
+          return {
+            ...result,
+            postSubmitBlocked: true,
+            reason: afterSubmit.reason || 'post-submit inventory finalization failed',
+            reasonCode: afterSubmit.reasonCode || 'POST_SUBMIT_FINALIZATION_BLOCKED',
+            details: afterSubmit.details || result.details,
+          };
+        }
+      }
       return result;
     }, context);
   } finally {

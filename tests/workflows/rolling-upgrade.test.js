@@ -118,6 +118,45 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.submitPrimary).toHaveBeenCalledWith(expect.objectContaining({ bootstrap: false }));
   });
 
+  it('recovers a persisted duplicate transaction before pending Pick, Unassigned, or pack work', async () => {
+    const calls = [];
+    const options = harness({
+      initializeInventory: vi.fn(async () => { calls.push('inventory'); return { status: 'ready' }; }),
+      recoverDuplicateTransaction: vi.fn(async () => { calls.push('duplicate-recovery'); return { status: 'ready' }; }),
+      resumePendingPlayerPick: vi.fn(async () => { calls.push('pick'); return { status: 'ready' }; }),
+      resumePendingUnassigned: vi.fn(async () => { calls.push('unassigned'); return { status: 'ready' }; }),
+      findPrimaryPack: vi.fn(async () => { calls.push('pack'); return null; }),
+    });
+
+    await runRollingUpgradeWorkflow(options);
+
+    expect(calls).toEqual(['inventory', 'duplicate-recovery', 'pick', 'unassigned', 'pack']);
+  });
+
+  it('stops before any pending inventory or pack work when duplicate recovery is ambiguous', async () => {
+    const resumePendingPlayerPick = vi.fn(async () => ({ status: 'ready' }));
+    const resumePendingUnassigned = vi.fn(async () => ({ status: 'ready' }));
+    const options = harness({
+      recoverDuplicateTransaction: vi.fn(async () => ({
+        status: 'blocked',
+        reason: 'duplicate submission outcome is ambiguous',
+        reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
+      })),
+      resumePendingPlayerPick,
+      resumePendingUnassigned,
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
+    });
+    expect(resumePendingPlayerPick).not.toHaveBeenCalled();
+    expect(resumePendingUnassigned).not.toHaveBeenCalled();
+    expect(options.findPrimaryPack).not.toHaveBeenCalled();
+  });
+
   it('replans an Active Squad conflict without counting a completion or reopening a pack', async () => {
     const submitPrimary = vi.fn()
       .mockResolvedValueOnce({
@@ -139,6 +178,122 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.onEvent).toHaveBeenCalledWith('replan', expect.objectContaining({
       reasonCode: 'ACTIVE_SQUAD_CONFLICT_REPLAN',
     }));
+  });
+
+  it('keeps an active duplicate transaction on the direct primary replan path', async () => {
+    let transactionActive = false;
+    const calls = [];
+    const submitPrimary = vi.fn()
+      .mockImplementationOnce(async () => {
+        transactionActive = true;
+        return { status: 'replan', submitted: false, reasonCode: 'DUPLICATE_MATERIALIZED_REPLAN' };
+      })
+      .mockImplementationOnce(async () => {
+        transactionActive = false;
+        return { status: 'submitted', submitted: true };
+      });
+    const options = harness({
+      hasActiveDuplicateTransaction: () => transactionActive,
+      findPrimaryPack: vi.fn(async () => { calls.push('pack'); return { id: 1, name: '10x85+' }; }),
+      openPrimaryPack: vi.fn(async () => { calls.push('open'); return { status: 'opened' }; }),
+      resolveProtectedStorage: vi.fn(async () => { calls.push('storage'); return { status: 'ready' }; }),
+      planPrimarySquad: vi.fn(async ({ duplicateTransactionReplan }) => {
+        calls.push(duplicateTransactionReplan ? 'transaction-plan' : 'plan');
+        return { ok: true, itemRefs: [{ id: 1 }] };
+      }),
+      submitPrimary,
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({ status: 'completed', completions: 1, packsOpened: 1 });
+    expect(calls).toEqual(['pack', 'open', 'storage', 'plan', 'transaction-plan']);
+    expect(submitPrimary).toHaveBeenCalledTimes(2);
+  });
+
+  it('compensates an active duplicate transaction instead of entering recovery after replan shortage', async () => {
+    let transactionActive = false;
+    const recoverProvisions = vi.fn(async () => ({ status: 'submitted', submitted: true }));
+    const recoverRequiredSpecial = vi.fn(async () => ({ status: 'submitted', submitted: true }));
+    const abortActiveDuplicateTransaction = vi.fn(async ({ plan }) => {
+      transactionActive = false;
+      return {
+        status: 'blocked',
+        submitted: false,
+        reason: plan.reason,
+        reasonCode: plan.reasonCode,
+        details: { compensationSucceeded: true },
+      };
+    });
+    const planPrimarySquad = vi.fn()
+      .mockResolvedValueOnce({ ok: true, itemRefs: [{ id: 1 }] })
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: 'A prime disappeared after materialization',
+        reasonCode: 'PLAYER_COUNT_SHORTAGE',
+      });
+    const options = harness({
+      hasActiveDuplicateTransaction: () => transactionActive,
+      abortActiveDuplicateTransaction,
+      planPrimarySquad,
+      submitPrimary: vi.fn(async () => {
+        transactionActive = true;
+        return { status: 'replan', submitted: false, reasonCode: 'DUPLICATE_MATERIALIZED_REPLAN' };
+      }),
+      recoverProvisions,
+      recoverRequiredSpecial,
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'PLAYER_COUNT_SHORTAGE',
+      details: { compensationSucceeded: true },
+    });
+    expect(abortActiveDuplicateTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      trigger: 'primary-replan-failed',
+      plan: expect.objectContaining({ reasonCode: 'PLAYER_COUNT_SHORTAGE' }),
+    }));
+    expect(recoverProvisions).not.toHaveBeenCalled();
+    expect(recoverRequiredSpecial).not.toHaveBeenCalled();
+    expect(options.findPrimaryPack).toHaveBeenCalledOnce();
+    expect(options.openPrimaryPack).toHaveBeenCalledOnce();
+  });
+
+  it('compensates an active duplicate transaction before honoring Stop', async () => {
+    let transactionActive = false;
+    const abortActiveDuplicateTransaction = vi.fn(async ({ value }) => {
+      transactionActive = false;
+      return {
+        ...value,
+        details: { compensationSucceeded: true },
+      };
+    });
+    const options = harness({
+      hasActiveDuplicateTransaction: () => transactionActive,
+      abortActiveDuplicateTransaction,
+      shouldStop: vi.fn(async () => transactionActive),
+      submitPrimary: vi.fn(async () => {
+        transactionActive = true;
+        return { status: 'replan', submitted: false, reasonCode: 'DUPLICATE_MATERIALIZED_REPLAN' };
+      }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'stopped',
+      reasonCode: 'USER_STOPPED',
+      details: { compensationSucceeded: true },
+    });
+    expect(abortActiveDuplicateTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      trigger: 'user-stop',
+      value: expect.objectContaining({ reasonCode: 'USER_STOPPED' }),
+    }));
+    expect(options.findPrimaryPack).toHaveBeenCalledOnce();
+    expect(options.openPrimaryPack).toHaveBeenCalledOnce();
+    expect(options.submitPrimary).toHaveBeenCalledOnce();
   });
 
   it('bootstraps from inventory when no primary reward exists', async () => {

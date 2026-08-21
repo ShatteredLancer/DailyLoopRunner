@@ -1,7 +1,721 @@
 import { describe, expect, it, vi } from 'vitest';
 import { loadUserscript, makePlayer } from '../helpers/load-userscript.js';
+import {
+  createDuplicateSubmissionManifest,
+  createDuplicateMaterializationTransaction,
+  materializeDuplicateTransaction,
+  transitionDuplicateMaterializationTransaction,
+  validateDuplicateSubmissionManifest,
+} from '../../src/inventory/duplicate-materialization-transaction.js';
+import { submitSbcAttempt } from '../../src/sbc/submit-attempt.js';
+import { ROLLING_DUPLICATE_TRANSACTION_KEY } from '../../src/config/runtime.js';
+
+function materializedDuplicateTransaction() {
+  const source = {
+    id: 101,
+    definitionId: 7001,
+    rating: 95,
+    rareflag: 64,
+    pile: 'unassigned',
+  };
+  const counterpart = {
+    id: 102,
+    definitionId: 7001,
+    rating: 95,
+    rareflag: 64,
+    pile: 'club',
+  };
+  const consume = { ...source, id: 103, pile: 'club' };
+  const displaced = { ...counterpart, pile: 'unassigned' };
+  const planned = createDuplicateMaterializationTransaction({
+    transactionId: 'tx-persist-recovery',
+    challengeRef: { setId: 500, challengeId: 501 },
+    beforeInventoryVersion: 8,
+    pairs: [{ sourceSignal: source, protectedCounterpart: counterpart }],
+  });
+  const result = materializeDuplicateTransaction(planned, {
+    replacements: [{ signalId: 101, targetId: 102, newItemId: 103 }],
+    afterInventoryVersion: 9,
+    resolveItem: (id, pile) => [consume, displaced]
+      .find((item) => item.id === id && item.pile === pile) || null,
+  });
+  return { transaction: result.transaction, consume, displaced };
+}
 
 describe('Rolling runtime recovery helpers', () => {
+  it('persists recovery-required before returning an identity validation block', async () => {
+    const { transaction, consume, displaced } = materializedDuplicateTransaction();
+    const { api, userscriptValues } = await loadUserscript({
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        getLedger: () => ({
+          summary: () => ({ inventoryVersion: 10 }),
+          resolveItem: ({ id }) => [consume, displaced].find((item) => item.id === id) || null,
+        }),
+      },
+    };
+
+    const result = api.rollingDuplicateTransactionPlanningContext(
+      runtime,
+      { id: 500 },
+      { id: 501 },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED',
+    });
+    expect(runtime.duplicateMaterializationTransaction).toMatchObject({
+      status: 'recovery-required',
+    });
+    expect(userscriptValues.get(ROLLING_DUPLICATE_TRANSACTION_KEY)).toMatchObject({
+      status: 'recovery-required',
+    });
+    expect(api.readPersistedRollingDuplicateTransaction()).toMatchObject({
+      status: 'recovery-required',
+    });
+  });
+
+  it('compensates a materialized duplicate transaction when submission blocks', async () => {
+    const { api } = await loadUserscript();
+    const runtime = { duplicateMaterializationTransaction: { status: 'materialized' } };
+    const finalize = vi.fn(async () => ({ ok: true }));
+
+    const result = await api.runRollingDuplicateSubmissionAttempt(
+      runtime,
+      'Rolling main',
+      async () => ({ status: 'blocked', submitted: false, reason: 'saved squad changed' }),
+      { finalize },
+    );
+
+    expect(result).toMatchObject({ status: 'blocked', submitted: false });
+    expect(finalize).toHaveBeenCalledWith(
+      runtime,
+      'Rolling main pre-submit compensation',
+      { submissionConfirmed: false },
+    );
+  });
+
+  it('clears an untouched planned journal immediately when swap preparation blocks', async () => {
+    const { api } = await loadUserscript();
+    const runtime = { duplicateMaterializationTransaction: { status: 'planned' } };
+    const finalize = vi.fn();
+    const recover = vi.fn(async () => {
+      runtime.duplicateMaterializationTransaction = null;
+      return { status: 'ready' };
+    });
+
+    const result = await api.runRollingDuplicateSubmissionAttempt(
+      runtime,
+      'Rolling swap',
+      async () => ({ status: 'blocked', submitted: false, reason: 'swap response incomplete' }),
+      { finalize, recover },
+    );
+
+    expect(result).toMatchObject({ status: 'blocked', reason: 'swap response incomplete' });
+    expect(recover).toHaveBeenCalledWith(runtime, 'Rolling swap pre-submit compensation');
+    expect(finalize).not.toHaveBeenCalled();
+  });
+
+  it('surfaces ambiguous immediate recovery after an interrupted unrecorded swap', async () => {
+    const { api } = await loadUserscript();
+    const runtime = { duplicateMaterializationTransaction: { status: 'recovery-required' } };
+    const recover = vi.fn(async () => ({
+      status: 'blocked',
+      reason: 'protected counterpart restored but consume identity is unknown',
+      reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
+    }));
+
+    const result = await api.runRollingDuplicateSubmissionAttempt(
+      runtime,
+      'Rolling swap',
+      async () => ({ status: 'blocked', submitted: false, reason: 'reconcile failed' }),
+      { recover },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
+      details: { originalFailure: { reason: 'reconcile failed' } },
+    });
+  });
+
+  it('compensates a materialized duplicate transaction when validation throws', async () => {
+    const { api } = await loadUserscript();
+    const runtime = { duplicateMaterializationTransaction: { status: 'materialized' } };
+    const finalize = vi.fn(async () => ({ ok: true }));
+
+    await expect(api.runRollingDuplicateSubmissionAttempt(
+      runtime,
+      'Rolling main',
+      async () => { throw new Error('final squad identity drift'); },
+      { finalize },
+    )).rejects.toThrow('final squad identity drift');
+    expect(finalize).toHaveBeenCalledOnce();
+  });
+
+  it('rolls back and preserves the transport timeout when A prime is still recoverable', async () => {
+    const { api } = await loadUserscript();
+    const runtime = { duplicateMaterializationTransaction: { status: 'materialized' } };
+    const finalize = vi.fn(async () => {
+      runtime.duplicateMaterializationTransaction = { status: 'completed' };
+      return { ok: true };
+    });
+
+    await expect(api.runRollingDuplicateSubmissionAttempt(
+      runtime,
+      'Rolling timeout',
+      async () => { throw new Error('transport timeout'); },
+      { finalize },
+    )).rejects.toThrow('transport timeout');
+    expect(finalize).toHaveBeenCalledOnce();
+    expect(runtime.duplicateMaterializationTransaction.status).toBe('completed');
+  });
+
+  it('reports an ambiguous transport timeout when A prime disappeared', async () => {
+    const { api } = await loadUserscript();
+    const runtime = { duplicateMaterializationTransaction: { status: 'materialized' } };
+    const finalize = vi.fn(async () => ({
+      ok: false,
+      reason: 'materialized consume item disappeared before outcome confirmation',
+      reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
+    }));
+
+    let caught = null;
+    try {
+      await api.runRollingDuplicateSubmissionAttempt(
+        runtime,
+        'Rolling timeout',
+        async () => { throw new Error('transport timeout'); },
+        { finalize },
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({ reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS' });
+    expect(caught.message).toContain('transport timeout');
+    expect(caught.message).toContain('materialized consume item disappeared');
+  });
+
+  it('preserves a materialized transaction when submission requests a replan', async () => {
+    const { api } = await loadUserscript();
+    const runtime = { duplicateMaterializationTransaction: { status: 'materialized' } };
+    const finalize = vi.fn(async () => ({ ok: true }));
+
+    const result = await api.runRollingDuplicateSubmissionAttempt(
+      runtime,
+      'Rolling main',
+      async () => ({ status: 'replan', submitted: false }),
+      { finalize },
+    );
+
+    expect(result).toMatchObject({ status: 'replan', submitted: false });
+    expect(finalize).not.toHaveBeenCalled();
+  });
+
+  it('keeps duplicate and Active Squad replans inside one bounded transaction attempt', async () => {
+    const { api } = await loadUserscript();
+    const runtime = {};
+    const attempt = vi.fn()
+      .mockImplementationOnce(async () => {
+        runtime.duplicateMaterializationTransaction = {
+          status: 'materialized',
+          transactionId: 'tx-local-replan',
+        };
+        return { status: 'replan', submitted: false, reasonCode: 'DUPLICATE_MATERIALIZED_REPLAN' };
+      })
+      .mockResolvedValueOnce({
+        status: 'replan',
+        submitted: false,
+        reasonCode: 'ACTIVE_SQUAD_CONFLICT_REPLAN',
+      })
+      .mockImplementationOnce(async () => {
+        runtime.duplicateMaterializationTransaction = { status: 'completed' };
+        return { status: 'submitted', submitted: true };
+      });
+    const finalize = vi.fn();
+
+    const result = await api.runBoundedRollingDuplicateTransactionReplans(
+      runtime,
+      'same Challenge',
+      attempt,
+      { maxReplans: 3, finalize },
+    );
+
+    expect(result).toMatchObject({ status: 'submitted', submitted: true });
+    expect(attempt.mock.calls.map(([context]) => context.replan)).toEqual([0, 1, 2]);
+    expect(finalize).not.toHaveBeenCalled();
+  });
+
+  it('rolls back when transaction-local replanning becomes infeasible', async () => {
+    const { api } = await loadUserscript();
+    const runtime = {};
+    const attempt = vi.fn()
+      .mockImplementationOnce(async () => {
+        runtime.duplicateMaterializationTransaction = {
+          status: 'materialized',
+          transactionId: 'tx-shortage',
+        };
+        return { status: 'replan', submitted: false, reasonCode: 'DUPLICATE_MATERIALIZED_REPLAN' };
+      })
+      .mockResolvedValueOnce({
+        status: 'blocked',
+        submitted: false,
+        reason: 'required material disappeared after swap',
+        reasonCode: 'RECOVERY_MATERIAL_SHORTAGE',
+      });
+    const finalize = vi.fn(async () => {
+      runtime.duplicateMaterializationTransaction = { status: 'completed' };
+      return { ok: true };
+    });
+
+    const result = await api.runBoundedRollingDuplicateTransactionReplans(
+      runtime,
+      'same Challenge',
+      attempt,
+      { finalize },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      submitted: false,
+      reasonCode: 'RECOVERY_MATERIAL_SHORTAGE',
+      details: { transactionReplanStopped: true, compensationSucceeded: true },
+    });
+    expect(finalize).toHaveBeenCalledWith(
+      runtime,
+      'same Challenge transaction replan compensation',
+      { submissionConfirmed: false },
+    );
+  });
+
+  it('does not capture an ordinary Active Squad replan without a duplicate transaction', async () => {
+    const { api } = await loadUserscript();
+    const attempt = vi.fn(async () => ({
+      status: 'replan',
+      submitted: false,
+      reasonCode: 'ACTIVE_SQUAD_CONFLICT_REPLAN',
+    }));
+    const finalize = vi.fn();
+
+    const result = await api.runBoundedRollingDuplicateTransactionReplans(
+      {},
+      'ordinary replan',
+      attempt,
+      { finalize },
+    );
+
+    expect(result).toMatchObject({ status: 'replan', reasonCode: 'ACTIVE_SQUAD_CONFLICT_REPLAN' });
+    expect(attempt).toHaveBeenCalledOnce();
+    expect(finalize).not.toHaveBeenCalled();
+  });
+
+  it('fails closed and compensates when transaction-local replans exceed the limit', async () => {
+    const { api } = await loadUserscript();
+    const runtime = {
+      duplicateMaterializationTransaction: { status: 'materialized', transactionId: 'tx-loop' },
+    };
+    const attempt = vi.fn(async () => ({ status: 'replan', submitted: false }));
+    const finalize = vi.fn(async () => ({ ok: true }));
+
+    const result = await api.runBoundedRollingDuplicateTransactionReplans(
+      runtime,
+      'bounded Challenge',
+      attempt,
+      { maxReplans: 2, finalize },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_TRANSACTION_REPLAN_LIMIT',
+      details: { compensationSucceeded: true },
+    });
+    expect(attempt).toHaveBeenCalledTimes(3);
+    expect(finalize).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a failed compensation instead of the original submission block', async () => {
+    const { api } = await loadUserscript();
+    const runtime = { duplicateMaterializationTransaction: { status: 'materialized' } };
+    const finalize = vi.fn(async () => ({
+      ok: false,
+      reason: 'materialized consume item disappeared',
+      reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
+    }));
+
+    const result = await api.runRollingDuplicateSubmissionAttempt(
+      runtime,
+      'Rolling main',
+      async () => ({ status: 'blocked', submitted: false, reason: 'saved squad changed' }),
+      { finalize },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      submitted: false,
+      reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
+      details: { originalFailure: { reason: 'saved squad changed' } },
+    });
+  });
+
+  it('runs swap, local replan, all identity guards, transport, and B restoration in order', async () => {
+    const { api } = await loadUserscript();
+    const { transaction, consume, displaced } = materializedDuplicateTransaction();
+    const ordinary = { id: 201, definitionId: 7201, rating: 84, pile: 'club' };
+    const runtime = { duplicateMaterializationTransaction: null };
+    const events = [];
+    const attempt = vi.fn(async ({ replan }) => {
+      if (replan === 0) {
+        events.push('swap');
+        runtime.duplicateMaterializationTransaction = transaction;
+        return {
+          status: 'replan',
+          submitted: false,
+          reasonCode: 'DUPLICATE_MATERIALIZED_REPLAN',
+        };
+      }
+      events.push('replan');
+      const players = [consume, ordinary];
+      const created = createDuplicateSubmissionManifest({
+        transaction: runtime.duplicateMaterializationTransaction,
+        inventoryVersion: 9,
+        players,
+      });
+      expect(created.ok).toBe(true);
+      const validate = (phase, actual) => {
+        events.push(phase);
+        expect(validateDuplicateSubmissionManifest(created.manifest, actual, {
+          inventoryVersion: 9,
+        })).toMatchObject({ ok: true });
+      };
+      return submitSbcAttempt({
+        label: 'duplicate identity transaction',
+        challengeProvider: async () => ({ set: { id: 500 }, challenge: { id: 501 } }),
+        squadProvider: async () => ({ ok: true, players, itemRefs: players }),
+        preSaveValidators: [({ players: actual }) => validate('pre-save', actual)],
+        saveSquad: async () => { events.push('save'); },
+        readSavedPlayers: async () => players,
+        postSaveValidators: [({ savedPlayers }) => validate('post-save', savedPlayers)],
+        readFinalPlayers: async () => players,
+        finalValidators: [({ finalPlayers }) => validate('final', finalPlayers)],
+        submitTransport: async ({ finalPlayers }) => {
+          validate('transport', finalPlayers);
+          return { submitted: true };
+        },
+        afterSubmit: async () => {
+          events.push('restore-b');
+          displaced.pile = 'club';
+          runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+            runtime.duplicateMaterializationTransaction,
+            'completed',
+          );
+          return { ok: true };
+        },
+      });
+    });
+
+    const result = await api.runBoundedRollingDuplicateTransactionReplans(
+      runtime,
+      'same exact Challenge',
+      attempt,
+    );
+
+    expect(result).toMatchObject({ status: 'submitted', submitted: true });
+    expect(events).toEqual([
+      'swap',
+      'replan',
+      'pre-save',
+      'save',
+      'post-save',
+      'final',
+      'transport',
+      'restore-b',
+    ]);
+    expect(displaced.pile).toBe('club');
+    expect(runtime.duplicateMaterializationTransaction.status).toBe('completed');
+  });
+
+  it('compensates and blocks when the materialized journal cannot be persisted', async () => {
+    const { api } = await loadUserscript({
+      gmSetValue: () => { throw new Error('journal quota exceeded'); },
+    });
+    const { transaction } = materializedDuplicateTransaction();
+    const runtime = { duplicateMaterializationTransaction: transaction };
+    const finalize = vi.fn(async () => ({ ok: true }));
+
+    const result = await api.persistMaterializedRollingDuplicateTransaction(
+      runtime,
+      'Rolling persistence failure',
+      { finalize },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'DUPLICATE_JOURNAL_WRITE_FAILED',
+      details: { compensationSucceeded: true },
+    });
+    expect(finalize).toHaveBeenCalledWith(
+      runtime,
+      'Rolling persistence failure journal-write compensation',
+      { submissionConfirmed: false },
+    );
+  });
+
+  it('does not report a cleared journal when userscript deletion is unavailable', async () => {
+    const { api, userscriptValues } = await loadUserscript({
+      userscriptStorage: {
+        [ROLLING_DUPLICATE_TRANSACTION_KEY]: { transactionId: 'tx-still-present', status: 'planned' },
+      },
+      gmDeleteValue: null,
+    });
+
+    expect(api.persistRollingDuplicateTransaction(null)).toBe(false);
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(true);
+  });
+
+  it('keeps recovery-required when physical restoration succeeds but journal clearing fails', async () => {
+    const { transaction } = materializedDuplicateTransaction();
+    const { api } = await loadUserscript({
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+      gmDeleteValue: null,
+    });
+    const runtime = { duplicateMaterializationTransaction: transaction };
+
+    const result = api.completeRollingDuplicateTransaction(runtime, transaction);
+
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'DUPLICATE_JOURNAL_CLEAR_FAILED',
+      details: { physicalRestorationSucceeded: true },
+    });
+    expect(runtime.duplicateMaterializationTransaction).toMatchObject({
+      status: 'recovery-required',
+    });
+  });
+
+  it('compensates an unsupported Requirements recovery replan and stops', async () => {
+    const { api } = await loadUserscript();
+    const runtime = {};
+    const submitAttempt = vi.fn(async () => {
+      runtime.duplicateMaterializationTransaction = {
+        status: 'materialized',
+        transactionId: 'tx-requirements-unsupported',
+      };
+      return {
+        status: 'replan',
+        submitted: false,
+        reasonCode: 'DUPLICATE_MATERIALIZED_REPLAN',
+      };
+    });
+    const finalize = vi.fn(async () => {
+      runtime.duplicateMaterializationTransaction = { status: 'completed' };
+      return { ok: true };
+    });
+
+    const result = await api.submitRollingRequirementRecovery(
+      { name: 'Rolling main' },
+      runtime,
+      { name: 'Requirements Recovery' },
+      { submitAttempt, finalize },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      submitted: false,
+      reasonCode: 'DUPLICATE_REQUIREMENTS_REPLAN_UNSUPPORTED',
+      details: { compensationSucceeded: true },
+    });
+    expect(submitAttempt).toHaveBeenCalledOnce();
+    expect(finalize).toHaveBeenCalledOnce();
+  });
+
+  it('does not enter the legacy 88 squad after the 89 transaction replan fails', async () => {
+    const { api } = await loadUserscript();
+    const contexts = [
+      { targetRating: 89, model: { targetRating: 89 } },
+      { targetRating: 88, model: { targetRating: 88 } },
+    ];
+    const plannedRatings = [];
+    const runtime = {
+      coordinator: { reconcile: vi.fn(async () => ({ ok: true })) },
+    };
+    const planSquad = vi.fn(async (_loopDef, _runtime, context) => {
+      plannedRatings.push(context.targetRating);
+      return {
+        ok: true,
+        plans: [{ selection: { selected: [] }, signalRefs: [] }],
+        pileCounts: { storage: 11 },
+        storageItemsConsumed: 11,
+        details: { sourceOrder: ['storage'], maxClubPerSquad: 0 },
+      };
+    });
+    const runReplans = vi.fn(async () => ({
+      status: 'blocked',
+      submitted: false,
+      reason: '89 transaction-local replanning became infeasible',
+      reasonCode: 'RECOVERY_MATERIAL_SHORTAGE',
+      details: { compensationSucceeded: true },
+    }));
+
+    const result = await api.runRollingLegacyStorageSinkRecovery(
+      { name: 'Rolling main', runtimeProtectionRating: 95 },
+      runtime,
+      { status: 'resolved', loop: { name: 'Legacy 95+ Pick', setId: 500 } },
+      {
+        selectPending: vi.fn(async () => ({ status: 'missing' })),
+        refreshCaches: vi.fn(async () => {}),
+        loadContexts: vi.fn(async () => ({
+          status: 'ready',
+          contexts,
+          completedCount: 0,
+        })),
+        planSquad,
+        validateHeadroom: vi.fn(() => ({ ok: true, projectedFree: 11, requiredFree: 1 })),
+        runReplans,
+        submitSquad: vi.fn(),
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      submitted: false,
+      reasonCode: 'RECOVERY_MATERIAL_SHORTAGE',
+    });
+    expect(plannedRatings).toEqual([89]);
+    expect(runReplans).toHaveBeenCalledOnce();
+  });
+
+  it('refreshes Storage before a final fresh Unassigned read during protected routing', async () => {
+    const { api } = await loadUserscript();
+    const events = [];
+    const refreshStorage = vi.fn(async () => { events.push('refresh-storage'); });
+    const states = [
+      { mergedCount: 2, mergedItemIds: [101, 102] },
+      { mergedCount: 0, mergedItemIds: [] },
+      { mergedCount: 2, mergedItemIds: [101, 102] },
+    ];
+    const invalidatePurchased = vi.fn(async () => {
+      events.push('invalidate-unassigned');
+      return { invalidated: true };
+    });
+    const refreshPurchased = vi.fn(async () => {
+      events.push('refresh-unassigned');
+      return { success: true, response: { items: [{ id: 101 }, { id: 102 }] } };
+    });
+    const readPurchasedState = vi.fn(() => states.shift());
+    const refreshTransfer = vi.fn(async () => { events.push('refresh-transfer'); });
+
+    const result = await api.refreshRollingProtectedStorageCaches({
+      refreshStorage,
+      invalidatePurchased,
+      refreshPurchased,
+      readPurchasedState,
+      onStage: (stage) => { events.push(`stage-${stage}`); },
+    });
+
+    expect(result).toMatchObject({
+      purchasedResult: { success: true },
+      evidence: {
+        beforeInvalidation: { mergedItemIds: [101, 102] },
+        invalidation: { invalidated: true },
+        afterInvalidation: { mergedItemIds: [] },
+        response: {
+          itemArrays: [{ source: 'response.items', count: 2 }],
+        },
+        afterRequest: { mergedItemIds: [101, 102] },
+      },
+    });
+    expect(events).toEqual([
+      'refresh-storage',
+      'stage-storage',
+      'invalidate-unassigned',
+      'refresh-unassigned',
+      'stage-unassigned',
+    ]);
+    expect(refreshStorage).toHaveBeenCalledOnce();
+    expect(invalidatePurchased).toHaveBeenCalledOnce();
+    expect(refreshPurchased).toHaveBeenCalledOnce();
+    expect(readPurchasedState).toHaveBeenCalledTimes(3);
+    expect(refreshTransfer).not.toHaveBeenCalled();
+  });
+
+  it('fails the protected Storage refresh before routing when fresh Unassigned evidence is unavailable', async () => {
+    const { api } = await loadUserscript();
+    const events = [];
+
+    await expect(api.refreshRollingProtectedStorageCaches({
+      refreshStorage: async () => { events.push('refresh-storage'); },
+      invalidatePurchased: async () => {
+        events.push('invalidate-unassigned');
+        return { invalidated: true };
+      },
+      refreshPurchased: async () => {
+        events.push('refresh-unassigned');
+        throw new Error('Purchased request failed');
+      },
+      readPurchasedState: () => ({ mergedCount: 0, mergedItemIds: [] }),
+      onStage: (stage) => { events.push(`stage-${stage}`); },
+    })).rejects.toThrow('Purchased request failed');
+    expect(events).toEqual([
+      'refresh-storage',
+      'stage-storage',
+      'invalidate-unassigned',
+      'refresh-unassigned',
+    ]);
+  });
+
+  it('classifies an explicitly empty Purchased response as absent from the response', async () => {
+    const { api } = await loadUserscript();
+    const result = api.classifyRollingProtectedRefreshEvidence([
+      { id: 101, definitionId: 1001, pile: 'unassigned' },
+    ], {
+      response: { itemArrays: [{ source: 'response.items', count: 0, items: [] }] },
+      afterRequest: { mergedItemIds: [] },
+    });
+
+    expect(result).toEqual([expect.objectContaining({
+      outcome: 'absent-from-response',
+      responseHasExactId: false,
+      repositoryHasExactId: false,
+    })]);
+  });
+
+  it('distinguishes an EA response item that the Purchased repository did not materialize', async () => {
+    const { api } = await loadUserscript();
+    const ref = { id: 101, definitionId: 1001, pile: 'unassigned' };
+    const evidence = {
+      response: {
+        itemArrays: [{
+          source: 'response.items',
+          count: 1,
+          items: [{ id: 101, definitionId: 1001, rating: 95, pile: 'unassigned' }],
+        }],
+      },
+      afterRequest: { mergedItemIds: [] },
+    };
+
+    expect(api.classifyRollingProtectedRefreshEvidence([ref], evidence)).toEqual([
+      expect.objectContaining({
+        outcome: 'response-not-materialized',
+        responseHasExactId: true,
+        repositoryHasExactId: false,
+        sameDefinitionResponseIds: [101],
+      }),
+    ]);
+
+    evidence.afterRequest.mergedItemIds = [101];
+    expect(api.classifyRollingProtectedRefreshEvidence([ref], evidence)).toEqual([
+      expect.objectContaining({
+        outcome: 'verified',
+        responseHasExactId: true,
+        repositoryHasExactId: true,
+      }),
+    ]);
+  });
+
   it('counts duplicate players from both selected arrays and selection objects', async () => {
     const duplicate = makePlayer({ id: 1, duplicate: true });
     const ordinary = makePlayer({ id: 2 });
@@ -481,6 +1195,7 @@ describe('Rolling runtime recovery helpers', () => {
       duplicateId: 1721,
     });
     const primarySubmission = makePlayer({ id: 1721, definitionId: 9721, rating: 88 });
+    const sameDefinitionClubCard = makePlayer({ id: 1723, definitionId: 9721, rating: 88 });
     const unrelatedReserve = makePlayer({ id: 1722, definitionId: 9722, rating: 88 });
     const { api } = await loadUserscript();
     const runtime = {
@@ -501,16 +1216,24 @@ describe('Rolling runtime recovery helpers', () => {
       allowPrimaryDuplicates: true,
       allowSpecial: true,
       allowedPrimaryDuplicateRefs: [{
-        id: primarySignal.id,
-        definitionId: primarySignal.definitionId,
+        id: primarySubmission.id,
+        definitionId: primarySubmission.definitionId,
       }],
     })).toBe(true);
+    expect(() => api.assertRollingRecoveryItems(loopDef, runtime, [sameDefinitionClubCard], {
+      allowPrimaryDuplicates: true,
+      allowSpecial: true,
+      allowedPrimaryDuplicateRefs: [{
+        id: primarySubmission.id,
+        definitionId: primarySubmission.definitionId,
+      }],
+    })).toThrow('recovery squad attempted to consume a reserved 88 card');
     expect(() => api.assertRollingRecoveryItems(loopDef, runtime, [unrelatedReserve], {
       allowPrimaryDuplicates: true,
       allowSpecial: true,
       allowedPrimaryDuplicateRefs: [{
-        id: primarySignal.id,
-        definitionId: primarySignal.definitionId,
+        id: primarySubmission.id,
+        definitionId: primarySubmission.definitionId,
       }],
     })).toThrow('recovery squad attempted to consume a reserved 88 card');
   });
@@ -561,6 +1284,45 @@ describe('Rolling runtime recovery helpers', () => {
         id: protectedReserve.id,
         definitionId: protectedReserve.definitionId,
       }],
+    })).toThrow('recovery squad attempted to consume a protected card');
+  });
+
+  it('does not transfer protected-item authorization to same-definition B or C cards', async () => {
+    const allowedA = makePlayer({ id: 1801, definitionId: 9801, rating: 86 });
+    const protectedB = makePlayer({ id: 1802, definitionId: 9801, rating: 86 });
+    const protectedC = makePlayer({ id: 1803, definitionId: 9801, rating: 86 });
+    const { api } = await loadUserscript();
+    const runtime = {
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      primaryContext: {},
+      coordinator: {
+        getLedger: () => ({
+          classifiedEntries: () => [allowedA, protectedB, protectedC].map((item) => ({
+            item,
+            pile: 'club',
+            classification: { requiredSpecial: false, protected: true },
+          })),
+        }),
+      },
+    };
+    const loopDef = {
+      name: 'Rolling exact protected authorization',
+      runtimeProtectionRating: 95,
+      blockSpecial: false,
+    };
+
+    expect(api.assertRollingRecoveryItems(loopDef, runtime, [allowedA], {
+      allowSpecial: true,
+      allowedProtectedItems: [{ id: allowedA.id, definitionId: allowedA.definitionId }],
+    })).toBe(true);
+    expect(() => api.assertRollingRecoveryItems(loopDef, runtime, [protectedB], {
+      allowSpecial: true,
+      allowedProtectedItems: [{ id: allowedA.id, definitionId: allowedA.definitionId }],
+    })).toThrow('recovery squad attempted to consume a protected card');
+    expect(() => api.assertRollingRecoveryItems(loopDef, runtime, [protectedC], {
+      allowSpecial: true,
+      allowedProtectedItems: [{ id: allowedA.id, definitionId: allowedA.definitionId }],
     })).toThrow('recovery squad attempted to consume a protected card');
   });
 

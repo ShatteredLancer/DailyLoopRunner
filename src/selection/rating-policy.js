@@ -6,6 +6,7 @@ const POLICY_INPUT_KEYS = Object.freeze([
   'protectedItems',
   'exclusiveRoles',
   'maxOrdinaryRating',
+  'maxPlayerRating',
   'protectionPolicy',
 ]);
 
@@ -156,11 +157,14 @@ export function buildRatingSelectionPolicy(input = {}, candidateEntries = [], mo
     .filter(Boolean));
   const maxOrdinaryRating = Number(input.maxOrdinaryRating);
   const hasMaxOrdinaryRating = Number.isFinite(maxOrdinaryRating) && maxOrdinaryRating > 0;
+  const maxPlayerRating = Number(input.maxPlayerRating);
+  const hasMaxPlayerRating = Number.isFinite(maxPlayerRating) && maxPlayerRating > 0;
   const counts = {
     scanned: candidateEntries.length,
     required: requiredRefs.length,
     preferred: 0,
     protected: 0,
+    overMaxPlayerRating: 0,
     reserved: 0,
     overMaxOrdinaryRating: 0,
     softProtected: 0,
@@ -186,6 +190,11 @@ export function buildRatingSelectionPolicy(input = {}, candidateEntries = [], mo
     };
     if (itemMatchesAnyRef(sourceEntry.item, protectedRefs)) {
       counts.protected++;
+      buckets.protected.push(entry);
+      continue;
+    }
+    if (hasMaxPlayerRating && Number(sourceEntry.item?.rating || 0) > maxPlayerRating) {
+      counts.overMaxPlayerRating++;
       buckets.protected.push(entry);
       continue;
     }

@@ -3,6 +3,31 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.27] - 2026-08-21
+
+### Fixed
+
+- Treat an Unassigned duplicate and its same-version Club counterpart as two
+  distinct item identities. Rolling now materializes the Unassigned card into
+  Club, invalidates the old squad, and replans the same exact Challenge so the
+  original Club card cannot inherit submission authority.
+- Validate the exact materialized item before save, after save, and immediately
+  before transport. The submitted squad is read back for transport, and the
+  protected counterpart must return unchanged to Club afterward.
+- Keep duplicate swaps recoverable across Stop, refresh, validation failures,
+  Active Squad replans, and transport timeouts through a persisted transaction
+  journal. Journal write or clear failures now compensate and stop explicitly.
+
+### Safety
+
+- Same-definition cards, evolved or customized counterparts, loans, Academy
+  cards, active trades, and FSU-protected cards cannot inherit the exact
+  materialized item's one-time authorization.
+- Transaction-local replanning is bounded to the original Challenge. Generic
+  Requirements recovery rolls back when it cannot prove that binding, and the
+  legacy 89/88 Storage Sink does not continue to the next squad after a failed
+  transaction replan.
+
 ## [0.8.22] - 2026-08-19
 
 ### Fixed

@@ -161,4 +161,77 @@ describe('Rolling squad safety inspection', () => {
     expect(inspection.specialCount).toBe(2);
     expect(inspection.blocked).toEqual([]);
   });
+
+  it('blocks a Required Special above the Rolling all-card maximum', async () => {
+    const requiredSpecial = makePlayer({ id: 301, definitionId: 3001, rating: 98, rareflag: 3 });
+    const { api } = await loadUserscript();
+    const model = {
+      requiredPlayerCount: 1,
+      targetRating: 84,
+      maxSpecialCount: 1,
+      constraints: [{ id: 'required-special', matches: (item) => item.id === requiredSpecial.id }],
+    };
+    const inspection = api.inspectSbcItems({
+      name: 'Rolling final all-card cap',
+      expectedPlayerCount: 1,
+      blockSpecial: false,
+    }, [requiredSpecial], {
+      expectedPlayerCount: 1,
+      model,
+      selectionPolicy: {
+        exclusiveRoles: [{ constraintIndex: 0, minCount: 1, maxCount: 1 }],
+        maxPlayerRating: 96,
+        maxOrdinaryRating: 96,
+        protectionPolicy: { allowOtherSpecialAsOrdinary: true },
+      },
+    });
+
+    expect(inspection.blocked).toEqual([
+      expect.objectContaining({ item: requiredSpecial, reasons: ['rating-over-96'] }),
+    ]);
+  });
+
+  it.each([
+    ['loan', { loans: 0 }],
+    ['Evolution', { evolutionId: 42 }],
+  ])('does not let a duplicate transaction bypass %s protection', async (_name, overrides) => {
+    const player = makePlayer({
+      id: 401,
+      definitionId: 4001,
+      rating: 84,
+      rareflag: 1,
+      ...overrides,
+    });
+    const { api } = await loadUserscript();
+    api.setFsuSettingsOverride({ excludeEvolution: true });
+
+    expect(api.isRatingSbcCandidateSafe(player, {
+      name: 'Rolling transaction candidate guard',
+      allowedSpecialCount: 0,
+    }, null, {
+      duplicateTransactionConsumeRefs: [{ id: player.id, definitionId: player.definitionId }],
+    })).toBe(false);
+  });
+
+  it('builds transaction refs from snapshots but fingerprints the complete EA entities', async () => {
+    const source = makePlayer({ id: 501, definitionId: 5001, rating: 90, rareflag: 22 });
+    source.playStyle = 250;
+    const counterpart = makePlayer({ id: 502, definitionId: 5001, rating: 90, rareflag: 22 });
+    counterpart.playStyle = 268;
+    counterpart.cosmetics = [{ id: 7 }];
+    counterpart.upgrades = { evolutionId: 42 };
+    const { api } = await loadUserscript();
+
+    const pair = api.rollingDuplicateMaterializationPair(source, counterpart);
+
+    expect(pair.sourceSignal).toBe(source);
+    expect(pair.protectedCounterpart).toBe(counterpart);
+    expect(pair.sourceSignalRef).not.toBe(source);
+    expect(pair.protectedCounterpartRef).not.toBe(counterpart);
+    expect(pair.protectedCounterpart).toMatchObject({
+      playStyle: 268,
+      cosmetics: [{ id: 7 }],
+      upgrades: { evolutionId: 42 },
+    });
+  });
 });

@@ -344,6 +344,37 @@ describe('rating candidate integration planning', () => {
     expect(JSON.stringify(result.requiredItemDiagnostics)).not.toContain('must-not-leak');
   });
 
+  it('does not reinsert an exact transaction item rejected by the base safety filter', () => {
+    const materializedConsume = item(925789369999, 84119499, 95, { loans: 0 });
+    const result = buildRatingCandidateEntries({
+      model: { constraints: [] },
+      settings: {},
+      piles: ['club'],
+      getPileItems: () => [materializedConsume],
+      submissionItems: [materializedConsume],
+      requiredItems: [{
+        id: materializedConsume.id,
+        definitionId: materializedConsume.definitionId,
+        pile: 'club',
+      }],
+      isSafe: () => false,
+      isDuplicate: () => false,
+      pileNeedsDuplicateSignalResolution: () => false,
+      sortFodder: (entries) => [...entries],
+      isSpecialItem: () => false,
+      now: () => 100,
+    });
+
+    expect(result.entries).toEqual([]);
+    expect(result.requiredItemDiagnostics).toEqual([
+      expect.objectContaining({
+        candidateBeforeDefinition: false,
+        candidateAfterDefinition: false,
+        reason: 'rejected-before-definition',
+      }),
+    ]);
+  });
+
   it('distinguishes policy filtering from definition de-duplication', () => {
     const diagnostics = [{
       ref: { id: 10, definitionId: 100, pile: 'storage' },

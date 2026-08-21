@@ -108,6 +108,18 @@ export async function loadUserscript(options = {}) {
       findOptimalRatingSbcSelection,
       validateRatingSbcModelAgainstItems,
       inspectSbcItems,
+      isRatingSbcCandidateSafe,
+      rollingDuplicateMaterializationPair,
+      runRollingDuplicateSubmissionAttempt,
+      runBoundedRollingDuplicateTransactionReplans,
+      submitRollingRequirementRecovery,
+      runRollingLegacyStorageSinkRecovery,
+      persistRollingDuplicateTransaction,
+      persistMaterializedRollingDuplicateTransaction,
+      completeRollingDuplicateTransaction,
+      rollingDuplicateTransactionPlanningContext,
+      readPersistedRollingDuplicateTransaction,
+      recoverPersistedRollingDuplicateTransaction,
       rollingDuplicatePlayerCount,
       rollingOrdinaryGoldDuplicate,
       rollingSnapshotRequiredSpecial,
@@ -120,6 +132,8 @@ export async function loadUserscript(options = {}) {
       rollingBaseProtectionReasons,
       rollingOpenedDuplicateTargetProtectionReasons,
       rollingPrimaryReservesAllSpecialSlots,
+      classifyRollingProtectedRefreshEvidence,
+      refreshRollingProtectedStorageCaches,
       assertRollingRecoveryItems,
       preserveRollingPrimaryDuplicateRefs,
       createRollingRequiredSpecialSourceFilter,
@@ -169,6 +183,7 @@ export async function loadUserscript(options = {}) {
   const source = bundled.outputFiles[0].text;
 
   const document = createDocument();
+  const userscriptValues = new Map(Object.entries(options.userscriptStorage || {}));
   const itemRepository = {
     club: { items: collection(options.club) },
     storage: collection(options.storage),
@@ -217,6 +232,15 @@ export async function loadUserscript(options = {}) {
     navigator: { clipboard: { writeText: async () => {} } },
     localStorage: window.localStorage,
     sessionStorage: window.sessionStorage,
+    GM_getValue: Object.hasOwn(options, 'gmGetValue') ? options.gmGetValue : ((key, fallback = null) => (
+      userscriptValues.has(String(key)) ? userscriptValues.get(String(key)) : fallback
+    )),
+    GM_setValue: Object.hasOwn(options, 'gmSetValue') ? options.gmSetValue : ((key, value) => {
+      userscriptValues.set(String(key), value);
+    }),
+    GM_deleteValue: Object.hasOwn(options, 'gmDeleteValue')
+      ? options.gmDeleteValue
+      : ((key) => userscriptValues.delete(String(key))),
     setInterval: () => 1,
     clearInterval: () => {},
     setTimeout,
@@ -266,5 +290,5 @@ export async function loadUserscript(options = {}) {
     lockedDefinitionIds: [],
   });
 
-  return { api, window, sandbox };
+  return { api, window, sandbox, userscriptValues };
 }

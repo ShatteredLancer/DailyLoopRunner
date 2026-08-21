@@ -524,10 +524,13 @@ Rolling 的主 `10x85+`、评分恢复阵和 Storage pressure SBC 共用同一�
 
 1. 只处理 selection 中来源为 Unassigned、目标为 Club 且目标可交易的实体。
 2. signal 与目标必须通过 definition、评分、rareflag、Evolution 和 cosmetic/version 同版本检查；signal 的 duplicate ID 必须指向该目标实体。
-3. EA move 响应必须提供等长且无歧义的 `clubDuplicates -> itemIds` 映射。缺失、重复、非法或未覆盖预期目标的映射全部 fail closed。
-4. 交换后刷新 Repository，验证新 Club 实体仍是同版本且不可交易，再替换 `players`、`itemRefs` 和 selection。
-5. 强制重新保存发生交换的 Challenge；提交前重新运行动态 SBC validator 和 Inventory Ledger 对账。
-6. 将被换出的可交易 Club 实体重新映射为 Unassigned signal，提交成功后由统一库存清理消费，避免丢失路由所有权。
+3. 移动前持久化 `planned` journal，分别记录 A 和 B 的精确 item ID、definition ID、价值指纹、Set/Challenge 和 Inventory Ledger 版本；journal 无法写入时禁止交换。
+4. EA move 响应必须提供等长且无歧义的 `clubDuplicates -> itemIds` 映射。缺失、重复、非法或未覆盖预期目标的映射全部 fail closed。
+5. 交换后刷新 Repository，验证新 Club 实体 A' 与 A 的价值身份一致且不可交易，同时验证 B 已原样进入 Unassigned；随后持久化 `materialized` journal。写入失败时立即物理补偿并停止。
+6. 交换前阵容永久失效。事务必须在相同 Set/Challenge 内重新规划，要求 A' 成为 exact required item，并把 B 加入 protected；同 definition 的其它实体不继承授权。
+7. 重规划后创建 exact-item manifest，在保存前、保存后和 transport 前按 item ID、definition ID 和库存版本校验；transport 只使用最后一次从 Challenge 回读的阵容。
+8. 提交确认后将 B 原样恢复到 Club 并校验其 Evolution、化学样式、外观和其它价值指纹；提交前失败、Stop 或有界重规划失败则补偿交换。transport 结果不明且 A' 已消失时进入 `ambiguous`，禁止自动重试。
+9. journal 在启动时先于 Pick、Unassigned 和开包恢复。journal 写入或清除失败必须返回 blocked，不能声称事务 completed。
 
 EA 对包含现有阵容球员的 SBC 可能返回 `409` 和 `data.itemViolations`。`Protect Active Squad players` 默认关闭；关闭时 Rolling 只在以下条件全部成立时执行一次官方确认语义的 `skipValidation:true` 重试：
 

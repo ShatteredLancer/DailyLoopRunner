@@ -195,6 +195,15 @@ export function createRollingRequiredSpecialSourceFilter(input = {}) {
 }
 
 export function createRollingStorageSinkCandidateFilter(input = {}) {
+  const exactConsumeRefs = uniqueRefs(input.exactConsumeRefs || []);
+  const exactConsumeMatch = (item) => exactConsumeRefs.some((ref) => (
+    Number(ref.id || 0) > 0
+      && Number(ref.id || 0) === Number(item?.id || item?.ref?.id || 0)
+      && Number(ref.definitionId || 0) > 0
+      && Number(ref.definitionId || 0) === Number(
+        item?.definitionId || item?.ref?.definitionId || 0,
+      )
+  ));
   const constraintIndexes = [...new Set((input.constraintIndexes || [])
     .map(Number)
     .filter((index) => Number.isInteger(index) && index >= 0))];
@@ -207,6 +216,7 @@ export function createRollingStorageSinkCandidateFilter(input = {}) {
     resolveSubmissionPile: input.resolveSubmissionPile,
   });
   return (entry = {}) => {
+    if (exactConsumeMatch(entry.item)) return true;
     const matchesPrimaryRequiredSpecial = [entry.signal, entry.item]
       .filter(Boolean)
       .some((item) => {
@@ -483,6 +493,7 @@ export function createRollingPrimarySelectionPolicy(input = {}) {
       ...relaxedPrimaryItems,
     ]),
     exclusiveRoles,
+    maxPlayerRating: Math.max(1, Number(input.protectionRating || 95) || 95),
     maxOrdinaryRating: Math.max(1, Number(input.protectionRating || 95) || 95),
     protectionPolicy: {
       reserveRatings,
@@ -646,6 +657,7 @@ export function createRollingRatingRecoverySelectionPolicy(input = {}) {
     preferredItems: uniqueRefs(input.preferredItems || []),
     protectedItems: protection.protectedItems,
     exclusiveRoles: [...(input.exclusiveRoles || [])],
+    maxPlayerRating: Math.max(1, Number(input.protectionRating || 95) || 95),
     maxOrdinaryRating: Math.max(1, Number(
       input.maxOrdinaryRating || input.protectionRating || 95,
     ) || 95),

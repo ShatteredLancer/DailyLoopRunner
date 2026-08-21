@@ -4,6 +4,7 @@ import {
   captureMoveResult,
   captureRuntimePack,
   captureRuntimeInventoryItem,
+  captureUnassignedRefreshResult,
   createRuntimeObjectIdentityTracker,
   diagnosticJson,
 } from '../../src/unassigned/diagnostics.js';
@@ -154,5 +155,46 @@ describe('Unassigned runtime diagnostics', () => {
     })).toMatchObject({
       error: { code: 471, reason: 'pending-items' },
     });
+  });
+
+  it('captures bounded item identity, names, and private Purchased response payloads', () => {
+    const diagnostic = captureUnassignedRefreshResult({
+      success: true,
+      response: {
+        items: [{
+          id: 101,
+          definitionId: 1001,
+          rating: 95,
+          pile: 'unassigned',
+          name: 'Diagnostic Player',
+          privatePayload: 'private diagnostic value',
+        }],
+      },
+    });
+
+    expect(diagnostic).toMatchObject({
+      transport: { result: { success: true } },
+      itemArrays: [{
+        source: 'response.items',
+        count: 1,
+        items: [{
+          id: 101,
+          definitionId: 1001,
+          rating: 95,
+          pile: 'unassigned',
+          name: 'Diagnostic Player',
+        }],
+      }],
+      raw: {
+        success: true,
+        response: {
+          items: [{
+            name: 'Diagnostic Player',
+            privatePayload: 'private diagnostic value',
+          }],
+        },
+      },
+    });
+    expect(JSON.stringify(diagnostic).length).toBeLessThan(20000);
   });
 });

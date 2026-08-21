@@ -92,7 +92,37 @@ Runner 会刷新 Unassigned、恢复迟到 duplicate metadata、确认新实体�
 
 释放容量后重新运行。Runner 会先检查现存 Unassigned，不会直接跳过阻塞。
 
-## 9. FSU 加载较慢
+## 9. Rolling 同版本重复卡身份保护
+
+当日志出现 `from:unassigned | submitFrom:club` 时，Unassigned 卡 A 和原 Club 卡 B
+即使 `definitionId` 相同，也必须当作两个不同资产。Runner 会先持久化事务，再执行
+交换：A 物化成 Club 实体 A'，B 暂时进入 Unassigned；旧阵容立即作废，并在同一个
+Set/Challenge 内重新规划。只有精确的 `A' itemId + definitionId` 获得本次提交权限。
+
+正常日志顺序应包含：
+
+- `planned`：记录 consume A 和 protect B，以及交换前库存版本。
+- `verified` / `materialized`：记录 A' 和被移到 Unassigned 的 B，旧计划失效。
+- 保存前、保存后和 transport 前均通过同一份 exact-item manifest。
+- 提交确认后 B 原样返回 Club，事务进入 `completed` 并清除 journal。
+
+下列结果会停止而不是猜测另一张同版本卡：
+
+- `DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED`：A'、B 或库存版本发生漂移。
+- `DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS`：transport 超时后无法确认 A' 是否已提交。
+- `DUPLICATE_JOURNAL_WRITE_FAILED` / `DUPLICATE_JOURNAL_CLEAR_FAILED`：事务无法可靠写入或清除。
+- `DUPLICATE_REQUIREMENTS_REPLAN_UNSUPPORTED`：Requirements Recovery 无法证明仍绑定原 Challenge。
+
+发生上述错误时点击 Stop，不要手动移动 A/A'/B。保留页面状态并重新运行同一个
+Rolling Loop；启动恢复会先于 Pick、Unassigned 清理和开包执行。若仍是 ambiguous，
+导出完整日志并人工核对三个精确 item ID，不能仅按球员名称或 `definitionId` 判断。
+
+真实页面验收应使用两张低价值同版本卡：A 放 Unassigned，B 放 Club，可让 B 带不同
+化学样式或外观。确认提交的是交换后的 A'，B 未进入保存阵容且最终原样回 Club；再分别
+触发 Stop、Active Squad 换卡和网络超时，确认恢复完成或明确停在 ambiguous。自动测试
+不能替代这一步。
+
+## 10. FSU 加载较慢
 
 FSU upstream 首次登录会全量加载 Club。FSU Local 首次成功后建立实体缓存，后续未检测到库存变化时可以快速恢复并在后台校验。
 
@@ -104,7 +134,7 @@ FSU Local 日志应区分：
 
 完整排查见 [FSU Club Cache Integration](../FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 
-## 10. Recap 没有出现
+## 11. Recap 没有出现
 
 Recap 只在本次会话实际获得 Rare Gold 或 Special 时显示。以下情况会跳过：
 
@@ -115,7 +145,7 @@ Recap 只在本次会话实际获得 Rare Gold 或 Special 时显示。以下情
 
 日志会记录 `recap skipped` 及原因。
 
-## 11. 提交 Issue 的最小信息
+## 12. 提交 Issue 的最小信息
 
 - DailyLoopRunner 版本。
 - FSU upstream/local 版本。
@@ -126,3 +156,9 @@ Recap 只在本次会话实际获得 Rare Gold 或 Special 时显示。以下情
 - 涉及 FSU Club 时附 diagnostics JSON。
 
 上传前删除认证 header、cookie 和 ntfy token。不要修改或重新排版日志时间顺序。
+
+## 13. EA 错误码参考
+
+`446`、`471`、`429`、`409` 和 `REQUIRED_ITEM_UNAVAILABLE` 的含义不同，不能只看
+最后一个数字判断原因。完整的已确认映射、当前 build、诊断证据和安全处理原则见
+[EA FC Web App 错误码记录](EA_ERROR_CODES_ZH.md)。

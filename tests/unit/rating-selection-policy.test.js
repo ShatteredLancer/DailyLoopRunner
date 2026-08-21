@@ -138,6 +138,39 @@ describe('role-aware rating selection policy', () => {
     ]);
   });
 
+  it('applies the Rolling all-card maximum before Required Special role matching', async () => {
+    const plan = await select([
+      entry(1, 98, { special: true, requirementMatches: [true] }),
+    ], {
+      ratingModel: {
+        requiredPlayerCount: 1,
+        targetRating: 98,
+        maxSpecialCount: 1,
+        constraints: [{ id: 'required-special', label: 'Required Special x1', count: 1 }],
+      },
+      selection: {
+        exclusiveRoles: [{
+          id: 'required-special',
+          constraintId: 'required-special',
+          minCount: 1,
+          maxCount: 1,
+        }],
+        maxPlayerRating: 96,
+        maxOrdinaryRating: 96,
+      },
+    });
+
+    expect(plan).toMatchObject({
+      ok: false,
+      missing: { code: 'REQUIRED_SPECIAL_SHORTAGE' },
+      details: {
+        policy: {
+          counts: { overMaxPlayerRating: 1, eligible: 0 },
+        },
+      },
+    });
+  });
+
   it('honors required, preferred, and protected item inputs deterministically', async () => {
     const plan = await select([
       entry(1, 84),

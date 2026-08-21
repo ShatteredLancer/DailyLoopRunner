@@ -166,6 +166,98 @@ export function captureMoveResult(result) {
   }
 }
 
+function collectionItems(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== 'object') return [];
+  if (Array.isArray(value._collection)) return value._collection;
+  if (Array.isArray(value.models)) return value.models;
+  try {
+    if (typeof value.values === 'function') return Array.from(value.values());
+  } catch { }
+  return [];
+}
+
+function boundedDiagnosticValue(value, options = {}, depth = 0, seen = new WeakSet(), budget = null) {
+  const state = budget || { remaining: Math.max(100, Number(options.maxNodes || 1500) || 1500) };
+  if (state.remaining-- <= 0) return '[Node budget exhausted]';
+  if (value === null || value === undefined) return value ?? null;
+  if (typeof value === 'string') {
+    const maxString = Math.max(80, Number(options.maxString || 1000) || 1000);
+    return value.length > maxString ? `${value.slice(0, maxString)}...[truncated]` : value;
+  }
+  if (['number', 'boolean'].includes(typeof value)) return value;
+  if (typeof value === 'bigint') return String(value);
+  if (typeof value === 'function') return `[Function ${value.name || 'anonymous'}]`;
+  if (typeof value !== 'object') return String(value);
+  if (seen.has(value)) return '[Circular]';
+  const maxDepth = Math.max(1, Number(options.maxDepth || 5) || 5);
+  if (depth >= maxDepth) return `[${value?.constructor?.name || 'Object'} depth limit]`;
+  seen.add(value);
+  const maxArray = Math.max(1, Number(options.maxArray || 100) || 100);
+  if (Array.isArray(value)) {
+    const captured = value.slice(0, maxArray).map((entry) => (
+      boundedDiagnosticValue(entry, options, depth + 1, seen, state)
+    ));
+    if (value.length > maxArray) captured.push(`[${value.length - maxArray} more item(s)]`);
+    return captured;
+  }
+  const maxKeys = Math.max(1, Number(options.maxKeys || 60) || 60);
+  let keys = [];
+  try { keys = Object.keys(value); } catch (error) { return `[Keys unavailable: ${error?.message || error}]`; }
+  const captured = { $type: value?.constructor?.name || 'Object' };
+  for (const key of keys.slice(0, maxKeys)) {
+    try {
+      captured[key] = boundedDiagnosticValue(value[key], options, depth + 1, seen, state);
+    } catch (error) {
+      captured[key] = `[Read failed: ${error?.message || error}]`;
+    }
+  }
+  if (keys.length > maxKeys) captured.$truncatedKeys = keys.length - maxKeys;
+  return captured;
+}
+
+export function captureUnassignedRefreshResult(result, options = {}) {
+  const maxItems = Math.max(1, Math.min(200, Number(options.maxItems || 100) || 100));
+  const paths = [
+    ['items'],
+    ['response', 'items'],
+    ['response', 'data', 'items'],
+    ['response', '_data', 'items'],
+    ['response', 'payload', 'items'],
+    ['data', 'items'],
+    ['_data', 'items'],
+    ['payload', 'items'],
+  ];
+  const itemArrays = [];
+  for (const path of paths) {
+    let value = result;
+    try {
+      for (const key of path) value = value?.[key];
+    } catch {
+      value = null;
+    }
+    const items = collectionItems(value);
+    if (!items.length && !Array.isArray(value)) continue;
+    itemArrays.push({
+      source: path.join('.'),
+      count: items.length,
+      items: items.slice(0, maxItems).map((item) => ({
+        id: numberOrNull(item?.id ?? item?.itemId ?? item?._data?.id),
+        definitionId: numberOrNull(item?.definitionId ?? item?.defId ?? item?._data?.definitionId),
+        rating: numberOrNull(item?.rating ?? item?._data?.rating),
+        pile: primitiveOrNull(item?.pile ?? item?._pile ?? item?._data?.pile),
+        name: primitiveOrNull(item?.name ?? item?.commonName ?? item?._staticData?.name),
+      })),
+      truncated: items.length > maxItems,
+    });
+  }
+  return {
+    transport: captureMoveResult(result),
+    itemArrays,
+    raw: boundedDiagnosticValue(result, options),
+  };
+}
+
 export function diagnosticJson(value) {
   try {
     return JSON.stringify(value);

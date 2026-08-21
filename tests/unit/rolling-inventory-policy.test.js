@@ -464,6 +464,7 @@ describe('Rolling inventory policy', () => {
     expect(policy.requiredItems).toEqual([{ id: 101, definitionId: 1001, pile: 'unknown' }]);
     expect(policy.preferredItems.map((ref) => ref.id)).toEqual([101, 102]);
     expect(policy.protectedItems.map((ref) => ref.id)).toEqual([3]);
+    expect(policy.maxPlayerRating).toBe(95);
     expect(policy.exclusiveRoles).toEqual([
       expect.objectContaining({ id: 'required-special', constraintIndex: 0, minCount: 1, maxCount: 1 }),
     ]);
@@ -862,6 +863,7 @@ describe('Rolling inventory policy', () => {
 
     expect(policy.protectedItems.map((ref) => ref.id)).toEqual([1]);
     expect(policy.exclusiveRoles).toEqual([]);
+    expect(policy.maxPlayerRating).toBe(95);
     expect(policy.maxOrdinaryRating).toBe(95);
     expect(policy.protectionPolicy).toMatchObject({
       reserveRatings: [87, 88],
@@ -981,6 +983,34 @@ describe('Rolling inventory policy', () => {
       submissionPileName: 'club',
       requirementMatches: [false],
     })).toBe(false);
+  });
+
+  it('admits only the exact materialized consume item through Storage Sink source filtering', () => {
+    const materializedA = item(3010, 95, { special: true, pile: 'club', definitionId: 7001 });
+    const protectedB = item(3020, 95, { special: true, pile: 'club', definitionId: 7001 });
+    const sameDefinitionC = item(3030, 95, { special: true, pile: 'club', definitionId: 7001 });
+    const reusedIdWrongDefinition = item(3010, 95, {
+      special: true,
+      pile: 'club',
+      definitionId: 7999,
+    });
+    const filter = createRollingStorageSinkCandidateFilter({
+      exactConsumeRefs: [{ id: materializedA.id, definitionId: materializedA.definitionId }],
+      isPrimaryRequiredSpecial: (candidate) => candidate.special === true,
+      resolveSubmissionPile: () => 'club',
+      isClubTotw: () => false,
+    });
+    const entry = (candidate) => ({
+      item: candidate,
+      pileName: 'club',
+      submissionPileName: 'club',
+      requirementMatches: [],
+    });
+
+    expect(filter(entry(materializedA))).toBe(true);
+    expect(filter(entry(protectedB))).toBe(false);
+    expect(filter(entry(sameDefinitionC))).toBe(false);
+    expect(filter(entry(reusedIdWrongDefinition))).toBe(false);
   });
 
   it('fail-closes malformed unclassified protection entries instead of crashing', () => {

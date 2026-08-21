@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.26
+// @version      0.8.27
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.26",
+    version: "0.8.27",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -87,6 +87,7 @@
   var TRADE_BULK_RELIST_JOURNAL_KEY = "fc-loop-runner-trade-bulk-relist-journal-v1";
   var TRADE_REQUEST_PACING_KEY = "fc-loop-runner-trade-request-pacing-v1";
   var TRADE_RECOVERY_AUDIT_KEY = "fc-loop-runner-trade-recovery-audit-v1";
+  var ROLLING_DUPLICATE_TRANSACTION_KEY = "fc-loop-runner-rolling-duplicate-transaction-v1";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -1204,8 +1205,8 @@
     const holders = cardHolders(item);
     const direct = firstPositiveInteger(holders, PLAYER_DATABASE_ID_FIELDS);
     if (direct) return direct;
-    const definitionId2 = firstPositiveInteger(holders, PLAYER_DEFINITION_ID_FIELDS);
-    return definitionId2 ? definitionId2 % 16777216 : 0;
+    const definitionId3 = firstPositiveInteger(holders, PLAYER_DEFINITION_ID_FIELDS);
+    return definitionId3 ? definitionId3 % 16777216 : 0;
   }
   function meaningfulCardState(value, options = {}) {
     if (value === null || value === void 0 || value === false) return false;
@@ -1262,8 +1263,8 @@
     return cardHolders(item).some((holder) => evolutionFields.some((field5) => typeof holder?.[field5] !== "function" && meaningfulCardState(holder?.[field5])));
   }
   function isSamePlayerCardVersion(item = {}, candidate = {}) {
-    const definitionId2 = playerDefinitionId(item);
-    if (!definitionId2 || definitionId2 !== playerDefinitionId(candidate)) return false;
+    const definitionId3 = playerDefinitionId(item);
+    if (!definitionId3 || definitionId3 !== playerDefinitionId(candidate)) return false;
     const rating = playerRating(item);
     const candidateRating = playerRating(candidate);
     if (rating > 0 && candidateRating > 0 && rating !== candidateRating) return false;
@@ -6733,17 +6734,17 @@
     }
     function getFutbinPlayerId(itemOrDefinitionId) {
       const item = itemOrDefinitionId && typeof itemOrDefinitionId === "object" ? itemOrDefinitionId : null;
-      const definitionId2 = positiveInteger7(item?.definitionId ?? itemOrDefinitionId);
-      if (!definitionId2) return null;
+      const definitionId3 = positiveInteger7(item?.definitionId ?? itemOrDefinitionId);
+      if (!definitionId3) return null;
       const explicitId = positiveInteger7(item?.futbinId ?? item?.futbinPlayerId);
       if (explicitId) return explicitId;
       const futbinIds = safeRead2(safeRead2(runtime, "info"), "futbinId");
-      return positiveInteger7(safeRead2(futbinIds, definitionId2));
+      return positiveInteger7(safeRead2(futbinIds, definitionId3));
     }
     function getFutbinLookupContext(itemOrDefinitionId) {
       const item = itemOrDefinitionId && typeof itemOrDefinitionId === "object" ? itemOrDefinitionId : null;
-      const definitionId2 = positiveInteger7(item?.definitionId ?? itemOrDefinitionId);
-      if (!item || !definitionId2) return null;
+      const definitionId3 = positiveInteger7(item?.definitionId ?? itemOrDefinitionId);
+      if (!item || !definitionId3) return null;
       const info = safeRead2(runtime, "info");
       const base = safeRead2(info, "base");
       const staticData = safeRead2(item, "_staticData") || safeRead2(item, "_data") || {};
@@ -6762,7 +6763,7 @@
       const season = positiveInteger7(safeRead2(base, "year"));
       const platform = String(safeRead2(base, "platform") || "").trim().toLowerCase() === "pc" ? "PC" : "PS";
       if (!nationId || !leagueId || !teamId || !rating || !position || !season) return null;
-      return Object.freeze({ definitionId: definitionId2, season, platform, nationId, leagueId, teamId, rating, position });
+      return Object.freeze({ definitionId: definitionId3, season, platform, nationId, leagueId, teamId, rating, position });
     }
     return Object.freeze({
       snapshot,
@@ -6934,9 +6935,9 @@
     return Number.isFinite(id) && id > 0 ? id : 0;
   }
   function classifyUnassignedDuplicateIdentity(item = {}, clubItems = []) {
-    const itemId5 = positiveId(item.id || item.ref?.id);
+    const itemId6 = positiveId(item.id || item.ref?.id);
     const duplicateId = positiveId(item.duplicateId);
-    const candidates = (clubItems || []).filter((candidate) => positiveId(candidate?.id || candidate?.ref?.id) !== itemId5);
+    const candidates = (clubItems || []).filter((candidate) => positiveId(candidate?.id || candidate?.ref?.id) !== itemId6);
     if (duplicateId) {
       const direct = candidates.find((candidate) => positiveId(candidate?.id || candidate?.ref?.id) === duplicateId && isSamePlayerCardVersion(item, candidate));
       if (direct) {
@@ -7288,13 +7289,13 @@
     }
     function resolveItem2(ref, preferredPiles = INVENTORY_PILES2) {
       const id = Number(ref?.id || 0);
-      const definitionId2 = Number(ref?.definitionId || 0);
+      const definitionId3 = Number(ref?.definitionId || 0);
       const piles = [...new Set([ref?.pile, ...preferredPiles || []].filter((pile) => INVENTORY_PILES2.includes(pile)))];
       for (const pile of piles) {
         const items = readPile(pile);
         const byId = id ? items.find((item) => Number(item?.id || 0) === id) : null;
         if (byId) return { item: byId, pile };
-        const byDefinition = !id && definitionId2 ? items.find((item) => Number(item?.definitionId || 0) === definitionId2) : null;
+        const byDefinition = !id && definitionId3 ? items.find((item) => Number(item?.definitionId || 0) === definitionId3) : null;
         if (byDefinition) return { item: byDefinition, pile };
       }
       return null;
@@ -7443,9 +7444,9 @@
       return unassignedItems().filter(isPlayerPickItem);
     }
     function isOwnedDuplicate(item) {
-      const itemId5 = Number(item?.id || 0);
+      const itemId6 = Number(item?.id || 0);
       return uniqueOwnedItems().some(
-        (ownedItem) => Number(ownedItem?.id || 0) !== itemId5 && isSamePlayerCardVersion(ownedItem, item) && sameLimitedUseType(ownedItem, item)
+        (ownedItem) => Number(ownedItem?.id || 0) !== itemId6 && isSamePlayerCardVersion(ownedItem, item) && sameLimitedUseType(ownedItem, item)
       );
     }
     function redeem(pickItem) {
@@ -7704,12 +7705,12 @@
       const item = award?.item || award?.utItem || award?.data?.item || null;
       if (!item || !isPlayerPickItem(item)) return null;
       const staticData = staticItemData(item);
-      const definitionId2 = firstPositiveInteger2([
+      const definitionId3 = firstPositiveInteger2([
         item?.definitionId,
         item?._data?.definitionId,
         staticData?.definitionId
       ]);
-      const itemId5 = positiveInteger16(item?.id);
+      const itemId6 = positiveInteger16(item?.id);
       return {
         type: "PLAYER_PICK",
         name: String(item?.name || staticData?.name || staticData?.description || "").trim(),
@@ -7718,9 +7719,9 @@
           item?.resourceId,
           item?._data?.resourceId,
           staticData?.resourceId,
-          itemId5 && definitionId2 && itemId5 === definitionId2 ? itemId5 : null
+          itemId6 && definitionId3 && itemId6 === definitionId3 ? itemId6 : null
         ]),
-        definitionId: definitionId2,
+        definitionId: definitionId3,
         candidateCount: firstPositiveInteger2([
           item?.candidateCount,
           item?.totalCandidates,
@@ -7760,12 +7761,12 @@
       }
       if (!isPlayer2) return null;
       const staticData = staticItemData(item);
-      const definitionId2 = firstPositiveInteger2([
+      const definitionId3 = firstPositiveInteger2([
         item?.definitionId,
         item?._data?.definitionId,
         staticData?.definitionId
       ]);
-      const itemId5 = positiveInteger16(item?.id);
+      const itemId6 = positiveInteger16(item?.id);
       return {
         type: "PLAYER",
         name: String(
@@ -7776,9 +7777,9 @@
           item?.resourceId,
           item?._data?.resourceId,
           staticData?.resourceId,
-          itemId5 && definitionId2 && itemId5 === definitionId2 ? itemId5 : null
+          itemId6 && definitionId3 && itemId6 === definitionId3 ? itemId6 : null
         ]),
-        definitionId: definitionId2,
+        definitionId: definitionId3,
         count: firstPositiveInteger2([award?.count, award?.amount, award?.quantity, award?.data?.count]) || 1,
         metadataHints: {
           award: metadataFieldHints(award),
@@ -9257,10 +9258,10 @@
   }
   function resolveItem(runtime, ref = {}) {
     const id = Number(ref.id || 0);
-    const definitionId2 = Number(ref.definitionId || 0);
+    const definitionId3 = Number(ref.definitionId || 0);
     const piles = [...new Set([ref.pile, "unassigned", "storage", "transfer", "club"].filter(Boolean))];
     for (const pile of piles) {
-      const item = repositoryPile(runtime, pile).find((candidate) => id > 0 && Number(candidate?.id || 0) === id || !id && definitionId2 > 0 && Number(candidate?.definitionId || 0) === definitionId2);
+      const item = repositoryPile(runtime, pile).find((candidate) => id > 0 && Number(candidate?.id || 0) === id || !id && definitionId3 > 0 && Number(candidate?.definitionId || 0) === definitionId3);
       if (item) return { item, pile };
     }
     return null;
@@ -9514,9 +9515,9 @@
           let sourceCount = 0;
           for (const item of rawItems) {
             const id = Number(item?.id || 0);
-            const definitionId2 = Number(item?.definitionId || 0);
+            const definitionId3 = Number(item?.definitionId || 0);
             if (pile === "club" && id > 0 && occupiedClubItemIds.has(id)) continue;
-            const key = id > 0 ? `${pile}:${id}` : `${pile}:definition:${definitionId2}:index:${sourceCount}`;
+            const key = id > 0 ? `${pile}:${id}` : `${pile}:definition:${definitionId3}:index:${sourceCount}`;
             if (seen.has(key)) continue;
             seen.add(key);
             sourceCount += 1;
@@ -9702,11 +9703,11 @@
     }
     async function searchMarket(request = {}, options = {}) {
       const service = runtime?.services?.Item;
-      const definitionId2 = Number(request.definitionId);
+      const definitionId3 = Number(request.definitionId);
       const maxBuyNow = Number(request.maxBuyNow);
       const page = Math.max(1, Math.floor(Number(request.page || 1)));
-      const normalizedRequest = { definitionId: definitionId2, maxBuyNow, page };
-      if (!Number.isInteger(definitionId2) || definitionId2 <= 0 || !Number.isFinite(maxBuyNow) || maxBuyNow <= 0) {
+      const normalizedRequest = { definitionId: definitionId3, maxBuyNow, page };
+      if (!Number.isInteger(definitionId3) || definitionId3 <= 0 || !Number.isFinite(maxBuyNow) || maxBuyNow <= 0) {
         return { status: "invalid-request", request: normalizedRequest, response: null, candidates: [], error: null };
       }
       if (typeof runtime?.UTSearchCriteriaDTO !== "function" || typeof service?.searchTransferMarket !== "function") {
@@ -9718,7 +9719,7 @@
       }
       try {
         const criteria = new runtime.UTSearchCriteriaDTO();
-        criteria.defId = [definitionId2];
+        criteria.defId = [definitionId3];
         criteria.type = runtime?.SearchType?.PLAYER ?? "player";
         criteria.category = runtime?.SearchCategory?.ANY ?? "any";
         criteria.maxBuy = maxBuyNow;
@@ -9877,18 +9878,18 @@
       }
     }
     function inspectDefinitionOwnership(definitionIdInput) {
-      const definitionId2 = Number(definitionIdInput);
-      const empty = { definitionId: definitionId2, club: 0, transfer: 0, unassigned: 0, storage: 0 };
-      if (!Number.isInteger(definitionId2) || definitionId2 <= 0) return empty;
-      return inspectDefinitionOwnerships([definitionId2])[definitionId2] || empty;
+      const definitionId3 = Number(definitionIdInput);
+      const empty = { definitionId: definitionId3, club: 0, transfer: 0, unassigned: 0, storage: 0 };
+      if (!Number.isInteger(definitionId3) || definitionId3 <= 0) return empty;
+      return inspectDefinitionOwnerships([definitionId3])[definitionId3] || empty;
     }
     function inspectDefinitionOwnerships(definitionIdsInput = []) {
       const definitionIds2 = [...new Set(
         (definitionIdsInput || []).map(Number).filter((value) => Number.isInteger(value) && value > 0)
       )];
       const requested = new Set(definitionIds2);
-      const ownerships = Object.fromEntries(definitionIds2.map((definitionId2) => [definitionId2, {
-        definitionId: definitionId2,
+      const ownerships = Object.fromEntries(definitionIds2.map((definitionId3) => [definitionId3, {
+        definitionId: definitionId3,
         club: 0,
         transfer: 0,
         unassigned: 0,
@@ -9907,14 +9908,14 @@
       for (const [pile, items] of Object.entries(rawPiles)) {
         const seen = /* @__PURE__ */ new Set();
         for (const item of items) {
-          const definitionId2 = Number(item?.definitionId || 0);
-          if (!requested.has(definitionId2)) continue;
+          const definitionId3 = Number(item?.definitionId || 0);
+          if (!requested.has(definitionId3)) continue;
           const id = Number(item?.id || 0);
           if (pile === "club" && id > 0 && occupiedIds.has(id)) continue;
           const key = id > 0 ? `${pile}:${id}` : item;
           if (seen.has(key)) continue;
           seen.add(key);
-          ownerships[definitionId2][pile] += 1;
+          ownerships[definitionId3][pile] += 1;
         }
       }
       return ownerships;
@@ -10049,9 +10050,9 @@
   function itemKey(item = {}) {
     const id = Number(item.id || item.ref?.id || 0);
     if (id) return `id:${id}`;
-    const definitionId2 = Number(item.definitionId || item.ref?.definitionId || 0);
-    if (!definitionId2) return null;
-    return `definition:${definitionId2}:${String(item.pile || item.ref?.pile || "unknown")}`;
+    const definitionId3 = Number(item.definitionId || item.ref?.definitionId || 0);
+    if (!definitionId3) return null;
+    return `definition:${definitionId3}:${String(item.pile || item.ref?.pile || "unknown")}`;
   }
   function normalizeReadiness(value = {}) {
     return Object.freeze({
@@ -10179,8 +10180,8 @@
         if (expectedPile && record?.pile !== expectedPile) return null;
         return record;
       }
-      const definitionId2 = Number(ref.definitionId || 0);
-      const matches = [...keysByDefinition.get(definitionId2) || []].map((key) => records.get(key)).filter((record) => record && (!expectedPile || record.pile === expectedPile));
+      const definitionId3 = Number(ref.definitionId || 0);
+      const matches = [...keysByDefinition.get(definitionId3) || []].map((key) => records.get(key)).filter((record) => record && (!expectedPile || record.pile === expectedPile));
       return matches.length === 1 ? matches[0] : null;
     }
     function rebuild(snapshot, metadata = {}) {
@@ -10916,12 +10917,12 @@
     for (const value of values || []) {
       const ref = value?.ref || value || {};
       const id = Number(ref.id || 0);
-      const definitionId2 = Number(ref.definitionId || 0);
-      if (!id && !definitionId2) continue;
-      const key = id ? `id:${id}` : `definition:${definitionId2}:${String(ref.pile || "unknown")}`;
+      const definitionId3 = Number(ref.definitionId || 0);
+      if (!id && !definitionId3) continue;
+      const key = id ? `id:${id}` : `definition:${definitionId3}:${String(ref.pile || "unknown")}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      refs.push({ id, definitionId: definitionId2, pile: String(ref.pile || "unknown") });
+      refs.push({ id, definitionId: definitionId3, pile: String(ref.pile || "unknown") });
     }
     return refs;
   }
@@ -10959,8 +10960,8 @@
   }
   function refMatchesItem(ref = {}, item = {}) {
     const id = Number(ref?.id || 0);
-    const definitionId2 = Number(ref?.definitionId || 0);
-    return id ? id === Number(item?.id || item?.ref?.id || 0) : definitionId2 > 0 && definitionId2 === Number(item?.definitionId || item?.ref?.definitionId || 0);
+    const definitionId3 = Number(ref?.definitionId || 0);
+    return id ? id === Number(item?.id || item?.ref?.id || 0) : definitionId3 > 0 && definitionId3 === Number(item?.definitionId || item?.ref?.definitionId || 0);
   }
   function primarySelectionRef(item = {}) {
     const pile = String(item.pile || item.ref?.pile || "unknown");
@@ -11043,6 +11044,10 @@
     };
   }
   function createRollingStorageSinkCandidateFilter(input2 = {}) {
+    const exactConsumeRefs = uniqueRefs(input2.exactConsumeRefs || []);
+    const exactConsumeMatch = (item) => exactConsumeRefs.some((ref) => Number(ref.id || 0) > 0 && Number(ref.id || 0) === Number(item?.id || item?.ref?.id || 0) && Number(ref.definitionId || 0) > 0 && Number(ref.definitionId || 0) === Number(
+      item?.definitionId || item?.ref?.definitionId || 0
+    ));
     const constraintIndexes = [...new Set((input2.constraintIndexes || []).map(Number).filter((index) => Number.isInteger(index) && index >= 0))];
     const isPrimaryRequiredSpecial = typeof input2.isPrimaryRequiredSpecial === "function" ? input2.isPrimaryRequiredSpecial : () => false;
     const requiredSpecialSourceFilter = createRollingRequiredSpecialSourceFilter({
@@ -11051,6 +11056,7 @@
       resolveSubmissionPile: input2.resolveSubmissionPile
     });
     return (entry = {}) => {
+      if (exactConsumeMatch(entry.item)) return true;
       const matchesPrimaryRequiredSpecial = [entry.signal, entry.item].filter(Boolean).some((item) => {
         try {
           return isPrimaryRequiredSpecial(item) === true;
@@ -11237,6 +11243,7 @@
         ...relaxedPrimaryItems
       ]),
       exclusiveRoles,
+      maxPlayerRating: Math.max(1, Number(input2.protectionRating || 95) || 95),
       maxOrdinaryRating: Math.max(1, Number(input2.protectionRating || 95) || 95),
       protectionPolicy: {
         reserveRatings,
@@ -11352,6 +11359,7 @@
       preferredItems: uniqueRefs(input2.preferredItems || []),
       protectedItems: protection.protectedItems,
       exclusiveRoles: [...input2.exclusiveRoles || []],
+      maxPlayerRating: Math.max(1, Number(input2.protectionRating || 95) || 95),
       maxOrdinaryRating: Math.max(1, Number(
         input2.maxOrdinaryRating || input2.protectionRating || 95
       ) || 95),
@@ -11363,6 +11371,368 @@
         liveRequirementsAvailable: true
       }
     };
+  }
+
+  // src/inventory/duplicate-materialization-transaction.js
+  var TRANSACTION_STATUSES = /* @__PURE__ */ new Set([
+    "planned",
+    "materialized",
+    "submission-confirmed",
+    "recovery-required",
+    "ambiguous",
+    "completed"
+  ]);
+  function positiveId2(value) {
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? id : 0;
+  }
+  function itemId2(value = {}) {
+    return positiveId2(value.id || value.ref?.id);
+  }
+  function definitionId(value = {}) {
+    return positiveId2(value.definitionId || value.ref?.definitionId);
+  }
+  function itemPile(value = {}, fallback = "unknown") {
+    return String(value.pile || value.ref?.pile || fallback || "unknown");
+  }
+  function itemRef2(value = {}, pile = null) {
+    return Object.freeze({
+      id: itemId2(value),
+      definitionId: definitionId(value),
+      pile: itemPile(value, pile || "unknown")
+    });
+  }
+  function stableValue(value, depth = 0, seen = /* @__PURE__ */ new WeakSet()) {
+    if (value === null || value === void 0) return null;
+    if (typeof value === "boolean" || typeof value === "string") return value;
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+    if (typeof value !== "object" || depth >= 5) return null;
+    if (seen.has(value)) return "[circular]";
+    seen.add(value);
+    if (Array.isArray(value)) {
+      const result2 = value.map((entry) => stableValue(entry, depth + 1, seen));
+      seen.delete(value);
+      return result2;
+    }
+    const result = {};
+    for (const key of Object.keys(value).sort()) {
+      const entry = value[key];
+      if (typeof entry === "function" || key.startsWith("on")) continue;
+      result[key] = stableValue(entry, depth + 1, seen);
+    }
+    seen.delete(value);
+    return result;
+  }
+  function firstDefined(values = [], fallback = null) {
+    return values.find((value) => value !== void 0 && value !== null) ?? fallback;
+  }
+  function rawHolders(item = {}) {
+    return [item, item?._data, item?.data, item?._staticData, item?.staticData].filter((value) => value && typeof value === "object");
+  }
+  function readRaw(item, fields, fallback = null) {
+    for (const holder of rawHolders(item)) {
+      for (const field5 of fields) {
+        if (holder[field5] !== void 0 && holder[field5] !== null) return holder[field5];
+      }
+    }
+    return fallback;
+  }
+  function createDuplicateCardValueFingerprint(item = {}) {
+    const upgrades = readRaw(item, ["upgrades"], null);
+    const cosmetics = readRaw(item, ["cosmetics"], null);
+    const groups = firstDefined([item.groups, item._data?.groups], []);
+    return Object.freeze({
+      definitionId: definitionId(item),
+      databaseId: positiveId2(readRaw(item, ["databaseId", "databaseID"], 0)),
+      rating: Number(readRaw(item, ["rating", "_rating"], 0)) || 0,
+      rareflag: Number(readRaw(item, ["rareflag", "rareFlag", "_rareflag"], 0)) || 0,
+      tradeable: item.tradeable === true || item.tradable === true || item.untradeable === false,
+      evolution: item.evolution === true || upgrades !== null || positiveId2(readRaw(item, ["evolutionId", "evoId"], 0)) > 0,
+      upgrades: stableValue(upgrades),
+      cosmetics: stableValue(cosmetics),
+      chemistryStyle: Number(readRaw(item, ["playStyle", "chemistryStyle", "chemStyle", "styleId"], 0)) || 0,
+      loyaltyBonus: Number(readRaw(item, ["loyaltyBonus"], 0)) || 0,
+      preferredPosition: Number(readRaw(item, ["preferredPosition", "_preferredPosition"], 0)) || 0,
+      attributes: stableValue(readRaw(item, ["attributes"], [])),
+      skillMoves: Number(readRaw(item, ["skillMoves", "_skillMoves"], 0)) || 0,
+      weakFoot: Number(readRaw(item, ["weakFoot", "_weakFoot"], 0)) || 0,
+      groups: Object.freeze([...Array.isArray(groups) ? groups : []].map(Number).sort((a, b) => a - b))
+    });
+  }
+  function duplicateCardValueFingerprintMatches(left = {}, right = {}) {
+    return JSON.stringify(createDuplicateCardValueFingerprint(left)) === JSON.stringify(createDuplicateCardValueFingerprint(right));
+  }
+  function transactionPair(input2 = {}) {
+    const sourceSignalRef = itemRef2(input2.sourceSignalRef || input2.sourceSignal, "unassigned");
+    const protectedCounterpartRef = itemRef2(
+      input2.protectedCounterpartRef || input2.protectedCounterpart,
+      "club"
+    );
+    if (!sourceSignalRef.id || !protectedCounterpartRef.id || !sourceSignalRef.definitionId) {
+      throw new TypeError("duplicate materialization pair requires exact source and counterpart identities");
+    }
+    if (sourceSignalRef.id === protectedCounterpartRef.id) {
+      throw new TypeError("duplicate materialization source and counterpart must be different instances");
+    }
+    if (sourceSignalRef.definitionId !== protectedCounterpartRef.definitionId) {
+      throw new TypeError("duplicate materialization pair must use the same definition");
+    }
+    return Object.freeze({
+      sourceSignalRef,
+      protectedCounterpartRef,
+      sourceFingerprint: Object.freeze(input2.sourceFingerprint ? stableValue(input2.sourceFingerprint) : createDuplicateCardValueFingerprint(input2.sourceSignal || input2.sourceSignalRef)),
+      counterpartFingerprint: Object.freeze(input2.counterpartFingerprint ? stableValue(input2.counterpartFingerprint) : createDuplicateCardValueFingerprint(
+        input2.protectedCounterpart || input2.protectedCounterpartRef
+      )),
+      materializedConsumeRef: input2.materializedConsumeRef ? itemRef2(input2.materializedConsumeRef, "club") : null,
+      displacedProtectedRef: input2.displacedProtectedRef ? itemRef2(input2.displacedProtectedRef, "unassigned") : null
+    });
+  }
+  function freezeTransaction(input2 = {}) {
+    const status = TRANSACTION_STATUSES.has(String(input2.status)) ? String(input2.status) : "planned";
+    return Object.freeze({
+      schemaVersion: 1,
+      transactionId: String(input2.transactionId || ""),
+      challengeRef: Object.freeze({
+        setId: positiveId2(input2.challengeRef?.setId || input2.challengeRef?.set?.id),
+        challengeId: positiveId2(input2.challengeRef?.challengeId || input2.challengeRef?.challenge?.id)
+      }),
+      beforeInventoryVersion: Math.max(0, Number(input2.beforeInventoryVersion) || 0),
+      afterInventoryVersion: Math.max(0, Number(input2.afterInventoryVersion) || 0),
+      status,
+      createdAt: String(input2.createdAt || (/* @__PURE__ */ new Date()).toISOString()),
+      updatedAt: String(input2.updatedAt || input2.createdAt || (/* @__PURE__ */ new Date()).toISOString()),
+      reason: input2.reason ? String(input2.reason) : null,
+      pairs: Object.freeze((input2.pairs || []).map(transactionPair))
+    });
+  }
+  function createDuplicateMaterializationTransaction(input2 = {}) {
+    const transaction = freezeTransaction({ ...input2, status: "planned" });
+    if (!transaction.transactionId) throw new TypeError("duplicate materialization transactionId is required");
+    if (!transaction.pairs.length) throw new TypeError("duplicate materialization transaction requires a pair");
+    const ids = transaction.pairs.flatMap((pair) => [pair.sourceSignalRef.id, pair.protectedCounterpartRef.id]);
+    if (new Set(ids).size !== ids.length) {
+      throw new TypeError("duplicate materialization transaction reused an item identity");
+    }
+    return transaction;
+  }
+  function materializeDuplicateTransaction(transaction = {}, input2 = {}) {
+    if (transaction.status !== "planned") {
+      return { ok: false, reason: `duplicate materialization transaction is ${transaction.status || "invalid"}` };
+    }
+    const replacements = Array.isArray(input2.replacements) ? input2.replacements : [];
+    if (replacements.length !== transaction.pairs.length) {
+      return { ok: false, reason: "duplicate materialization replacement count changed" };
+    }
+    const replacementBySource = new Map(replacements.map((entry) => [positiveId2(entry.signalId), entry]));
+    const materializedPairs = [];
+    for (const pair of transaction.pairs) {
+      const replacement = replacementBySource.get(pair.sourceSignalRef.id);
+      const materializedConsume = input2.resolveItem?.(positiveId2(replacement?.newItemId), "club") || null;
+      const displacedProtected = input2.resolveItem?.(pair.protectedCounterpartRef.id, "unassigned") || null;
+      if (!replacement || positiveId2(replacement.targetId) !== pair.protectedCounterpartRef.id) {
+        return { ok: false, reason: `duplicate materialization mapping changed for source #${pair.sourceSignalRef.id}` };
+      }
+      if (itemId2(materializedConsume) !== positiveId2(replacement.newItemId) || itemPile(materializedConsume) !== "club") {
+        return { ok: false, reason: `materialized consume item #${positiveId2(replacement.newItemId) || "?"} is not in Club` };
+      }
+      if (definitionId(materializedConsume) !== pair.sourceSignalRef.definitionId || !duplicateCardValueFingerprintMatches(pair.sourceFingerprint, materializedConsume)) {
+        return { ok: false, reason: `materialized consume item #${itemId2(materializedConsume)} changed value identity` };
+      }
+      if (itemId2(displacedProtected) !== pair.protectedCounterpartRef.id || itemPile(displacedProtected) !== "unassigned") {
+        return { ok: false, reason: `protected counterpart #${pair.protectedCounterpartRef.id} is not displaced to Unassigned` };
+      }
+      if (!duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, displacedProtected)) {
+        return { ok: false, reason: `protected counterpart #${pair.protectedCounterpartRef.id} changed value identity` };
+      }
+      materializedPairs.push({
+        ...pair,
+        materializedConsumeRef: itemRef2(materializedConsume, "club"),
+        displacedProtectedRef: itemRef2(displacedProtected, "unassigned")
+      });
+    }
+    const afterInventoryVersion = Math.max(0, Number(input2.afterInventoryVersion) || 0);
+    if (transaction.beforeInventoryVersion && afterInventoryVersion <= transaction.beforeInventoryVersion) {
+      return { ok: false, reason: "duplicate materialization did not advance the inventory version" };
+    }
+    return {
+      ok: true,
+      transaction: freezeTransaction({
+        ...transaction,
+        status: "materialized",
+        pairs: materializedPairs,
+        afterInventoryVersion,
+        updatedAt: input2.updatedAt
+      })
+    };
+  }
+  function duplicateTransactionConsumeRefs(transaction = {}) {
+    if (transaction.status !== "materialized") return [];
+    return transaction.pairs.map((pair) => pair.materializedConsumeRef).filter(Boolean);
+  }
+  function duplicateTransactionProtectedRefs(transaction = {}) {
+    return (transaction.pairs || []).map((pair) => pair.displacedProtectedRef || pair.protectedCounterpartRef);
+  }
+  function validateDuplicateMaterializationState(transaction = {}, input2 = {}) {
+    if (transaction.status !== "materialized") {
+      return { ok: false, reason: `duplicate materialization transaction is ${transaction.status || "invalid"}` };
+    }
+    const inventoryVersion = Math.max(0, Number(input2.inventoryVersion) || 0);
+    if (transaction.afterInventoryVersion && inventoryVersion && transaction.afterInventoryVersion !== inventoryVersion) {
+      return { ok: false, reason: "duplicate materialization inventory version changed before replanning" };
+    }
+    for (const pair of transaction.pairs || []) {
+      const consume = input2.resolveItem?.(pair.materializedConsumeRef?.id, "club") || null;
+      const protectedCard = input2.resolveItem?.(pair.displacedProtectedRef?.id, "unassigned") || null;
+      if (itemId2(consume) !== pair.materializedConsumeRef?.id || definitionId(consume) !== pair.materializedConsumeRef?.definitionId || itemPile(consume) !== "club" || !duplicateCardValueFingerprintMatches(pair.sourceFingerprint, consume)) {
+        return { ok: false, reason: `materialized consume item #${pair.materializedConsumeRef?.id || "?"} changed before replanning` };
+      }
+      if (itemId2(protectedCard) !== pair.displacedProtectedRef?.id || definitionId(protectedCard) !== pair.displacedProtectedRef?.definitionId || itemPile(protectedCard) !== "unassigned" || !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, protectedCard)) {
+        return { ok: false, reason: `protected counterpart #${pair.displacedProtectedRef?.id || "?"} changed before replanning` };
+      }
+    }
+    return { ok: true };
+  }
+  function validateDuplicateProtectedRestoration(transaction = {}, input2 = {}) {
+    if (!["submission-confirmed", "completed"].includes(transaction.status)) {
+      return { ok: false, reason: `duplicate materialization transaction is ${transaction.status || "invalid"}` };
+    }
+    for (const pair of transaction.pairs || []) {
+      const protectedCard = input2.resolveItem?.(pair.protectedCounterpartRef.id, "club") || null;
+      if (itemId2(protectedCard) !== pair.protectedCounterpartRef.id || definitionId(protectedCard) !== pair.protectedCounterpartRef.definitionId || itemPile(protectedCard) !== "club" || !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, protectedCard)) {
+        return { ok: false, reason: `protected counterpart #${pair.protectedCounterpartRef.id} was not restored unchanged to Club` };
+      }
+    }
+    return { ok: true };
+  }
+  function exactRecoveryItem(transactionPairValue, ref, fingerprint, input2 = {}) {
+    const item = input2.resolveItem?.(positiveId2(ref?.id)) || null;
+    if (!item) return { ok: false, missing: true, item: null, pile: null };
+    const exact = itemId2(item) === positiveId2(ref?.id) && definitionId(item) === positiveId2(ref?.definitionId);
+    const valueIdentity = exact && duplicateCardValueFingerprintMatches(fingerprint, item);
+    return {
+      ok: exact && valueIdentity,
+      missing: false,
+      item,
+      pile: itemPile(item),
+      pair: transactionPairValue,
+      exact,
+      valueIdentity
+    };
+  }
+  function planDuplicateMaterializationRecovery(transaction = {}, input2 = {}) {
+    if (!transaction?.transactionId || !Array.isArray(transaction.pairs) || !transaction.pairs.length) {
+      return { ok: false, action: "block", reason: "duplicate materialization journal is invalid" };
+    }
+    if (transaction.status === "completed") return { ok: true, action: "clear" };
+    const states = transaction.pairs.map((pair) => ({
+      pair,
+      source: exactRecoveryItem(pair, pair.sourceSignalRef, pair.sourceFingerprint, input2),
+      consume: pair.materializedConsumeRef ? exactRecoveryItem(pair, pair.materializedConsumeRef, pair.sourceFingerprint, input2) : null,
+      counterpart: exactRecoveryItem(
+        pair,
+        pair.displacedProtectedRef || pair.protectedCounterpartRef,
+        pair.counterpartFingerprint,
+        input2
+      )
+    }));
+    const changedValueIdentity = states.some(({ source, consume, counterpart }) => [source, consume, counterpart].filter(Boolean).some((state) => !state.missing && !state.ok));
+    if (changedValueIdentity) {
+      return {
+        ok: false,
+        action: "block",
+        reason: "a duplicate materialization journal item changed value identity"
+      };
+    }
+    if (transaction.status === "planned") {
+      const untouched = states.every(({ source, counterpart }) => source.ok && source.pile === "unassigned" && counterpart.ok && counterpart.pile === "club");
+      if (untouched) return { ok: true, action: "clear" };
+      const displaced = states.every(({ counterpart }) => counterpart.ok && counterpart.pile === "unassigned");
+      return displaced ? { ok: true, action: "restore-ambiguous" } : { ok: false, action: "block", reason: "planned duplicate materialization journal has ambiguous inventory state" };
+    }
+    if (transaction.status === "submission-confirmed") {
+      const displaced = states.every(({ counterpart }) => counterpart.ok && counterpart.pile === "unassigned");
+      if (displaced) return { ok: true, action: "restore-confirmed" };
+      const restored = states.every(({ counterpart }) => counterpart.ok && counterpart.pile === "club");
+      return restored ? { ok: true, action: "clear" } : { ok: false, action: "block", reason: "confirmed duplicate counterpart restoration is ambiguous" };
+    }
+    if (["materialized", "recovery-required", "ambiguous"].includes(transaction.status)) {
+      const swapped = states.every(({ consume, counterpart }) => consume?.ok && consume.pile === "club" && counterpart.ok && counterpart.pile === "unassigned");
+      if (swapped) return { ok: true, action: "rollback" };
+      const restored = states.every(({ consume, counterpart }) => consume?.ok && consume.pile === "unassigned" && counterpart.ok && counterpart.pile === "club");
+      if (restored && transaction.status === "materialized") return { ok: true, action: "clear" };
+      const protectedDisplaced = states.every(({ counterpart }) => counterpart.ok && counterpart.pile === "unassigned");
+      if (protectedDisplaced) return { ok: true, action: "restore-ambiguous" };
+      return {
+        ok: false,
+        action: "block",
+        reason: "duplicate materialization submission outcome is ambiguous"
+      };
+    }
+    return {
+      ok: false,
+      action: "block",
+      reason: `duplicate materialization journal has unsupported status ${transaction.status || "unknown"}`
+    };
+  }
+  function createDuplicateSubmissionManifest(input2 = {}) {
+    const transaction = input2.transaction || {};
+    const expectedRefs = (input2.players || []).map((item) => itemRef2(item));
+    const expectedIds = expectedRefs.map((ref) => ref.id);
+    if (!expectedIds.length || expectedIds.some((id) => !id) || new Set(expectedIds).size !== expectedIds.length) {
+      return { ok: false, reason: "duplicate submission manifest requires unique exact player identities" };
+    }
+    const requiredRefs = duplicateTransactionConsumeRefs(transaction);
+    const protectedRefs = duplicateTransactionProtectedRefs(transaction);
+    if (requiredRefs.some((ref) => !expectedIds.includes(ref.id))) {
+      return { ok: false, reason: "replanned squad does not contain every materialized consume item" };
+    }
+    if (protectedRefs.some((ref) => expectedIds.includes(ref.id))) {
+      return { ok: false, reason: "replanned squad contains a protected displaced counterpart" };
+    }
+    return {
+      ok: true,
+      manifest: Object.freeze({
+        transactionId: String(transaction.transactionId || ""),
+        inventoryVersion: Math.max(0, Number(input2.inventoryVersion) || 0),
+        expectedRefs: Object.freeze(expectedRefs),
+        requiredRefs: Object.freeze(requiredRefs),
+        protectedRefs: Object.freeze(protectedRefs)
+      })
+    };
+  }
+  function validateDuplicateSubmissionManifest(manifest = {}, players = [], options = {}) {
+    const actualRefs = players.map((item) => itemRef2(item));
+    const actualIds = actualRefs.map((ref) => ref.id);
+    const expectedIds = (manifest.expectedRefs || []).map((ref) => positiveId2(ref.id));
+    const inventoryVersion = Math.max(0, Number(options.inventoryVersion) || 0);
+    if (manifest.inventoryVersion && inventoryVersion && manifest.inventoryVersion !== inventoryVersion) {
+      return { ok: false, reason: "duplicate submission inventory version changed after replanning" };
+    }
+    if (actualIds.length !== expectedIds.length || actualIds.some((id) => !id) || [...actualIds].sort((a, b) => a - b).some((id, index) => id !== [...expectedIds].sort((a, b) => a - b)[index])) {
+      return { ok: false, reason: "saved squad identities differ from the duplicate submission manifest" };
+    }
+    for (const required2 of manifest.requiredRefs || []) {
+      const actual = actualRefs.find((ref) => ref.id === positiveId2(required2.id));
+      if (!actual || actual.definitionId !== positiveId2(required2.definitionId)) {
+        return { ok: false, reason: `saved squad is missing materialized consume item #${positiveId2(required2.id) || "?"}` };
+      }
+    }
+    for (const protectedRef of manifest.protectedRefs || []) {
+      if (actualIds.includes(positiveId2(protectedRef.id))) {
+        return { ok: false, reason: `saved squad contains protected counterpart #${positiveId2(protectedRef.id)}` };
+      }
+    }
+    return { ok: true, actualRefs };
+  }
+  function transitionDuplicateMaterializationTransaction(transaction = {}, status, options = {}) {
+    if (!TRANSACTION_STATUSES.has(String(status))) throw new TypeError(`invalid duplicate transaction status ${status}`);
+    return freezeTransaction({
+      ...transaction,
+      status,
+      reason: options.reason,
+      updatedAt: options.updatedAt
+    });
   }
 
   // src/selection/inventory.js
@@ -11377,8 +11747,8 @@
   }
   function isPreferredItem(item, preferredRefs) {
     const id = Number(item?.id || item?.ref?.id || 0);
-    const definitionId2 = Number(item?.definitionId || item?.ref?.definitionId || 0);
-    return preferredRefs.some((ref) => ref.id ? ref.id === id : ref.definitionId > 0 && ref.definitionId === definitionId2);
+    const definitionId3 = Number(item?.definitionId || item?.ref?.definitionId || 0);
+    return preferredRefs.some((ref) => ref.id ? ref.id === id : ref.definitionId > 0 && ref.definitionId === definitionId3);
   }
   function applyPilePriority(piles = [], fsuPolicy = {}) {
     if (!fsuPolicy.priorityStoragePlayers || !piles.includes("storage")) return [...piles];
@@ -11589,6 +11959,7 @@
     "protectedItems",
     "exclusiveRoles",
     "maxOrdinaryRating",
+    "maxPlayerRating",
     "protectionPolicy"
   ]);
   function positiveInteger9(value) {
@@ -11602,9 +11973,9 @@
     }
     const source = value?.ref || value || {};
     const id = Number(source.id || 0);
-    const definitionId2 = Number(source.definitionId || 0);
-    if (!id && !definitionId2) return null;
-    return { id, definitionId: definitionId2 };
+    const definitionId3 = Number(source.definitionId || 0);
+    if (!id && !definitionId3) return null;
+    return { id, definitionId: definitionId3 };
   }
   function normalizeItemRefs(values = []) {
     const result = [];
@@ -11621,8 +11992,8 @@
   }
   function itemMatchesRef(item, ref) {
     const id = Number(item?.id || item?.ref?.id || 0);
-    const definitionId2 = Number(item?.definitionId || item?.ref?.definitionId || 0);
-    return ref.id ? id === ref.id : ref.definitionId > 0 && definitionId2 === ref.definitionId;
+    const definitionId3 = Number(item?.definitionId || item?.ref?.definitionId || 0);
+    return ref.id ? id === ref.id : ref.definitionId > 0 && definitionId3 === ref.definitionId;
   }
   function itemMatchesAnyRef(item, refs) {
     return refs.some((ref) => itemMatchesRef(item, ref));
@@ -11711,11 +12082,14 @@
     const softProtectSpecialPiles = new Set((input2.protectionPolicy?.softProtectSpecialPiles || []).map(String).filter(Boolean));
     const maxOrdinaryRating = Number(input2.maxOrdinaryRating);
     const hasMaxOrdinaryRating = Number.isFinite(maxOrdinaryRating) && maxOrdinaryRating > 0;
+    const maxPlayerRating = Number(input2.maxPlayerRating);
+    const hasMaxPlayerRating = Number.isFinite(maxPlayerRating) && maxPlayerRating > 0;
     const counts = {
       scanned: candidateEntries.length,
       required: requiredRefs.length,
       preferred: 0,
       protected: 0,
+      overMaxPlayerRating: 0,
       reserved: 0,
       overMaxOrdinaryRating: 0,
       softProtected: 0,
@@ -11740,6 +12114,11 @@
       };
       if (itemMatchesAnyRef(sourceEntry.item, protectedRefs)) {
         counts.protected++;
+        buckets.protected.push(entry);
+        continue;
+      }
+      if (hasMaxPlayerRating && Number(sourceEntry.item?.rating || 0) > maxPlayerRating) {
+        counts.overMaxPlayerRating++;
         buckets.protected.push(entry);
         continue;
       }
@@ -12415,8 +12794,8 @@
     });
   }
   function ratingEntryKey(entry) {
-    const itemId5 = Number(entry?.item?.id || 0);
-    if (itemId5) return `id:${itemId5}`;
+    const itemId6 = Number(entry?.item?.id || 0);
+    if (itemId6) return `id:${itemId6}`;
     return `definition:${Number(entry?.item?.definitionId || 0)}`;
   }
   function duplicateSelectedPlayerGroups(plan) {
@@ -12431,13 +12810,13 @@
     return [...byDatabaseId.entries()].filter(([, items]) => items.length > 1).map(([databaseId, items]) => ({ databaseId, items }));
   }
   function matchingEntry(candidateEntries, item) {
-    const itemId5 = Number(item?.id || 0);
-    if (itemId5) {
-      const byId = candidateEntries.find((entry) => Number(entry?.item?.id || 0) === itemId5);
+    const itemId6 = Number(item?.id || 0);
+    if (itemId6) {
+      const byId = candidateEntries.find((entry) => Number(entry?.item?.id || 0) === itemId6);
       if (byId) return byId;
     }
-    const definitionId2 = Number(item?.definitionId || 0);
-    return candidateEntries.find((entry) => Number(entry?.item?.definitionId || 0) === definitionId2) || null;
+    const definitionId3 = Number(item?.definitionId || 0);
+    return candidateEntries.find((entry) => Number(entry?.item?.definitionId || 0) === definitionId3) || null;
   }
   function equivalentReplacementCount(entry, candidateEntries, excludedKeys) {
     const rating = Number(entry?.item?.rating || 0);
@@ -12667,8 +13046,8 @@
   function refMatchesItem2(ref = {}, item = {}) {
     const id = Number(ref.id || 0);
     if (id) return id === Number(item?.id || 0);
-    const definitionId2 = Number(ref.definitionId || 0);
-    return definitionId2 > 0 && definitionId2 === Number(item?.definitionId || 0);
+    const definitionId3 = Number(ref.definitionId || 0);
+    return definitionId3 > 0 && definitionId3 === Number(item?.definitionId || 0);
   }
   function diagnosticCandidate(item = {}, pileName = "unknown") {
     return {
@@ -12730,30 +13109,30 @@
     const submissionPileById = /* @__PURE__ */ new Map();
     for (const pileName of ["storage", "club"]) {
       for (const item of readPile(pileName)) {
-        const itemId5 = Number(item?.id || 0);
-        if (itemId5 && !submissionPileById.has(itemId5)) submissionPileById.set(itemId5, pileName);
+        const itemId6 = Number(item?.id || 0);
+        if (itemId6 && !submissionPileById.has(itemId6)) submissionPileById.set(itemId6, pileName);
       }
     }
     const requiredRefs = (Array.isArray(requiredItems) ? requiredItems : []).map(normalizedRequiredRef).filter((ref) => ref.id > 0 || ref.definitionId > 0).slice(0, MAX_REQUIRED_DIAGNOSTICS);
     const exactRequiredItemIds = new Set(requiredRefs.map((ref) => ref.id).filter((id) => id > 0));
     const requiredScannedLocations = requiredRefs.map(() => []);
     const cachedIsSafe = (item) => {
-      const itemId5 = Number(item?.id || 0);
-      if (!itemId5) return false;
-      if (!safetyCache.has(itemId5)) safetyCache.set(itemId5, isSafe(item));
-      return safetyCache.get(itemId5);
+      const itemId6 = Number(item?.id || 0);
+      if (!itemId6) return false;
+      if (!safetyCache.has(itemId6)) safetyCache.set(itemId6, isSafe(item));
+      return safetyCache.get(itemId6);
     };
     const safeSubmissionItems = submissionItems.filter(cachedIsSafe);
     const submissionById = /* @__PURE__ */ new Map();
     const submissionByDefinition = /* @__PURE__ */ new Map();
     for (const item of safeSubmissionItems) {
-      const itemId5 = Number(item?.id || 0);
-      const definitionId2 = Number(item?.definitionId || 0);
-      if (itemId5) submissionById.set(itemId5, item);
-      if (!definitionId2) continue;
-      const entries2 = submissionByDefinition.get(definitionId2) || [];
+      const itemId6 = Number(item?.id || 0);
+      const definitionId3 = Number(item?.definitionId || 0);
+      if (itemId6) submissionById.set(itemId6, item);
+      if (!definitionId3) continue;
+      const entries2 = submissionByDefinition.get(definitionId3) || [];
       entries2.push(item);
-      submissionByDefinition.set(definitionId2, entries2);
+      submissionByDefinition.set(definitionId3, entries2);
     }
     for (const entries2 of submissionByDefinition.values()) {
       const sorted = sortFodder(entries2, broadSpec, settings);
@@ -12763,8 +13142,8 @@
       const duplicateId = Number(sourceItem?.duplicateId || 0);
       const direct = duplicateId ? submissionById.get(duplicateId) : null;
       if (direct && isSamePlayerCardVersion(sourceItem, direct)) return direct;
-      const definitionId2 = Number(sourceItem?.definitionId || 0);
-      return (submissionByDefinition.get(definitionId2) || []).find((item) => isSamePlayerCardVersion(sourceItem, item)) || null;
+      const definitionId3 = Number(sourceItem?.definitionId || 0);
+      return (submissionByDefinition.get(definitionId3) || []).find((item) => isSamePlayerCardVersion(sourceItem, item)) || null;
     }
     const requirementCache = /* @__PURE__ */ new Map();
     let scannedItems = 0;
@@ -12784,23 +13163,23 @@
           if (!item) continue;
           signal = sourceItem;
         }
-        const itemId5 = Number(item?.id || 0);
-        const definitionId2 = Number(item?.definitionId || 0);
-        if (!itemId5 || !definitionId2 || byItemId.has(itemId5)) continue;
+        const itemId6 = Number(item?.id || 0);
+        const definitionId3 = Number(item?.definitionId || 0);
+        if (!itemId6 || !definitionId3 || byItemId.has(itemId6)) continue;
         if (!cachedIsSafe(item)) continue;
         const submissionPileName = String(
-          submissionPileById.get(itemId5) || item?.ref?.pile || item?.pile || pileName
+          submissionPileById.get(itemId6) || item?.ref?.pile || item?.pile || pileName
         );
-        if (!requirementCache.has(itemId5)) {
+        if (!requirementCache.has(itemId6)) {
           let requirementItem = item;
           try {
             requirementItem = resolveRequirementItem(item, { sourceItem, signal, pileName }) || item;
           } catch {
           }
-          requirementCache.set(itemId5, model.constraints.map((constraint) => constraint.matches(requirementItem)));
+          requirementCache.set(itemId6, model.constraints.map((constraint) => constraint.matches(requirementItem)));
         }
-        const requirementMatches = requirementCache.get(itemId5);
-        byItemId.set(itemId5, {
+        const requirementMatches = requirementCache.get(itemId6);
+        byItemId.set(itemId6, {
           item,
           signal,
           pileName,
@@ -12814,19 +13193,19 @@
     }
     const byDefinition = /* @__PURE__ */ new Map();
     for (const entry of byItemId.values()) {
-      const definitionId2 = Number(entry.item?.definitionId || 0);
-      const existing = byDefinition.get(definitionId2);
+      const definitionId3 = Number(entry.item?.definitionId || 0);
+      const existing = byDefinition.get(definitionId3);
       const entryIsExactRequired = exactRequiredItemIds.has(Number(entry.item?.id || 0));
       const existingIsExactRequired = exactRequiredItemIds.has(Number(existing?.item?.id || 0));
       if (!existing || entryIsExactRequired && !existingIsExactRequired || entryIsExactRequired === existingIsExactRequired && (entry.pileRank < existing.pileRank || entry.pileRank === existing.pileRank && Number(entry.item?.id || 0) < Number(existing.item?.id || 0))) {
-        byDefinition.set(definitionId2, entry);
+        byDefinition.set(definitionId3, entry);
       }
     }
     const entries = [...byDefinition.values()];
     const requiredItemDiagnostics = requiredRefs.map((ref, index) => {
       const candidateBeforeDefinition = [...byItemId.values()].find((entry) => refMatchesItem2(ref, entry.item)) || null;
-      const definitionId2 = Number(ref.definitionId || candidateBeforeDefinition?.item?.definitionId || 0);
-      const representative = definitionId2 ? byDefinition.get(definitionId2) || null : null;
+      const definitionId3 = Number(ref.definitionId || candidateBeforeDefinition?.item?.definitionId || 0);
+      const representative = definitionId3 ? byDefinition.get(definitionId3) || null : null;
       const candidateAfterDefinition = Boolean(
         candidateBeforeDefinition && representative && Number(candidateBeforeDefinition.item?.id || 0) === Number(representative.item?.id || 0)
       );
@@ -12835,7 +13214,7 @@
       if (!scannedLocations.length && !candidateBeforeDefinition) reason = "not-in-scanned-piles";
       else if (!candidateBeforeDefinition) reason = "rejected-before-definition";
       else if (!candidateAfterDefinition) reason = "definition-dedup-replaced";
-      const competingCandidates = definitionId2 ? [...byItemId.values()].filter((entry) => Number(entry.item?.definitionId || 0) === definitionId2).slice(0, MAX_COMPETING_CANDIDATES).map((entry) => diagnosticCandidate(
+      const competingCandidates = definitionId3 ? [...byItemId.values()].filter((entry) => Number(entry.item?.definitionId || 0) === definitionId3).slice(0, MAX_COMPETING_CANDIDATES).map((entry) => diagnosticCandidate(
         entry.item,
         entry.submissionPileName || entry.pileName
       )) : [];
@@ -12874,6 +13253,7 @@
       preferredItems,
       protectedItems,
       exclusiveRoles,
+      maxPlayerRating,
       maxOrdinaryRating,
       protectionPolicy
     } = options;
@@ -12909,6 +13289,7 @@
       preferredItems,
       protectedItems,
       exclusiveRoles,
+      maxPlayerRating,
       maxOrdinaryRating,
       protectionPolicy
     });
@@ -12979,11 +13360,11 @@
   function normalizeRef(value = {}, fallbackPile = "unknown") {
     const source = value?.ref || value || {};
     const id = positiveNumber(source.id);
-    const definitionId2 = positiveNumber(source.definitionId);
-    if (!id && !definitionId2) return null;
+    const definitionId3 = positiveNumber(source.definitionId);
+    if (!id && !definitionId3) return null;
     return {
       id,
-      definitionId: definitionId2,
+      definitionId: definitionId3,
       pile: String(source.pile || fallbackPile || "unknown")
     };
   }
@@ -12991,8 +13372,8 @@
     const plan = selection.plan || selection;
     const refs = [];
     for (const entry of plan.entries || []) {
-      const itemRef4 = normalizeRef(entry.itemRef || entry.item || entry.selected, entry.pileName);
-      if (itemRef4) refs.push({ kind: "item", ref: itemRef4 });
+      const itemRef5 = normalizeRef(entry.itemRef || entry.item || entry.selected, entry.pileName);
+      if (itemRef5) refs.push({ kind: "item", ref: itemRef5 });
       if (options.includeSignals === true) {
         const signalRef = normalizeRef(entry.signalRef || entry.signal, entry.pileName);
         if (signalRef) refs.push({ kind: "signal", ref: signalRef });
@@ -13135,8 +13516,8 @@
     const refSource = ref?.ref || ref || {};
     const refId = Number(refSource.id || 0);
     if (refId) return Number(source.id || 0) === refId;
-    const definitionId2 = Number(refSource.definitionId || 0);
-    return definitionId2 > 0 && Number(source.definitionId || 0) === definitionId2;
+    const definitionId3 = Number(refSource.definitionId || 0);
+    return definitionId3 > 0 && Number(source.definitionId || 0) === definitionId3;
   }
   function partitionPrimaryUnassignedEntries(entries = [], options = {}) {
     const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
@@ -13550,6 +13931,17 @@
             reason: prepared.reason || "SBC player preparation failed"
           }), { phase: "player-preparation", context });
         }
+        if (prepared?.replan === true || prepared?.status === "replan") {
+          return publishResult(options, createSubmissionResult({
+            status: "replan",
+            submitted: false,
+            challengeRef: context.challengeRef || { id: context.challenge?.id || null },
+            consumedItemRefs: context.squadPlan.itemRefs || [],
+            reason: prepared.reason || "inventory changed during player preparation; replan required",
+            reasonCode: prepared.reasonCode || "PLAYER_PREPARATION_REPLAN",
+            details: prepared.details
+          }), { phase: "player-preparation-replan", context });
+        }
         if (Array.isArray(prepared?.players)) {
           context.players = prepared.players;
           context.squadPlan = {
@@ -13583,6 +13975,10 @@
           reason: "saved squad is not submit ready"
         }), { phase: "readiness", context });
       }
+      if (options.readFinalPlayers) {
+        context.finalPlayers = await options.readFinalPlayers(context);
+      }
+      await runValidators(options.finalValidators, context, "final");
       const runCommittedSubmit = typeof options.runCommittedSubmit === "function" ? options.runCommittedSubmit : async (operation) => operation();
       return await runCommittedSubmit(async () => {
         const transportResult = await options.submitTransport?.(context);
@@ -13605,26 +14001,37 @@
           rewardPackId: transportResult?.rewardPackId
         });
         await publishResult(options, result, { phase: "submitted", context, transportResult });
-        if (options.afterSubmit) await options.afterSubmit({ ...context, result, transportResult });
+        if (options.afterSubmit) {
+          const afterSubmit = await options.afterSubmit({ ...context, result, transportResult });
+          if (afterSubmit?.ok === false) {
+            return {
+              ...result,
+              postSubmitBlocked: true,
+              reason: afterSubmit.reason || "post-submit inventory finalization failed",
+              reasonCode: afterSubmit.reasonCode || "POST_SUBMIT_FINALIZATION_BLOCKED",
+              details: afterSubmit.details || result.details
+            };
+          }
+        }
         return result;
       }, context);
     } finally {
       if (options.releaseRuntimeAccess) await options.releaseRuntimeAccess({ ...context, token: accessToken });
     }
   }
-  function createInventorySquadProvider({ prepareSelection, selection, itemRef: itemRef4 }) {
+  function createInventorySquadProvider({ prepareSelection, selection, itemRef: itemRef5 }) {
     return async (context) => {
       const prepared = await prepareSelection(context, selection);
       if (!prepared?.ok) return { ok: false, reason: prepared?.missing ? `missing ${prepared.missing.count} player(s)` : "inventory preparation failed" };
       return {
         ok: true,
         players: prepared.selected || [],
-        itemRefs: (prepared.selected || []).map(itemRef4),
+        itemRefs: (prepared.selected || []).map(itemRef5),
         selection: prepared
       };
     };
   }
-  function createExistingSquadProvider({ getPlayers, itemRef: itemRef4, selection = null, source = "existing-squad" }) {
+  function createExistingSquadProvider({ getPlayers, itemRef: itemRef5, selection = null, source = "existing-squad" }) {
     return async (context) => {
       const players = await getPlayers(context);
       if (!Array.isArray(players) || !players.length) {
@@ -13633,14 +14040,14 @@
       const result = {
         ok: true,
         players,
-        itemRefs: players.map(itemRef4),
+        itemRefs: players.map(itemRef5),
         source
       };
       if (selection) result.selection = selection;
       return result;
     };
   }
-  function createFsuFillProvider({ fill, getPlayers, itemRef: itemRef4 }) {
+  function createFsuFillProvider({ fill, getPlayers, itemRef: itemRef5 }) {
     return async (context) => {
       const fillResult = await fill(context);
       const players = await getPlayers({ ...context, fillResult });
@@ -13650,7 +14057,7 @@
       return {
         ok: true,
         players,
-        itemRefs: players.map(itemRef4),
+        itemRefs: players.map(itemRef5),
         fillResult,
         source: "fsu-fill"
       };
@@ -13679,8 +14086,8 @@
   }
   function describeRef(ref = {}) {
     const id = Number(ref.id || 0) || "?";
-    const definitionId2 = Number(ref.definitionId || 0) || "?";
-    return `#${id}/def:${definitionId2}`;
+    const definitionId3 = Number(ref.definitionId || 0) || "?";
+    return `#${id}/def:${definitionId3}`;
   }
   function criticalSnapshotSignature(snapshot = {}) {
     const critical = Object.fromEntries(
@@ -13914,13 +14321,13 @@
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
-  function stableValue(value) {
-    if (Array.isArray(value)) return value.map(stableValue);
+  function stableValue2(value) {
+    if (Array.isArray(value)) return value.map(stableValue2);
     if (!isPlainObject(value)) return value;
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue2(value[key])]));
   }
   function fingerprintDynamicSbcValue(value) {
-    const text = JSON.stringify(stableValue(value));
+    const text = JSON.stringify(stableValue2(value));
     let hash = 2166136261;
     for (let index = 0; index < text.length; index++) {
       hash ^= text.charCodeAt(index);
@@ -14318,14 +14725,14 @@
     });
   }
   function itemIdentityIds(item) {
-    const definitionId2 = Number(item?.definitionId || 0);
-    const itemId5 = Number(item?.id || 0);
+    const definitionId3 = Number(item?.definitionId || 0);
+    const itemId6 = Number(item?.id || 0);
     return [...new Set([
-      definitionId2,
+      definitionId3,
       Number(item?.resourceId || 0),
       Number(item?._data?.resourceId || 0),
       Number(item?._staticData?.resourceId || 0),
-      itemId5 && definitionId2 && itemId5 === definitionId2 ? itemId5 : 0
+      itemId6 && definitionId3 && itemId6 === definitionId3 ? itemId6 : 0
     ].filter((value) => Number.isFinite(value) && value > 0))];
   }
   function playerPickItemName(item) {
@@ -14505,10 +14912,10 @@
     if (!TRADE_PRICE_PROVIDERS.includes(provider)) throw new Error(`Unsupported price provider: ${value}`);
     return provider;
   }
-  function quote(definitionId2, price, source, platform, quotedAt, ttlMs) {
+  function quote(definitionId3, price, source, platform, quotedAt, ttlMs) {
     return {
       schemaVersion: PRICE_QUOTE_SCHEMA_VERSION,
-      definitionId: definitionId2,
+      definitionId: definitionId3,
       price,
       source,
       platform,
@@ -14520,10 +14927,10 @@
     const response = parseJson(text, "FUT.GG");
     const prices = [];
     for (const entry of response?.data || []) {
-      const definitionId2 = Number(entry?.eaId || entry?.definitionId || 0);
+      const definitionId3 = Number(entry?.eaId || entry?.definitionId || 0);
       const price = Number(entry?.price);
-      if (Number.isInteger(definitionId2) && definitionId2 > 0 && Number.isFinite(price) && price > 0) {
-        prices.push({ definitionId: definitionId2, price });
+      if (Number.isInteger(definitionId3) && definitionId3 > 0 && Number.isFinite(price) && price > 0) {
+        prices.push({ definitionId: definitionId3, price });
       }
     }
     return [...new Map(prices.map((entry) => [entry.definitionId, entry])).values()];
@@ -14532,10 +14939,10 @@
     const response = parseJson(text, "FUTNext");
     const prices = [];
     for (const entry of Array.isArray(response) ? response : []) {
-      const definitionId2 = Number(entry?.definitionId || entry?.eaId || 0);
+      const definitionId3 = Number(entry?.definitionId || entry?.eaId || 0);
       const price = Number(entry?.prices?.[0]);
-      if (Number.isInteger(definitionId2) && definitionId2 > 0 && Number.isFinite(price) && price > 0) {
-        prices.push({ definitionId: definitionId2, price });
+      if (Number.isInteger(definitionId3) && definitionId3 > 0 && Number.isFinite(price) && price > 0) {
+        prices.push({ definitionId: definitionId3, price });
       }
     }
     return [...new Map(prices.map((entry) => [entry.definitionId, entry])).values()];
@@ -14608,7 +15015,7 @@
     if (typeof options.requestText !== "function") throw new TypeError("requestText is required");
     const cache = /* @__PURE__ */ new Map();
     const now = typeof options.now === "function" ? options.now : () => Date.now();
-    const cacheKey = (platform, definitionId2) => `${platform}:${definitionId2}`;
+    const cacheKey = (platform, definitionId3) => `${platform}:${definitionId3}`;
     let loadCount = 0;
     let lastLoad = null;
     let lastClearedAt = null;
@@ -17309,10 +17716,10 @@
     }
     const requestedDefinitionIds = [...new Set(lanes.flatMap((lane) => lane.definitionIds))];
     const ownerships = typeof adapter.inspectDefinitionOwnerships === "function" ? adapter.inspectDefinitionOwnerships(requestedDefinitionIds) : null;
-    const ownershipFor = (definitionId2) => ownerships?.[definitionId2] || ownerships?.[String(definitionId2)] || adapter.inspectDefinitionOwnership(definitionId2);
+    const ownershipFor = (definitionId3) => ownerships?.[definitionId3] || ownerships?.[String(definitionId3)] || adapter.inspectDefinitionOwnership(definitionId3);
     const filtered = lanes.map((lane) => ({
       ...lane,
-      definitionIds: lane.definitionIds.filter((definitionId2) => destinationForOwnership(ownershipFor(definitionId2)) === expected)
+      definitionIds: lane.definitionIds.filter((definitionId3) => destinationForOwnership(ownershipFor(definitionId3)) === expected)
     }));
     const matched = filtered.reduce((sum, lane) => sum + lane.definitionIds.length, 0);
     return {
@@ -19159,7 +19566,7 @@
     if (fsu.ready !== true) return { ready: false, reason: `fsu-club-${fsu.state || "not-ready"}` };
     return { ready: true, reason: null };
   }
-  function itemRef2(ref = {}) {
+  function itemRef3(ref = {}) {
     return {
       id: Number(ref.id || 0),
       definitionId: Number(ref.definitionId || 0),
@@ -19171,7 +19578,7 @@
   }
   async function validateProvisionalClubEntries(options, input2, prepared) {
     const readiness = input2.context?.fsuReadiness || {};
-    const refs = (prepared?.plan?.entries || []).map((entry) => itemRef2(entry.item));
+    const refs = (prepared?.plan?.entries || []).map((entry) => itemRef3(entry.item));
     if (refs.length && refs.every((ref) => ref.pile === "transfer")) {
       return { ok: true, required: false, status: "not-required-transfer", items: refs };
     }
@@ -19188,8 +19595,8 @@
       const validation = await options.validateClubPlayers(refs, {
         label: `${input2.job?.name || "Trade Scheduler"} targeted Club validation`
       });
-      const returned = (validation?.items || []).map(itemRef2);
-      const missing = (validation?.missing || []).map(itemRef2);
+      const returned = (validation?.items || []).map(itemRef3);
+      const missing = (validation?.missing || []).map(itemRef3);
       const matched = refs.every((ref) => returned.some((candidate) => sameItemRef(candidate, ref)));
       return {
         ok: validation?.ok === true && matched,
@@ -21535,8 +21942,8 @@
     return Number.isInteger(id) && id > 0 ? id : null;
   }
   function recapDefinitionId(value = {}) {
-    const definitionId2 = Number(value?.definitionId || value?.ref?.definitionId || 0);
-    return Number.isInteger(definitionId2) && definitionId2 > 0 ? definitionId2 : null;
+    const definitionId3 = Number(value?.definitionId || value?.ref?.definitionId || 0);
+    return Number.isInteger(definitionId3) && definitionId3 > 0 ? definitionId3 : null;
   }
   function recapDestination(value, fallback = "unknown") {
     const destination = String(value || "").toLowerCase();
@@ -21552,12 +21959,12 @@
     ];
     for (const entry of refs) {
       const id = recapItemId(entry.ref);
-      const definitionId2 = recapDefinitionId(entry.ref);
+      const definitionId3 = recapDefinitionId(entry.ref);
       if (id && !byItemId.has(id)) byItemId.set(id, entry.destination);
-      if (definitionId2) {
-        const destinations = byDefinitionId.get(definitionId2) || [];
+      if (definitionId3) {
+        const destinations = byDefinitionId.get(definitionId3) || [];
         destinations.push(entry.destination);
-        byDefinitionId.set(definitionId2, destinations);
+        byDefinitionId.set(definitionId3, destinations);
       }
     }
     return (item = {}) => {
@@ -22325,9 +22732,9 @@
     const source = safeContext(context);
     const season = positiveInteger12(source.season);
     const platform = normalizedPlatform(source.platform);
-    const definitionId2 = positiveInteger12(source.definitionId);
-    if (!season || !platform || !definitionId2) return null;
-    return `${season}:${platform}:${definitionId2}`;
+    const definitionId3 = positiveInteger12(source.definitionId);
+    if (!season || !platform || !definitionId3) return null;
+    return `${season}:${platform}:${definitionId3}`;
   }
   function normalizeFutbinCardIdCache(rawCache) {
     const entries = {};
@@ -22379,8 +22786,8 @@
     });
     return `https://www.futbin.org/futbin/api/${season}/getFilteredPlayers?${query3.toString()}`;
   }
-  function parseFutbinFilteredPlayerId(responseText, definitionId2) {
-    const targetDefinitionId = positiveInteger12(definitionId2);
+  function parseFutbinFilteredPlayerId(responseText, definitionId3) {
+    const targetDefinitionId = positiveInteger12(definitionId3);
     if (!targetDefinitionId || typeof responseText !== "string") return null;
     let response;
     try {
@@ -22416,8 +22823,8 @@
     const queued = /* @__PURE__ */ new Map();
     let cacheHits = 0;
     for (const originalItem of items) {
-      const definitionId2 = positiveInteger12(originalItem?.definitionId);
-      if (!definitionId2 || ids.has(definitionId2)) continue;
+      const definitionId3 = positiveInteger12(originalItem?.definitionId);
+      if (!definitionId3 || ids.has(definitionId3)) continue;
       let item = originalItem;
       try {
         item = hydrateItem(originalItem) || originalItem;
@@ -22426,19 +22833,19 @@
       }
       const knownId = positiveInteger12(resolveKnownId(item)) || positiveInteger12(resolveKnownId(originalItem));
       if (knownId) {
-        ids.set(definitionId2, knownId);
+        ids.set(definitionId3, knownId);
         continue;
       }
       if (!shouldResolve(originalItem)) continue;
       const context = getLookupContext(item) || getLookupContext(originalItem);
       const cacheHit = getCachedFutbinPlayerId(cache, context);
       if (cacheHit) {
-        ids.set(definitionId2, cacheHit);
+        ids.set(definitionId3, cacheHit);
         cacheHits++;
         continue;
       }
       const url = createFutbinFilteredPlayersUrl(context);
-      if (url) queued.set(definitionId2, { item, context, url });
+      if (url) queued.set(definitionId3, { item, context, url });
     }
     const lookups = [...queued.values()];
     const responses = requestText ? await mapWithConcurrency(lookups, options.maxConcurrency || 2, async (lookup) => {
@@ -22546,7 +22953,7 @@
   }
 
   // src/unassigned/plan.js
-  function itemRef3(item) {
+  function itemRef4(item) {
     return item?.ref || { id: Number(item?.id || 0), definitionId: Number(item?.definitionId || 0), pile: "unassigned" };
   }
   function findClubDuplicate(item, clubItems) {
@@ -22562,7 +22969,7 @@
       action: {
         type,
         destination,
-        itemRefs: items.map(itemRef3),
+        itemRefs: items.map(itemRef4),
         description,
         requiresExactClubDuplicate
       }
@@ -22575,7 +22982,7 @@
         destination,
         required: items.length,
         free,
-        itemRefs: items.map(itemRef3),
+        itemRefs: items.map(itemRef4),
         description
       }
     };
@@ -22589,7 +22996,7 @@
     if (!items.length) {
       return {
         status: reserved.length ? "preserved" : "empty",
-        reservedItemRefs: reserved.map(itemRef3)
+        reservedItemRefs: reserved.map(itemRef4)
       };
     }
     const nonDuplicates = items.filter((item) => !item.duplicate);
@@ -22620,8 +23027,8 @@
     }
     return {
       status: "unclassified",
-      itemRefs: items.map(itemRef3),
-      reservedItemRefs: reserved.map(itemRef3)
+      itemRefs: items.map(itemRef4),
+      reservedItemRefs: reserved.map(itemRef4)
     };
   }
   function unassignedFingerprint(snapshot) {
@@ -22780,17 +23187,17 @@
   }
 
   // src/pack/opened-item-materialization.js
-  function itemId2(item) {
+  function itemId3(item) {
     return Number(item?.id || item?.ref?.id || 0);
   }
-  function definitionId(item) {
+  function definitionId2(item) {
     return Number(item?.definitionId || item?.ref?.definitionId || 0);
   }
   function itemIds(items = []) {
-    return new Set((items || []).map(itemId2).filter(Boolean));
+    return new Set((items || []).map(itemId3).filter(Boolean));
   }
   function itemRoutingSignature(item) {
-    const definition = definitionId(item);
+    const definition = definitionId2(item);
     if (!definition) return null;
     const type = String(item?.type || item?._itemType || item?._type || "unknown").toLowerCase();
     const rating = Number(item?.rating ?? item?._rating ?? item?._staticData?.rating ?? 0);
@@ -22808,7 +23215,7 @@
     return `${type}:${definition}:${rating}:${rareflag}:${untradeable}`;
   }
   function itemStaticRoutingSignature(item) {
-    const definition = definitionId(item);
+    const definition = definitionId2(item);
     if (!definition) return null;
     const type = String(item?.type || item?._itemType || item?._type || "unknown").toLowerCase();
     const rating = Number(item?.rating ?? item?._rating ?? item?._staticData?.rating ?? 0);
@@ -22835,7 +23242,7 @@
     const sourcesBySignature = /* @__PURE__ */ new Map();
     const aliasesBySignature = /* @__PURE__ */ new Map();
     for (const item of items) {
-      const id = itemId2(item);
+      const id = itemId3(item);
       if (!id || currentPileIds.has(id)) continue;
       const signature = itemStaticRoutingSignature(item);
       if (!signature) continue;
@@ -22844,7 +23251,7 @@
       sourcesBySignature.set(signature, matches);
     }
     for (const item of pileItems) {
-      const id = itemId2(item);
+      const id = itemId3(item);
       if (!id || baselineIds.has(id) || openedIds.has(id)) continue;
       const signature = itemStaticRoutingSignature(item);
       if (!signature) continue;
@@ -22856,8 +23263,8 @@
     for (const [signature, sources] of sourcesBySignature) {
       const candidates = aliasesBySignature.get(signature) || [];
       if (!candidates.length || candidates.length !== sources.length) continue;
-      const orderedSources = [...sources].sort((a, b) => itemId2(a) - itemId2(b));
-      const orderedCandidates = [...candidates].sort((a, b) => itemId2(a) - itemId2(b));
+      const orderedSources = [...sources].sort((a, b) => itemId3(a) - itemId3(b));
+      const orderedCandidates = [...candidates].sort((a, b) => itemId3(a) - itemId3(b));
       orderedSources.forEach((item, index) => aliases.push({ item, alias: orderedCandidates[index] }));
     }
     return aliases;
@@ -22869,12 +23276,12 @@
     const baselineIds = options.baselineIds || [];
     const baselineIdSet = new Set(baselineIds);
     const liveUnassignedIds = new Set(
-      pileItems.map(itemId2).filter((id) => id && !baselineIdSet.has(id))
+      pileItems.map(itemId3).filter((id) => id && !baselineIdSet.has(id))
     );
     const trackedItemIds = itemIds(items);
-    const aliases = matchOpenedItemsToNewPileAliases({ items: responseItems2, pileItems, baselineIds }).filter(({ item }) => trackedItemIds.has(itemId2(item)));
+    const aliases = matchOpenedItemsToNewPileAliases({ items: responseItems2, pileItems, baselineIds }).filter(({ item }) => trackedItemIds.has(itemId3(item)));
     const materializedItems = /* @__PURE__ */ new Set([
-      ...items.filter((item) => liveUnassignedIds.has(itemId2(item))),
+      ...items.filter((item) => liveUnassignedIds.has(itemId3(item))),
       ...aliases.map(({ item }) => item)
     ]);
     return {
@@ -22890,10 +23297,10 @@
     const isDuplicate = options.isDuplicate || ((item) => Number(item?.duplicateId || 0) > 0);
     const preparePurchasedItem = options.preparePurchasedItem || (() => {
     });
-    const clubById = new Map(clubItems.map((item) => [itemId2(item), item]).filter(([id]) => id));
+    const clubById = new Map(clubItems.map((item) => [itemId3(item), item]).filter(([id]) => id));
     const clubByDefinition = /* @__PURE__ */ new Map();
     for (const item of clubItems) {
-      const key = definitionId(item);
+      const key = definitionId2(item);
       if (!key) continue;
       const matches = clubByDefinition.get(key) || [];
       matches.push(item);
@@ -22906,7 +23313,7 @@
       if (!isPlayer2(item)) continue;
       const duplicateId = Number(item?.duplicateId || 0);
       const directDuplicate = duplicateId ? clubById.get(duplicateId) : null;
-      const clubDuplicate = (directDuplicate && isSamePlayerCardVersion(item, directDuplicate) ? directDuplicate : null) || (clubByDefinition.get(definitionId(item)) || []).find((candidate) => itemId2(candidate) !== itemId2(item) && isSamePlayerCardVersion(item, candidate)) || null;
+      const clubDuplicate = (directDuplicate && isSamePlayerCardVersion(item, directDuplicate) ? directDuplicate : null) || (clubByDefinition.get(definitionId2(item)) || []).find((candidate) => itemId3(candidate) !== itemId3(item) && isSamePlayerCardVersion(item, candidate)) || null;
       if (!clubDuplicate) {
         if (isDuplicate(item)) {
           item.duplicateId = 0;
@@ -22916,8 +23323,8 @@
         continue;
       }
       if (!duplicateId && clubDuplicate) {
-        item.duplicateId = itemId2(clubDuplicate);
-        if (item._duplicateId !== void 0) item._duplicateId = itemId2(clubDuplicate);
+        item.duplicateId = itemId3(clubDuplicate);
+        if (item._duplicateId !== void 0) item._duplicateId = itemId3(clubDuplicate);
         inferredDuplicates.push(item);
       }
       preparePurchasedItem(item);
@@ -22990,7 +23397,7 @@
     const routedItems = [];
     const pendingItems = [];
     for (const item of items) {
-      const id = itemId2(item);
+      const id = itemId3(item);
       if (id && unassignedIds.has(id)) {
         if (reserveItem(item)) reservedItems.push(item);
         else pendingItems.push(item);
@@ -23005,7 +23412,7 @@
     const openedIds = itemIds(items);
     const aliasesBySignature = /* @__PURE__ */ new Map();
     for (const entry of destinations) {
-      const id = itemId2(entry.item);
+      const id = itemId3(entry.item);
       if (!id || baselineIds.has(id) || openedIds.has(id)) continue;
       const signature = itemRoutingSignature(entry.item);
       if (!signature) continue;
@@ -23015,7 +23422,7 @@
     }
     const pendingBySignature = /* @__PURE__ */ new Map();
     for (const item of pendingItems) {
-      const id = itemId2(item);
+      const id = itemId3(item);
       if (!id || unassignedIds.has(id)) continue;
       const signature = itemRoutingSignature(item);
       if (!signature) continue;
@@ -23030,19 +23437,19 @@
         if (!destinationsForSignature.length || destinationsForSignature.length !== pending.length) continue;
         pending.forEach((item, index) => aliasRoutes.push({ item, destination: destinationsForSignature[index] }));
       }
-      const strictSourceIds = new Set(aliasRoutes.map((route) => itemId2(route.item)));
-      const strictDestinationIds = new Set(aliasRoutes.map((route) => itemId2(route.destination.item)));
+      const strictSourceIds = new Set(aliasRoutes.map((route) => itemId3(route.item)));
+      const strictDestinationIds = new Set(aliasRoutes.map((route) => itemId3(route.destination.item)));
       const staticAliases = matchOpenedItemsToNewPileAliases({
         items: pendingItems.filter((item) => {
-          const id = itemId2(item);
+          const id = itemId3(item);
           return !strictSourceIds.has(id) && !unassignedIds.has(id);
         }),
-        pileItems: destinations.filter((entry) => !strictDestinationIds.has(itemId2(entry.item))).map((entry) => entry.item),
+        pileItems: destinations.filter((entry) => !strictDestinationIds.has(itemId3(entry.item))).map((entry) => entry.item),
         baselineIds: options.routingBaseline?.destinationIds || []
       });
-      const destinationById = new Map(destinations.map((entry) => [itemId2(entry.item), entry]));
+      const destinationById = new Map(destinations.map((entry) => [itemId3(entry.item), entry]));
       for (const { item, alias } of staticAliases) {
-        const destination = destinationById.get(itemId2(alias));
+        const destination = destinationById.get(itemId3(alias));
         if (destination) aliasRoutes.push({ item, destination });
       }
     }
@@ -23056,7 +23463,7 @@
   }
 
   // src/unassigned/fresh-materialization.js
-  function itemId3(item) {
+  function itemId4(item) {
     return Number(item?.id || item?.ref?.id || 0);
   }
   function uniqueItems(items = []) {
@@ -23064,7 +23471,7 @@
     const seenObjects = /* @__PURE__ */ new Set();
     return (items || []).filter((item) => {
       if (!item || typeof item !== "object") return false;
-      const id = itemId3(item);
+      const id = itemId4(item);
       if (id) {
         if (seenIds.has(id)) return false;
         seenIds.add(id);
@@ -23090,19 +23497,19 @@
       status: Number(result?.status ?? result?.statusCode ?? result?.response?.status) || null,
       error: error ? String(error?.message || error) : null,
       responseItemCount: responseItems(result).length,
-      responseItemIds: responseItems(result).map(itemId3).filter(Boolean)
+      responseItemIds: responseItems(result).map(itemId4).filter(Boolean)
     };
   }
   function matchOpenedItemsToLiveUnassigned(options = {}) {
     const openedItems = uniqueItems(options.openedItems || []);
     const baselineIds = new Set((options.baselineIds || []).map(Number).filter(Boolean));
-    const liveItems = uniqueItems(options.liveItems || []).filter((item) => !baselineIds.has(itemId3(item)));
+    const liveItems = uniqueItems(options.liveItems || []).filter((item) => !baselineIds.has(itemId4(item)));
     const usedLiveIds = /* @__PURE__ */ new Set();
     const matches = [];
     const unresolved = [];
     for (const opened of openedItems) {
-      const id = itemId3(opened);
-      const exact = id ? liveItems.find((live) => itemId3(live) === id && !usedLiveIds.has(id)) : null;
+      const id = itemId4(opened);
+      const exact = id ? liveItems.find((live) => itemId4(live) === id && !usedLiveIds.has(id)) : null;
       if (!exact) {
         unresolved.push(opened);
         continue;
@@ -23110,7 +23517,7 @@
       usedLiveIds.add(id);
       matches.push({ opened, live: exact, via: "id" });
     }
-    const unmatchedLive = liveItems.filter((item) => !usedLiveIds.has(itemId3(item)));
+    const unmatchedLive = liveItems.filter((item) => !usedLiveIds.has(itemId4(item)));
     const aliases = matchOpenedItemsToNewPileAliases({
       items: unresolved,
       pileItems: unmatchedLive,
@@ -23175,7 +23582,7 @@
         repositoryBefore,
         repositoryAfter,
         repositoryCount: repositoryItems.length,
-        repositoryItemIds: repositoryItems.map(itemId3).filter(Boolean),
+        repositoryItemIds: repositoryItems.map(itemId4).filter(Boolean),
         matchedCount: latest.matches.length,
         unresolvedCount: latest.unresolvedItems.length,
         navigationTrigger: null
@@ -23569,9 +23976,9 @@
       return { diagnosticError: error?.message || String(error) };
     }
   }
-  function captureDefinitionPileState(piles = {}, definitionId2, options = {}) {
+  function captureDefinitionPileState(piles = {}, definitionId3, options = {}) {
     try {
-      const target = numberOrNull(definitionId2);
+      const target = numberOrNull(definitionId3);
       const identify = typeof options.identify === "function" ? options.identify : () => null;
       const maxItems = Math.max(1, Math.min(100, Number(options.maxItems || 20) || 20));
       return Object.fromEntries(["unassigned", "storage", "transfer", "club"].map((pileName) => {
@@ -23611,6 +24018,98 @@
       return { diagnosticError: error?.message || String(error) };
     }
   }
+  function collectionItems(value) {
+    if (Array.isArray(value)) return value;
+    if (!value || typeof value !== "object") return [];
+    if (Array.isArray(value._collection)) return value._collection;
+    if (Array.isArray(value.models)) return value.models;
+    try {
+      if (typeof value.values === "function") return Array.from(value.values());
+    } catch {
+    }
+    return [];
+  }
+  function boundedDiagnosticValue(value, options = {}, depth = 0, seen = /* @__PURE__ */ new WeakSet(), budget = null) {
+    const state = budget || { remaining: Math.max(100, Number(options.maxNodes || 1500) || 1500) };
+    if (state.remaining-- <= 0) return "[Node budget exhausted]";
+    if (value === null || value === void 0) return value ?? null;
+    if (typeof value === "string") {
+      const maxString = Math.max(80, Number(options.maxString || 1e3) || 1e3);
+      return value.length > maxString ? `${value.slice(0, maxString)}...[truncated]` : value;
+    }
+    if (["number", "boolean"].includes(typeof value)) return value;
+    if (typeof value === "bigint") return String(value);
+    if (typeof value === "function") return `[Function ${value.name || "anonymous"}]`;
+    if (typeof value !== "object") return String(value);
+    if (seen.has(value)) return "[Circular]";
+    const maxDepth = Math.max(1, Number(options.maxDepth || 5) || 5);
+    if (depth >= maxDepth) return `[${value?.constructor?.name || "Object"} depth limit]`;
+    seen.add(value);
+    const maxArray = Math.max(1, Number(options.maxArray || 100) || 100);
+    if (Array.isArray(value)) {
+      const captured2 = value.slice(0, maxArray).map((entry) => boundedDiagnosticValue(entry, options, depth + 1, seen, state));
+      if (value.length > maxArray) captured2.push(`[${value.length - maxArray} more item(s)]`);
+      return captured2;
+    }
+    const maxKeys = Math.max(1, Number(options.maxKeys || 60) || 60);
+    let keys = [];
+    try {
+      keys = Object.keys(value);
+    } catch (error) {
+      return `[Keys unavailable: ${error?.message || error}]`;
+    }
+    const captured = { $type: value?.constructor?.name || "Object" };
+    for (const key of keys.slice(0, maxKeys)) {
+      try {
+        captured[key] = boundedDiagnosticValue(value[key], options, depth + 1, seen, state);
+      } catch (error) {
+        captured[key] = `[Read failed: ${error?.message || error}]`;
+      }
+    }
+    if (keys.length > maxKeys) captured.$truncatedKeys = keys.length - maxKeys;
+    return captured;
+  }
+  function captureUnassignedRefreshResult(result, options = {}) {
+    const maxItems = Math.max(1, Math.min(200, Number(options.maxItems || 100) || 100));
+    const paths = [
+      ["items"],
+      ["response", "items"],
+      ["response", "data", "items"],
+      ["response", "_data", "items"],
+      ["response", "payload", "items"],
+      ["data", "items"],
+      ["_data", "items"],
+      ["payload", "items"]
+    ];
+    const itemArrays = [];
+    for (const path of paths) {
+      let value = result;
+      try {
+        for (const key of path) value = value?.[key];
+      } catch {
+        value = null;
+      }
+      const items = collectionItems(value);
+      if (!items.length && !Array.isArray(value)) continue;
+      itemArrays.push({
+        source: path.join("."),
+        count: items.length,
+        items: items.slice(0, maxItems).map((item) => ({
+          id: numberOrNull(item?.id ?? item?.itemId ?? item?._data?.id),
+          definitionId: numberOrNull(item?.definitionId ?? item?.defId ?? item?._data?.definitionId),
+          rating: numberOrNull(item?.rating ?? item?._data?.rating),
+          pile: primitiveOrNull(item?.pile ?? item?._pile ?? item?._data?.pile),
+          name: primitiveOrNull(item?.name ?? item?.commonName ?? item?._staticData?.name)
+        })),
+        truncated: items.length > maxItems
+      });
+    }
+    return {
+      transport: captureMoveResult(result),
+      itemArrays,
+      raw: boundedDiagnosticValue(result, options)
+    };
+  }
   function diagnosticJson(value) {
     try {
       return JSON.stringify(value);
@@ -23622,11 +24121,11 @@
   // src/unassigned/recovery.js
   function refMatches(ref, expectedRefs = []) {
     const id = Number(ref?.id || 0);
-    const definitionId2 = Number(ref?.definitionId || 0);
+    const definitionId3 = Number(ref?.definitionId || 0);
     return expectedRefs.some((expected) => {
       const expectedId = Number(expected?.id || 0);
       if (expectedId) return expectedId === id;
-      return Number(expected?.definitionId || 0) > 0 && Number(expected.definitionId) === definitionId2;
+      return Number(expected?.definitionId || 0) > 0 && Number(expected.definitionId) === definitionId3;
     });
   }
   function itemMatchesRecoverySpec(item, spec = {}) {
@@ -23684,8 +24183,8 @@
       const signalRef = entry.signal.ref || entry.signal;
       if (!refMatches(signalRef, expectedRefs)) continue;
       const id = Number(signalRef?.id || 0);
-      const definitionId2 = Number(signalRef?.definitionId || 0);
-      selectedKeys.add(id ? `id:${id}` : `definition:${definitionId2}`);
+      const definitionId3 = Number(signalRef?.definitionId || 0);
+      selectedKeys.add(id ? `id:${id}` : `definition:${definitionId3}`);
     }
     return selectedKeys.size;
   }
@@ -24105,7 +24604,7 @@
     const numeric = Number(id);
     return Number.isFinite(numeric) && numeric > 0 ? String(numeric) : "";
   }
-  function itemId4(item) {
+  function itemId5(item) {
     const numeric = Number(item?.id ?? item?.itemId ?? 0);
     return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
   }
@@ -24114,7 +24613,7 @@
     for (const pile of Object.values(piles || {})) {
       if (!Array.isArray(pile)) continue;
       for (const item of pile) {
-        const id = itemId4(item);
+        const id = itemId5(item);
         if (id !== null) ids.add(id);
       }
     }
@@ -24861,7 +25360,7 @@
   }
 
   // src/sbc/untradeable-duplicate-swap.js
-  function positiveId2(value) {
+  function positiveId3(value) {
     const id = Number(value);
     return Number.isSafeInteger(id) && id > 0 ? id : 0;
   }
@@ -24871,11 +25370,11 @@
   function entryItem(entry = {}) {
     return entry.item || entry.itemRef || null;
   }
-  function itemPile(item = {}) {
+  function itemPile2(item = {}) {
     return String(item.pile || item.ref?.pile || "unknown");
   }
   function planUntradeableDuplicateSwaps({ selection = null, players = [] } = {}) {
-    const playerById = new Map((players || []).map((player) => [positiveId2(player?.id || player?.ref?.id), player]).filter(([id]) => id));
+    const playerById = new Map((players || []).map((player) => [positiveId3(player?.id || player?.ref?.id), player]).filter(([id]) => id));
     const swaps = [];
     const seenSignals = /* @__PURE__ */ new Set();
     const seenTargets = /* @__PURE__ */ new Set();
@@ -24883,13 +25382,13 @@
       if (String(entry?.pileName || "") !== "unassigned") continue;
       const signal = entrySignal(entry);
       const plannedTarget = entryItem(entry);
-      const signalId = positiveId2(signal?.id || signal?.ref?.id);
-      const targetId = positiveId2(plannedTarget?.id || plannedTarget?.ref?.id);
+      const signalId = positiveId3(signal?.id || signal?.ref?.id);
+      const targetId = positiveId3(plannedTarget?.id || plannedTarget?.ref?.id);
       const target = playerById.get(targetId);
       if (!signalId || !targetId || !target) continue;
-      if (signal?.tradeable === true || target?.tradeable !== true || itemPile(target) !== "club") continue;
+      if (signal?.tradeable === true || target?.tradeable !== true || itemPile2(target) !== "club") continue;
       if (!isSamePlayerCardVersion(signal, target)) continue;
-      const duplicateId = positiveId2(signal?.duplicateId || signal?.duplicateSignalId);
+      const duplicateId = positiveId3(signal?.duplicateId || signal?.duplicateSignalId);
       if (!duplicateId) {
         return { ok: false, reason: "duplicate target identity is missing", swaps: [] };
       }
@@ -24904,7 +25403,7 @@
       swaps.push({
         signalId,
         targetId,
-        definitionId: positiveId2(signal?.definitionId || signal?.ref?.definitionId)
+        definitionId: positiveId3(signal?.definitionId || signal?.ref?.definitionId)
       });
     }
     return { ok: true, swaps };
@@ -24926,8 +25425,8 @@
     }
     const newIdByOldId = /* @__PURE__ */ new Map();
     for (let index = 0; index < clubDuplicates.length; index++) {
-      const oldId = positiveId2(clubDuplicates[index]?.id ?? clubDuplicates[index]?.itemId ?? clubDuplicates[index]);
-      const newItemId = positiveId2(itemIds2[index]);
+      const oldId = positiveId3(clubDuplicates[index]?.id ?? clubDuplicates[index]?.itemId ?? clubDuplicates[index]);
+      const newItemId = positiveId3(itemIds2[index]);
       if (!oldId || !newItemId || newIdByOldId.has(oldId)) {
         return failedResolution("duplicate swap response contains invalid identities");
       }
@@ -24935,15 +25434,15 @@
     }
     const replacements = [];
     for (const swap of swaps) {
-      const newItemId = newIdByOldId.get(positiveId2(swap.targetId));
+      const newItemId = newIdByOldId.get(positiveId3(swap.targetId));
       if (!newItemId) {
-        return failedResolution(`duplicate swap response omitted selected Club item #${positiveId2(swap.targetId) || "?"}`);
+        return failedResolution(`duplicate swap response omitted selected Club item #${positiveId3(swap.targetId) || "?"}`);
       }
       replacements.push({
-        signalId: positiveId2(swap.signalId),
-        targetId: positiveId2(swap.targetId),
+        signalId: positiveId3(swap.signalId),
+        targetId: positiveId3(swap.targetId),
         newItemId,
-        definitionId: positiveId2(swap.definitionId)
+        definitionId: positiveId3(swap.definitionId)
       });
     }
     return { ok: true, replacements };
@@ -24958,17 +25457,17 @@
     newClubItem = null,
     displacedTarget = null
   } = {}) {
-    const signalId = positiveId2(replacement.signalId);
-    const targetId = positiveId2(replacement.targetId);
-    const newItemId = positiveId2(replacement.newItemId);
+    const signalId = positiveId3(replacement.signalId);
+    const targetId = positiveId3(replacement.targetId);
+    const newItemId = positiveId3(replacement.newItemId);
     if (!signalId || !targetId || !newItemId || !originalSignal || !originalTarget) {
       return failedMaterialization("duplicate swap postcondition is missing an expected identity");
     }
-    if (positiveId2(newClubItem?.id || newClubItem?.ref?.id) !== newItemId) {
+    if (positiveId3(newClubItem?.id || newClubItem?.ref?.id) !== newItemId) {
       return failedMaterialization(`duplicate swap Club item #${newItemId} was not materialized`);
     }
-    if (itemPile(newClubItem) !== "club") {
-      return failedMaterialization(`duplicate swap replacement #${newItemId} materialized in ${itemPile(newClubItem)}, expected club`);
+    if (itemPile2(newClubItem) !== "club") {
+      return failedMaterialization(`duplicate swap replacement #${newItemId} materialized in ${itemPile2(newClubItem)}, expected club`);
     }
     if (!isSamePlayerCardVersion(originalSignal, newClubItem) || newClubItem?.tradeable === true) {
       return failedMaterialization(`duplicate swap Club item #${newItemId} failed same-version untradeable validation`);
@@ -24976,11 +25475,11 @@
     if (!displacedTarget) {
       return failedMaterialization(`duplicate swap displaced tradeable Club item #${targetId} disappeared after move`);
     }
-    if (positiveId2(displacedTarget?.id || displacedTarget?.ref?.id) !== targetId) {
+    if (positiveId3(displacedTarget?.id || displacedTarget?.ref?.id) !== targetId) {
       return failedMaterialization(`duplicate swap displaced item identity changed from #${targetId}`);
     }
-    if (itemPile(displacedTarget) !== "unassigned") {
-      return failedMaterialization(`duplicate swap displaced tradeable Club item #${targetId} moved to ${itemPile(displacedTarget)}, expected unassigned`);
+    if (itemPile2(displacedTarget) !== "unassigned") {
+      return failedMaterialization(`duplicate swap displaced tradeable Club item #${targetId} moved to ${itemPile2(displacedTarget)}, expected unassigned`);
     }
     if (!isSamePlayerCardVersion(originalTarget, displacedTarget)) {
       return failedMaterialization(`duplicate swap displaced tradeable Club item #${targetId} changed card version`);
@@ -25167,13 +25666,13 @@
   function violationItemReference(value, submittedIds) {
     if (!value || typeof value !== "object" && typeof value !== "function") return null;
     const id = numericId(safeRead4(value, "id")) ?? numericId(safeRead4(value, "itemId"));
-    const itemId5 = numericId(safeRead4(value, "itemId")) ?? id;
+    const itemId6 = numericId(safeRead4(value, "itemId")) ?? id;
     return {
       id,
-      itemId: itemId5,
+      itemId: itemId6,
       definitionId: numericId(safeRead4(value, "definitionId")),
       rating: numericId(safeRead4(value, "rating")),
-      submittedMatch: itemId5 === null ? null : submittedIds.has(itemId5)
+      submittedMatch: itemId6 === null ? null : submittedIds.has(itemId6)
     };
   }
   function itemViolation(entryKey, value, submittedIds, ordinal) {
@@ -25184,14 +25683,14 @@
     const item = violationItemReference(nestedItem, submittedIds);
     const id = numericId(safeRead4(nestedValue, "id"));
     const itemIds2 = numericIdList(safeRead4(nestedValue, "itemIds"));
-    const itemId5 = numericId(safeRead4(nestedValue, "itemId")) ?? item?.itemId ?? keyItemId ?? id ?? (itemIds2.length === 1 ? itemIds2[0] : null);
-    const candidateIds = [...new Set([itemId5, ...itemIds2].filter((candidate) => candidate !== null))];
+    const itemId6 = numericId(safeRead4(nestedValue, "itemId")) ?? item?.itemId ?? keyItemId ?? id ?? (itemIds2.length === 1 ? itemIds2[0] : null);
+    const candidateIds = [...new Set([itemId6, ...itemIds2].filter((candidate) => candidate !== null))];
     const matchedSubmittedIds = candidateIds.filter((candidate) => submittedIds.has(candidate));
     return {
       key,
       ordinal,
       id,
-      itemId: itemId5,
+      itemId: itemId6,
       definitionId: numericId(safeRead4(nestedValue, "definitionId")) ?? item?.definitionId ?? null,
       name: diagnosticValue(safeRead4(nestedValue, "name"), 120),
       itemIds: itemIds2,
@@ -26713,6 +27212,10 @@
       30
     );
     const budgets = recoveryBudgets(options.recoveryBudgets);
+    const maxDuplicateTransactionReplans = Math.max(
+      0,
+      Math.min(5, Number(options.maxDuplicateTransactionReplans ?? 3) || 0)
+    );
     const result = {
       status: "completed",
       phase: ROLLING_UPGRADE_PHASES.PREFLIGHT,
@@ -26746,6 +27249,7 @@
       requiredSpecial: 0,
       storageMaintenance: 0
     };
+    let duplicateTransactionReplans = 0;
     function rememberReceipt(receipt) {
       if (!receipt || receipt.status === "replan" && receipt.submitted !== true) return;
       result.receiptCount++;
@@ -26776,6 +27280,27 @@
       if (isStopped(await options.shouldStop?.({ result, phase: result.phase }))) return true;
       if (isStopped(await options.stopPoint?.({ result, phase: result.phase }))) return true;
       return false;
+    }
+    async function hasActiveDuplicateTransaction() {
+      return options.hasActiveDuplicateTransaction?.() === true;
+    }
+    async function finishAfterDuplicateTransactionAbort(trigger, value, successStatus, fallbackReason, fallbackCode, details = {}) {
+      if (!await hasActiveDuplicateTransaction()) {
+        return finish(successStatus, value, fallbackReason, fallbackCode);
+      }
+      const aborted = await options.abortActiveDuplicateTransaction?.({
+        trigger,
+        value,
+        replans: duplicateTransactionReplans,
+        ...details
+      }) || value;
+      const compensationSucceeded = aborted?.details?.compensationSucceeded === true;
+      return finish(
+        compensationSucceeded ? successStatus : "blocked",
+        aborted,
+        fallbackReason,
+        reasonCode(aborted) || fallbackCode
+      );
     }
     async function runRecovery(kind, phase, callback, context = {}) {
       if (typeof callback !== "function") return { status: "skipped", reason: `${kind} recovery is unavailable` };
@@ -26983,6 +27508,20 @@
         "INVENTORY_INDEX_UNAVAILABLE"
       );
     }
+    if (typeof options.recoverDuplicateTransaction === "function") {
+      const recovered = await options.recoverDuplicateTransaction({ result });
+      if (isStopped(recovered)) {
+        return finish("stopped", recovered, "stopped while recovering a duplicate materialization transaction");
+      }
+      if (isBlocked(recovered)) {
+        return finish(
+          recovered?.status === "unavailable" ? "unavailable" : "blocked",
+          recovered,
+          "duplicate materialization transaction could not be recovered safely",
+          "DUPLICATE_MATERIALIZATION_RECOVERY_REQUIRED"
+        );
+      }
+    }
     if (typeof options.resumePendingPlayerPick === "function") {
       await enter(ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK, {
         recovery: "storageSink",
@@ -27021,9 +27560,28 @@
       resumedPrimaryPending = resumed?.primaryPending === true;
     }
     while (maxCompletions === 0 || result.completions < maxCompletions) {
-      if (await stopRequested()) return finish("stopped", null, "stopped by user", "USER_STOPPED");
+      if (await stopRequested()) {
+        return finishAfterDuplicateTransactionAbort(
+          "user-stop",
+          { status: "stopped", reason: "stopped by user", reasonCode: "USER_STOPPED" },
+          "stopped",
+          "stopped by user",
+          "USER_STOPPED"
+        );
+      }
       if (result.iterations >= maxIterations) {
-        return finish("blocked", null, `Rolling safety limit reached after ${maxIterations} iteration(s)`, "SAFETY_LIMIT_REACHED");
+        return finishAfterDuplicateTransactionAbort(
+          "safety-limit",
+          {
+            status: "blocked",
+            reason: `Rolling safety limit reached after ${maxIterations} iteration(s)`,
+            reasonCode: "SAFETY_LIMIT_REACHED"
+          },
+          "blocked",
+          `Rolling safety limit reached after ${maxIterations} iteration(s)`,
+          "SAFETY_LIMIT_REACHED",
+          { maxIterations }
+        );
       }
       result.iterations++;
       let progressed = false;
@@ -27068,7 +27626,55 @@
       let plan = null;
       let primaryDuplicateReserveResolved = !pack || !surplusCraftingEnabled;
       while (!plan) {
-        if (await stopRequested()) return finish("stopped", null, "stopped by user", "USER_STOPPED");
+        if (await stopRequested()) {
+          return finishAfterDuplicateTransactionAbort(
+            "user-stop",
+            { status: "stopped", reason: "stopped by user", reasonCode: "USER_STOPPED" },
+            "stopped",
+            "stopped by user",
+            "USER_STOPPED"
+          );
+        }
+        if (await hasActiveDuplicateTransaction()) {
+          await enter(ROLLING_UPGRADE_PHASES.PLAN_PRIMARY_SQUAD, {
+            bootstrap: !pack && !resumedPrimary,
+            resumedPrimary,
+            duplicateTransactionReplan: true
+          });
+          const transactionPlan = await options.planPrimarySquad({
+            result,
+            iteration: result.iterations,
+            bootstrap: !pack && !resumedPrimary,
+            resumedPrimary,
+            duplicateTransactionReplan: true
+          });
+          result.lastPlan = transactionPlan || null;
+          if (isStopped(transactionPlan)) {
+            return finishAfterDuplicateTransactionAbort(
+              "primary-replan-stopped",
+              transactionPlan,
+              "stopped",
+              "stopped while replanning an active duplicate transaction",
+              reasonCode(transactionPlan) || "USER_STOPPED",
+              { plan: transactionPlan }
+            );
+          }
+          if (transactionPlan?.ok || transactionPlan?.status === "ready") {
+            plan = transactionPlan;
+            break;
+          }
+          const aborted = await options.abortActiveDuplicateTransaction?.({
+            trigger: "primary-replan-failed",
+            plan: transactionPlan,
+            replans: duplicateTransactionReplans
+          }) || transactionPlan;
+          return finish(
+            "blocked",
+            aborted,
+            "active duplicate transaction could not be replanned in its current Challenge",
+            reasonCode(aborted) || reasonCode(transactionPlan) || "DUPLICATE_TRANSACTION_REPLAN_BLOCKED"
+          );
+        }
         await enter(ROLLING_UPGRADE_PHASES.RESOLVE_PROTECTED_STORAGE);
         const storage = await options.resolveProtectedStorage?.({
           pack,
@@ -27350,6 +27956,23 @@
       rememberReceipt(submission?.receipt || submission);
       if (submission?.inventoryDelta) result.inventoryDelta = submission.inventoryDelta;
       if (submission?.status === "replan") {
+        if (await hasActiveDuplicateTransaction()) {
+          duplicateTransactionReplans++;
+          if (duplicateTransactionReplans > maxDuplicateTransactionReplans) {
+            const aborted = await options.abortActiveDuplicateTransaction?.({
+              trigger: "primary-replan-limit",
+              submission,
+              replans: duplicateTransactionReplans,
+              maxReplans: maxDuplicateTransactionReplans
+            }) || submission;
+            return finish(
+              "blocked",
+              aborted,
+              `active duplicate transaction exceeded ${maxDuplicateTransactionReplans} replans`,
+              reasonCode(aborted) || "DUPLICATE_TRANSACTION_REPLAN_LIMIT"
+            );
+          }
+        }
         resumedPrimaryPending = true;
         await emit8(options, "replan", {
           kind: "primary",
@@ -27368,6 +27991,7 @@
         return finish("blocked", submission, "primary SBC submission did not complete", "PRIMARY_SUBMISSION_BLOCKED");
       }
       result.completions++;
+      duplicateTransactionReplans = 0;
       if (bootstrap) result.bootstrapSubmissions++;
       if (resumedPrimary) resumedPrimaryPending = false;
       progressed = true;
@@ -29288,13 +29912,13 @@
   function clone14(value) {
     return cloneLoopDef(value);
   }
-  function stableValue2(value) {
-    if (Array.isArray(value)) return value.map(stableValue2);
+  function stableValue3(value) {
+    if (Array.isArray(value)) return value.map(stableValue3);
     if (!isPlainObject(value)) return value;
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue2(value[key])]));
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue3(value[key])]));
   }
   function sameValue(left, right) {
-    return JSON.stringify(stableValue2(left)) === JSON.stringify(stableValue2(right));
+    return JSON.stringify(stableValue3(left)) === JSON.stringify(stableValue3(right));
   }
   function valueAt(value, path) {
     let current = value;
@@ -29677,7 +30301,7 @@
     ];
   }
   function fingerprintBuilderValue(value) {
-    const text = JSON.stringify(stableValue2(value));
+    const text = JSON.stringify(stableValue3(value));
     let hash = 2166136261;
     for (let index = 0; index < text.length; index++) {
       hash ^= text.charCodeAt(index);
@@ -39750,8 +40374,8 @@
       if (pileName === "club") return uniqueItems2(getClubItems());
       return [];
     }
-    function findCachedItemById(itemId5, pileNames = ["storage", "club", "unassigned", "transfer"]) {
-      const targetId = Number(itemId5 || 0);
+    function findCachedItemById(itemId6, pileNames = ["storage", "club", "unassigned", "transfer"]) {
+      const targetId = Number(itemId6 || 0);
       if (!targetId) return null;
       for (const pileName of pileNames) {
         const item = getPileItemsByName(pileName).find((entry) => Number(entry?.id || 0) === targetId);
@@ -39851,10 +40475,10 @@
     function isSbcUsablePlayer(item, options = {}, context = null) {
       if (!isPlayer2(item)) return false;
       const id = Number(item?.id || 0);
-      const definitionId2 = Number(item?.definitionId || 0);
+      const definitionId3 = Number(item?.definitionId || 0);
       if (id && state.consumedItemIds.has(id)) return false;
       if (id && (context?.protectedItemIds?.has(id) || options.protectedItemIds?.some((value) => Number(value) === id))) return false;
-      if (definitionId2 && (context?.protectedDefinitionIds?.has(definitionId2) || options.protectedDefinitionIds?.some((value) => Number(value) === definitionId2))) return false;
+      if (definitionId3 && (context?.protectedDefinitionIds?.has(definitionId3) || options.protectedDefinitionIds?.some((value) => Number(value) === definitionId3))) return false;
       if (options.protectHighGold && isProtectedHighGold(item, resolveProtectHighGoldThreshold(options))) return false;
       const policy = options.sbcFodderPolicy;
       const lowRatedGoldMaxRating = Number(options.lowRatedGoldMaxRating || getSbcFodderRuntimeOptions().lowRatedGoldMaxRating || 0);
@@ -39949,9 +40573,9 @@
                 items.filter((item) => Number(item?.id || 0) === Number(ref?.id || 0)).map((item) => captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem }))
               ]))
             })),
-            definitions: Object.fromEntries(definitions.map((definitionId2) => [
-              String(definitionId2),
-              captureDefinitionPileState(piles, definitionId2, { identify: identifyRuntimeInventoryItem })
+            definitions: Object.fromEntries(definitions.map((definitionId3) => [
+              String(definitionId3),
+              captureDefinitionPileState(piles, definitionId3, { identify: identifyRuntimeInventoryItem })
             ])),
             capacity: {
               storageFree: storageSpaceLeft(),
@@ -41695,11 +42319,11 @@
     function getUsabilityRejectReasons(item, options = {}) {
       const reasons = [];
       const id = Number(item?.id || 0);
-      const definitionId2 = Number(item?.definitionId || 0);
+      const definitionId3 = Number(item?.definitionId || 0);
       if (!isPlayer2(item)) reasons.push("not-player");
       if (id && state.consumedItemIds.has(id)) reasons.push("consumed-this-run");
       if (id && options.protectedItemIds?.some((value) => Number(value) === id)) reasons.push("protected-id");
-      if (definitionId2 && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId2)) reasons.push("protected-def");
+      if (definitionId3 && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId3)) reasons.push("protected-def");
       if (options.protectHighGold && isProtectedHighGold(item, resolveProtectHighGoldThreshold(options))) {
         reasons.push("protected-high-gold");
       }
@@ -41836,9 +42460,9 @@
     }
     function duplicateSignalDiagnostic(signal, requirement2 = {}, settings = getFsuSettings()) {
       const signalId = Number(signal?.id || signal?.ref?.id || 0);
-      const definitionId2 = Number(signal?.definitionId || signal?.ref?.definitionId || 0);
+      const definitionId3 = Number(signal?.definitionId || signal?.ref?.definitionId || 0);
       const duplicateId = Number(signal?.duplicateId || 0);
-      const candidates = getSubmissionCacheItems().filter((item) => (Number(item?.id || 0) === duplicateId || Number(item?.definitionId || 0) === definitionId2) && isSamePlayerCardVersion(signal, item)).map((item) => {
+      const candidates = getSubmissionCacheItems().filter((item) => (Number(item?.id || 0) === duplicateId || Number(item?.definitionId || 0) === definitionId3) && isSamePlayerCardVersion(signal, item)).map((item) => {
         const reasons = [.../* @__PURE__ */ new Set([
           ...getUsabilityRejectReasons(item, requirement2),
           ...getSpecRejectReasons(item, requirement2)
@@ -41860,7 +42484,7 @@
       ])];
       return {
         signalId,
-        definitionId: definitionId2,
+        definitionId: definitionId3,
         duplicateId,
         name: itemDisplayName(signal),
         rating: Number(signal?.rating || 0),
@@ -42036,11 +42660,12 @@
           if (!matchesActivePlayerGroup) return false;
         }
       }
-      return getSbcProtectionReasons(item, loopDef, {
+      const protectionReasons = getSbcProtectionReasons(item, loopDef, {
         ...context || {},
         allowedSpecialCount,
         specialIndex: isSbcSpecialItem(item) ? 1 : 0
-      }).length === 0;
+      });
+      return protectionReasons.length === 0;
     }
     function isResolvableRatingSbcUnassignedDuplicate(item, loopDef) {
       if (!isDuplicate(item) || !isPlayer2(item)) return false;
@@ -42068,7 +42693,8 @@
         lockedDefinitionIds: new Set((settings.lockedDefinitionIds || []).map(Number).filter(Boolean)),
         excludedLeagueIds: (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0),
         roleAware: selectionPolicy !== null,
-        skipRatingLimit: selectionPolicy !== null
+        skipRatingLimit: selectionPolicy !== null,
+        duplicateTransactionConsumeRefs: selectionPolicy?.duplicateTransactionConsumeRefs || []
       };
       const broadSpec = {
         playerOnly: true,
@@ -42157,6 +42783,7 @@
         preferredItems: selectionPolicy.preferredItems,
         protectedItems: selectionPolicy.protectedItems,
         exclusiveRoles: selectionPolicy.exclusiveRoles,
+        maxPlayerRating: selectionPolicy.maxPlayerRating,
         maxOrdinaryRating: selectionPolicy.maxOrdinaryRating,
         protectionPolicy: selectionPolicy.protectionPolicy,
         createSnapshot: ratingSelectionItemSnapshot,
@@ -42186,11 +42813,11 @@
       );
       let resolvedCount = 0;
       const selected2 = (selection.selected || []).map((item) => {
-        const itemId5 = Number(item?.id || 0);
-        if (!transferIds.has(itemId5)) return item;
+        const itemId6 = Number(item?.id || 0);
+        if (!transferIds.has(itemId6)) return item;
         const resolved = findSubmissionItemForDuplicateSignal(item, usedIds);
         if (!resolved) {
-          const name = item?.name || item?.lastName || item?.definitionId || itemId5 || "unknown";
+          const name = item?.name || item?.lastName || item?.definitionId || itemId6 || "unknown";
           fail2(`${loopDef.name}: transfer item ${name} cannot be resolved to a club/storage duplicate for SBC submit`);
         }
         usedIds.add(Number(resolved.id));
@@ -42566,11 +43193,11 @@
             if (!item) continue;
           }
           const id = Number(item?.id || 0);
-          const definitionId2 = Number(item?.definitionId || 0);
-          if (!id || seenIds.has(id) || definitionId2 && seenDefinitions.has(definitionId2)) continue;
+          const definitionId3 = Number(item?.definitionId || 0);
+          if (!id || seenIds.has(id) || definitionId3 && seenDefinitions.has(definitionId3)) continue;
           if (state.consumedItemIds.has(id)) continue;
           seenIds.add(id);
-          if (definitionId2) seenDefinitions.add(definitionId2);
+          if (definitionId3) seenDefinitions.add(definitionId3);
           if (isEligibleRequiredSpecialForLoop(item, loopDef)) entries.push({ item, pileName });
         }
       }
@@ -42790,8 +43417,8 @@
         for (const item of getPileItemsByName(pileName)) {
           const id = Number(item?.id || 0);
           if (!id || seen.has(id) || usedIds.has(id)) continue;
-          const definitionId2 = Number(item?.definitionId || 0);
-          if (definitionId2 && usedDefinitionIds.has(definitionId2)) continue;
+          const definitionId3 = Number(item?.definitionId || 0);
+          if (definitionId3 && usedDefinitionIds.has(definitionId3)) continue;
           seen.add(id);
           if (isEligibleNormalRepairFiller(item, loopDef)) entries.push({ item, pileName });
         }
@@ -42812,8 +43439,8 @@
     function isRequiredTotwRepairTarget(loopDef, entry, keepTotwId) {
       const item = entry?.item;
       if (!item) return false;
-      const itemId5 = Number(item?.id || 0);
-      if (itemId5 && itemId5 === keepTotwId) return false;
+      const itemId6 = Number(item?.id || 0);
+      if (itemId6 && itemId6 === keepTotwId) return false;
       const reasons = entry?.reasons || [];
       return isSbcSpecialItem(item) || reasons.includes("required-totw") || reasons.some((reason) => String(reason).startsWith("required-totw-min-")) || reasons.includes("special-blocked") || reasons.includes("tradeable-blocked") || reasons.includes("fsu-locked-player") || reasons.includes("protected-id") || reasons.includes("protected-def") || reasons.includes("loan") || reasons.includes("limited-use") || reasons.includes("concept") || reasons.includes("academy") || reasons.some((reason) => reason.startsWith("rating-over-")) || getFsuRejectReasons(item, { playerOnly: true, allowSpecial: false }).length > 0;
     }
@@ -42929,8 +43556,8 @@
       const changes = [];
       for (const target of targets) {
         const fillerIndex = fillers.findIndex(({ item }) => {
-          const definitionId2 = Number(item?.definitionId || 0);
-          return !definitionId2 || !usedDefinitionIds.has(definitionId2);
+          const definitionId3 = Number(item?.definitionId || 0);
+          return !definitionId3 || !usedDefinitionIds.has(definitionId3);
         });
         if (fillerIndex === -1) {
           return {
@@ -43032,16 +43659,16 @@
       const changes = [];
       for (let offset = 0; offset < missing.missing; offset++) {
         const filler = fillers.find(({ item }) => {
-          const definitionId3 = Number(item?.definitionId || 0);
-          return !definitionId3 || !usedDefinitionIds.has(definitionId3);
+          const definitionId4 = Number(item?.definitionId || 0);
+          return !definitionId4 || !usedDefinitionIds.has(definitionId4);
         });
         if (!filler) return null;
         const fillerIndex = fillers.indexOf(filler);
         if (fillerIndex >= 0) fillers.splice(fillerIndex, 1);
         players.push(filler.item);
         usedIds.add(Number(filler.item?.id || 0));
-        const definitionId2 = Number(filler.item?.definitionId || 0);
-        if (definitionId2) usedDefinitionIds.add(definitionId2);
+        const definitionId3 = Number(filler.item?.definitionId || 0);
+        if (definitionId3) usedDefinitionIds.add(definitionId3);
         changes.push({
           index: missing.current + offset,
           from: null,
@@ -43487,7 +44114,7 @@
     function getSbcProtectionReasons(item, loopDef = {}, context = {}) {
       const reasons = [];
       const rating = Number(item?.rating || 0);
-      const itemId5 = Number(item?.id || 0);
+      const itemId6 = Number(item?.id || 0);
       const settings = context.settings || getFsuSettings();
       const fodderPolicy = getSbcFodderPolicy(loopDef);
       const roleAware = context.roleAware === true;
@@ -43502,7 +44129,7 @@
         allowSpecial: roleAware || requiredSpecialCount > 0 && specialIndex <= requiredSpecialCount
       };
       const protectFsuLockedPlayers = context.protectFsuLockedPlayers ?? loopDef.runtimePickOptions?.protectFsuLockedPlayers ?? getPickRuntimeOptions().protectFsuLockedPlayers;
-      if (itemId5 && state.consumedItemIds.has(itemId5)) reasons.push("consumed-this-run");
+      if (itemId6 && state.consumedItemIds.has(itemId6)) reasons.push("consumed-this-run");
       if (isLoanItem(item)) reasons.push("loan");
       else if (isLimitedUseItem(item)) reasons.push("limited-use");
       if (isConceptItem(item)) reasons.push("concept");
@@ -43514,7 +44141,7 @@
       if (!isInactiveTrade(item)) {
         if (!reasons.includes("active-trade")) reasons.push("active-trade");
       }
-      if (protectedIds.has(itemId5)) reasons.push("protected-id");
+      if (protectedIds.has(itemId6)) reasons.push("protected-id");
       if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) reasons.push("protected-def");
       if (!roleAware && ["totw", "totw-tots-fof"].includes(requiredSpecialKind(loopDef)) && requiredSpecialCount > 0 && isSbcSpecialItem(item) && specialIndex <= requiredSpecialCount && !isRequiredSpecialItem(item, loopDef)) {
         reasons.push("required-totw");
@@ -43550,6 +44177,7 @@
       const selectionModel = options.model || null;
       const policyProtectedRefs = selectionPolicy?.protectedItems || [];
       const reserveRatings = new Set((selectionPolicy?.protectionPolicy?.reserveRatings || []).map(Number));
+      const maxPlayerRating = Number(selectionPolicy?.maxPlayerRating || 0);
       const maxOrdinaryRating = Number(selectionPolicy?.maxOrdinaryRating || 0);
       const requiredItemRefs = selectionPolicy?.requiredItems || [];
       const allowOtherSpecialAsOrdinary = selectionPolicy?.protectionPolicy?.allowOtherSpecialAsOrdinary === true;
@@ -43559,8 +44187,8 @@
           ...Array.isArray(role?.items) ? role.items : []
         ];
         if (roleRefs.some((ref) => rollingItemMatchesRef(item, ref))) return true;
-        const itemPile2 = String(item?.pile || item?.ref?.pile || "");
-        if (Array.isArray(role?.piles) && role.piles.some((pile) => String(pile) === itemPile2)) return true;
+        const itemPile3 = String(item?.pile || item?.ref?.pile || "");
+        if (Array.isArray(role?.piles) && role.piles.some((pile) => String(pile) === itemPile3)) return true;
         let constraintIndex = role?.constraintIndex;
         if (constraintIndex === void 0 || constraintIndex === null) {
           const constraintId = String(role?.constraintId || "");
@@ -43589,9 +44217,9 @@
         const requiredItemMatch = requiredItemRefs.some((ref) => {
           const refId = Number(ref?.id || ref?.ref?.id || 0);
           const refDefinitionId = Number(ref?.definitionId || ref?.ref?.definitionId || 0);
-          const itemId6 = Number(item?.id || item?.ref?.id || 0);
+          const itemId7 = Number(item?.id || item?.ref?.id || 0);
           const itemDefinitionId2 = Number(item?.definitionId || item?.ref?.definitionId || 0);
-          return refId ? refId === itemId6 : refDefinitionId > 0 && refDefinitionId === itemDefinitionId2;
+          return refId ? refId === itemId7 : refDefinitionId > 0 && refDefinitionId === itemDefinitionId2;
         });
         const exclusiveRoleMatch = (selectionPolicy?.exclusiveRoles || []).some((role) => {
           return selectionRoleMatchesItem(role, item);
@@ -43603,11 +44231,15 @@
           skipRatingLimit: selectionPolicy !== null,
           allowedSpecialCount: selectionPolicy ? expectedPlayerCount : void 0
         });
-        const itemId5 = Number(item?.id || 0);
-        const definitionId2 = Number(item?.definitionId || 0);
-        if (selectionPolicy && policyProtectedRefs.some((ref) => Number(ref?.id || 0) ? Number(ref.id) === itemId5 : Number(ref?.definitionId || 0) === definitionId2)) reasons.push("protected-selection-item");
+        const itemId6 = Number(item?.id || 0);
+        const definitionId3 = Number(item?.definitionId || 0);
+        if (selectionPolicy && policyProtectedRefs.some((ref) => Number(ref?.id || 0) ? Number(ref.id) === itemId6 : Number(ref?.definitionId || 0) === definitionId3)) reasons.push("protected-selection-item");
+        if (selectionPolicy && maxPlayerRating > 0 && Number(item?.rating || 0) > maxPlayerRating) {
+          reasons.push(`rating-over-${maxPlayerRating}`);
+        }
         if (selectionPolicy && !policyRoleMatch && maxOrdinaryRating > 0 && Number(item?.rating || 0) > maxOrdinaryRating) {
-          reasons.push(`rating-over-${maxOrdinaryRating}`);
+          const reason = `rating-over-${maxOrdinaryRating}`;
+          if (!reasons.includes(reason)) reasons.push(reason);
         }
         if (selectionPolicy && !policyRoleMatch && reserveRatings.has(Number(item?.rating || 0))) {
           reasons.push(`reserved-rating-${Number(item?.rating || 0)}`);
@@ -43663,10 +44295,10 @@
       for (const { item, index, reasons } of inspection.blocked || []) {
         const name = itemDisplayName(item);
         const rating = Number(item?.rating || 0) || "?";
-        const itemId5 = Number(item?.id || 0) || "?";
-        const definitionId2 = Number(item?.definitionId || 0) || "?";
+        const itemId6 = Number(item?.id || 0) || "?";
+        const definitionId3 = Number(item?.definitionId || 0) || "?";
         const ratingLimit2 = getSubmittedRatingLimit(item, loopDef);
-        const prefix = `slot ${index + 1} ${name} rating:${rating} id:${itemId5} def:${definitionId2}`;
+        const prefix = `slot ${index + 1} ${name} rating:${rating} id:${itemId6} def:${definitionId3}`;
         if (reasons.some((reason) => reason.startsWith("rating-over-"))) {
           const replacement = isNormalGoldFodder(item) ? "normal gold card" : "untradeable card";
           hints.push(`${prefix}: replace with rating <= ${ratingLimit2 || "limit"} ${replacement}`);
@@ -44570,8 +45202,8 @@
     function itemRefMatchesAny(item, refs = []) {
       const id = Number(item?.id || item?.ref?.id || 0);
       if (id) return refs.some((ref) => Number(ref?.id || 0) === id);
-      const definitionId2 = Number(item?.definitionId || item?.ref?.definitionId || 0);
-      return definitionId2 > 0 && refs.some((ref) => !Number(ref?.id || 0) && Number(ref?.definitionId || 0) === definitionId2);
+      const definitionId3 = Number(item?.definitionId || item?.ref?.definitionId || 0);
+      return definitionId3 > 0 && refs.some((ref) => !Number(ref?.id || 0) && Number(ref?.definitionId || 0) === definitionId3);
     }
     function duplicateSignalRefKey(ref = {}) {
       const id = Number(ref?.id || ref?.ref?.id || 0);
@@ -46153,6 +46785,13 @@
             label,
             savedPlayers?.length ? savedPlayers : players
           );
+          const afterSubmit = await options.afterSubmit?.({
+            result: submissionResult,
+            players,
+            savedPlayers,
+            squadPlan
+          });
+          if (afterSubmit?.ok === false) return afterSubmit;
           if (options.handleReward === false) return;
           if (submissionResult.rewardPackId && loopDef.openRewardPacks) {
             await openRewardPackAndCleanup(loopDef, submissionResult.rewardPackId);
@@ -46992,9 +47631,9 @@
           refresh: captureMoveResult(refreshResult),
           unassigned: eaInventoryAdapter().unassignedState(),
           pendingPlayerPicks: eaPlayerPickAdapter().listUnassignedPlayerPicks().map((item) => captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })),
-          selectedDefinitions: Object.fromEntries(selectedDefinitions.map((definitionId2) => [
-            definitionId2,
-            captureDefinitionPileState(piles, definitionId2, { identify: identifyRuntimeInventoryItem })
+          selectedDefinitions: Object.fromEntries(selectedDefinitions.map((definitionId3) => [
+            definitionId3,
+            captureDefinitionPileState(piles, definitionId3, { identify: identifyRuntimeInventoryItem })
           ]))
         })}`;
       });
@@ -47537,8 +48176,8 @@
       return result;
     }
     function recapDefinitionId2(item) {
-      const definitionId2 = Number(item?.definitionId || 0);
-      return Number.isInteger(definitionId2) && definitionId2 > 0 ? definitionId2 : null;
+      const definitionId3 = Number(item?.definitionId || 0);
+      return Number.isInteger(definitionId3) && definitionId3 > 0 ? definitionId3 : null;
     }
     function createRecapItemHydrator() {
       const byItemId = /* @__PURE__ */ new Map();
@@ -47547,29 +48186,29 @@
       const destinationsByDefinitionId = /* @__PURE__ */ new Map();
       ["storage", "club", "unassigned", "transfer"].forEach((pileName) => {
         getPileItemsByName(pileName).forEach((item) => {
-          const itemId5 = Number(item?.id || 0);
-          const definitionId2 = recapDefinitionId2(item);
-          if (Number.isInteger(itemId5) && itemId5 > 0 && !byItemId.has(itemId5)) {
-            byItemId.set(itemId5, item);
-            destinationByItemId.set(itemId5, pileName);
+          const itemId6 = Number(item?.id || 0);
+          const definitionId3 = recapDefinitionId2(item);
+          if (Number.isInteger(itemId6) && itemId6 > 0 && !byItemId.has(itemId6)) {
+            byItemId.set(itemId6, item);
+            destinationByItemId.set(itemId6, pileName);
           }
-          if (definitionId2) {
-            if (!byDefinitionId.has(definitionId2)) byDefinitionId.set(definitionId2, item);
-            const destinations = destinationsByDefinitionId.get(definitionId2) || /* @__PURE__ */ new Set();
+          if (definitionId3) {
+            if (!byDefinitionId.has(definitionId3)) byDefinitionId.set(definitionId3, item);
+            const destinations = destinationsByDefinitionId.get(definitionId3) || /* @__PURE__ */ new Set();
             destinations.add(pileName);
-            destinationsByDefinitionId.set(definitionId2, destinations);
+            destinationsByDefinitionId.set(definitionId3, destinations);
           }
         });
       });
       const hydrateItem = (item) => {
-        const itemId5 = Number(item?.id || 0);
-        if (Number.isInteger(itemId5) && itemId5 > 0 && byItemId.has(itemId5)) return byItemId.get(itemId5);
+        const itemId6 = Number(item?.id || 0);
+        if (Number.isInteger(itemId6) && itemId6 > 0 && byItemId.has(itemId6)) return byItemId.get(itemId6);
         return byDefinitionId.get(recapDefinitionId2(item)) || item;
       };
       hydrateItem.resolveDestination = (item) => {
-        const itemId5 = Number(item?.id || 0);
-        if (Number.isInteger(itemId5) && itemId5 > 0 && destinationByItemId.has(itemId5)) {
-          return destinationByItemId.get(itemId5);
+        const itemId6 = Number(item?.id || 0);
+        if (Number.isInteger(itemId6) && itemId6 > 0 && destinationByItemId.has(itemId6)) {
+          return destinationByItemId.get(itemId6);
         }
         const destinations = [...destinationsByDefinitionId.get(recapDefinitionId2(item)) || []];
         return destinations.length === 1 ? destinations[0] : null;
@@ -48091,6 +48730,12 @@
         players: players.map((item) => duplicateSwapSnapshot(item, liveItemRef(item).pile))
       });
       if (!originalPlan.ok || !originalPlan.swaps.length) return originalPlan;
+      if (runtime?.duplicateMaterializationTransaction?.status === "materialized") {
+        return {
+          ok: false,
+          reason: "replanned squad requested another duplicate swap while a materialization transaction is active"
+        };
+      }
       const signalItems = [];
       for (const swap of originalPlan.swaps) {
         const live = findCachedItemById(swap.signalId, ["unassigned"])?.item || null;
@@ -48116,6 +48761,30 @@
       if (!livePlan.ok || livePlan.swaps.length !== originalPlan.swaps.length) {
         return { ok: false, reason: livePlan.reason || "duplicate swap eligibility changed before move" };
       }
+      const beforeInventoryVersion = Number(runtime?.coordinator?.getLedger?.()?.summary?.().inventoryVersion || 0);
+      let transaction;
+      try {
+        transaction = createDuplicateMaterializationTransaction({
+          transactionId: `rolling-duplicate-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          challengeRef: {
+            setId: context?.set?.id,
+            challengeId: context?.challenge?.id
+          },
+          beforeInventoryVersion,
+          pairs: livePlan.swaps.map((swap, index) => rollingDuplicateMaterializationPair(
+            signalItems[index],
+            players.find((item) => Number(item?.id || 0) === swap.targetId)
+          ))
+        });
+      } catch (error) {
+        return { ok: false, reason: error?.message || String(error) };
+      }
+      runtime.duplicateMaterializationTransaction = transaction;
+      if (!persistRollingDuplicateTransaction(transaction)) {
+        runtime.duplicateMaterializationTransaction = null;
+        return { ok: false, reason: "duplicate materialization journal could not be persisted before swap" };
+      }
+      log(`${context.label}: duplicate materialization ${transaction.transactionId} planned at inventory v${beforeInventoryVersion}; consume:${transaction.pairs.map((pair) => pair.sourceSignalRef.id).join(",")}; protect:${transaction.pairs.map((pair) => pair.protectedCounterpartRef.id).join(",")}`);
       log(`${context.label}: swapping ${signalItems.length} Unassigned untradeable duplicate(s) into Club before SBC submit`);
       const moveResult = await moveItems(signalItems, inventoryPile("club"), true);
       const resolution = resolveUntradeableDuplicateSwapIds(livePlan, moveResult);
@@ -48127,7 +48796,6 @@
         includePacks: false,
         quiet: true
       });
-      const replacementByTargetId = /* @__PURE__ */ new Map();
       for (const replacement of resolution.replacements) {
         const originalSignal = signalItems.find((item) => Number(item?.id || 0) === replacement.signalId);
         const originalTarget = players.find((item) => Number(item?.id || 0) === replacement.targetId);
@@ -48171,37 +48839,7 @@
           return materialization;
         }
         log(`${context.label}: duplicate swap verified: untradeable #${replacement.signalId} -> Club #${replacement.newItemId}; tradeable Club #${replacement.targetId} -> Unassigned #${replacement.targetId}`);
-        replacementByTargetId.set(replacement.targetId, {
-          ...replacement,
-          originalTarget,
-          newItem
-        });
       }
-      const preparedPlayers = players.map((item) => replacementByTargetId.get(Number(item?.id || 0))?.newItem || item);
-      const preparedSelection = {
-        ...selection,
-        entries: (selection.entries || []).map((entry) => {
-          const selected2 = entry?.item || entry?.itemRef || null;
-          const replacement = replacementByTargetId.get(Number(selected2?.id || selected2?.ref?.id || 0));
-          if (!replacement) return entry;
-          const swappedOutSignal = {
-            ...duplicateSwapSnapshot(replacement.originalTarget, "unassigned"),
-            duplicate: true,
-            duplicateSignal: true,
-            duplicateId: replacement.newItemId,
-            duplicateSignalId: replacement.newItemId
-          };
-          return {
-            ...entry,
-            pileName: "unassigned",
-            signal: swappedOutSignal,
-            signalRef: swappedOutSignal.ref,
-            item: replacement.newItem,
-            itemRef: liveItemRef(replacement.newItem, "club")
-          };
-        }),
-        selected: preparedPlayers
-      };
       if (runtime?.coordinator) {
         const reconciliation = await runtime.coordinator.reconcile(
           `${context.label} post-untradeable-duplicate-swap`,
@@ -48211,13 +48849,56 @@
           return { ok: false, reason: reconciliation.reason || "inventory reconciliation failed after duplicate swap" };
         }
       }
-      log(`${context.label}: replaced ${resolution.replacements.length} selected tradeable Club card(s) with Unassigned untradeable version(s)`);
+      const afterInventoryVersion = Number(runtime?.coordinator?.getLedger?.()?.summary?.().inventoryVersion || 0);
+      const materialized = materializeDuplicateTransaction(transaction, {
+        replacements: resolution.replacements,
+        afterInventoryVersion,
+        resolveItem: (id, pile) => findCachedItemById(id, [pile])?.item || null
+      });
+      if (!materialized.ok) {
+        runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+          transaction,
+          "recovery-required",
+          { reason: materialized.reason }
+        );
+        persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+        return materialized;
+      }
+      runtime.duplicateMaterializationTransaction = materialized.transaction;
+      const persisted = await persistMaterializedRollingDuplicateTransaction(
+        runtime,
+        context.label
+      );
+      if (!persisted.ok) return persisted;
+      const sourceRefs = materialized.transaction.pairs.map((pair) => pair.sourceSignalRef);
+      const isMaterializedSourceRef = (ref) => sourceRefs.some((sourceRef) => rollingExactItemMatchesRef(ref, sourceRef));
+      runtime.primaryDuplicateRefs = (runtime.primaryDuplicateRefs || []).filter((ref) => !isMaterializedSourceRef(ref));
+      runtime.pendingUnassignedRefs = (runtime.pendingUnassignedRefs || []).filter((ref) => !isMaterializedSourceRef(ref));
+      runtime.openRouting = releaseRollingRoutingItemsAfterConsumption(
+        runtime.openRouting,
+        sourceRefs
+      ).routing;
+      log(`${context.label}: duplicate materialization ${transaction.transactionId} verified at inventory v${afterInventoryVersion}; invalidating the old squad plan before submission`);
       return {
         ok: true,
         changed: true,
-        players: preparedPlayers,
-        itemRefs: preparedPlayers.map((item) => liveItemRef(item)),
-        selection: preparedSelection
+        replan: true,
+        reason: "duplicate materialized into Club; old squad plan invalidated",
+        reasonCode: "DUPLICATE_MATERIALIZED_REPLAN",
+        details: {
+          transactionId: materialized.transaction.transactionId,
+          consumeItemIds: duplicateTransactionConsumeRefs(materialized.transaction).map((ref) => ref.id),
+          protectedItemIds: duplicateTransactionProtectedRefs(materialized.transaction).map((ref) => ref.id)
+        },
+        transaction: materialized.transaction
+      };
+    }
+    function rollingDuplicateMaterializationPair(sourceSignal, protectedCounterpart) {
+      return {
+        sourceSignalRef: duplicateSwapSnapshot(sourceSignal, "unassigned"),
+        sourceSignal,
+        protectedCounterpartRef: duplicateSwapSnapshot(protectedCounterpart, "club"),
+        protectedCounterpart
       };
     }
     function rollingRequiredSpecialConstraintIndexes(model = {}) {
@@ -48274,13 +48955,13 @@
     }
     function findRollingLiveUnassignedItem(responseItem, usedIds = /* @__PURE__ */ new Set(), baselineIds = /* @__PURE__ */ new Set()) {
       const responseId = Number(responseItem?.id || 0);
-      const definitionId2 = Number(responseItem?.definitionId || 0);
+      const definitionId3 = Number(responseItem?.definitionId || 0);
       const items = getUnassignedItems();
       const exact = responseId ? items.find((item) => Number(item?.id || 0) === responseId && !usedIds.has(responseId) && !baselineIds.has(responseId)) : null;
       if (exact) return exact;
       return items.find((item) => {
         const id = Number(item?.id || 0);
-        return id && !usedIds.has(id) && !baselineIds.has(id) && Number(item?.definitionId || 0) === definitionId2 && isSamePlayerCardVersion(responseItem, item);
+        return id && !usedIds.has(id) && !baselineIds.has(id) && Number(item?.definitionId || 0) === definitionId3 && isSamePlayerCardVersion(responseItem, item);
       }) || null;
     }
     function createRollingPrimaryPackPolicy(loopDef, context, options = {}) {
@@ -48595,9 +49276,9 @@
       });
     }
     function rollingItemMatchesRef(item, ref) {
-      const itemId5 = Number(item?.id || 0);
+      const itemId6 = Number(item?.id || 0);
       const refId = Number(ref?.id || 0);
-      if (refId) return itemId5 === refId;
+      if (refId) return itemId6 === refId;
       return Number(ref?.definitionId || 0) > 0 && Number(item?.definitionId || 0) === Number(ref.definitionId);
     }
     function assertRollingRecoveryItems(loopDef, runtime, players = [], options = {}) {
@@ -48622,8 +49303,8 @@
         fail2(`${loopDef.name}: recovery squad violated strict Club special protection: ${sourceErrors.join(", ")}`);
       }
       for (const item of players || []) {
-        const allowedPrimaryDuplicate = allowedPrimaryDuplicateRefs.some((ref) => rollingItemMatchesRef(item, ref) || Number(item?.definitionId || 0) > 0 && Number(item.definitionId) === Number(ref?.definitionId || 0));
-        const allowedProtectedItem = allowedProtectedItems.some((ref) => rollingItemMatchesRef(item, ref) || Number(item?.definitionId || 0) > 0 && Number(item.definitionId) === Number(ref?.definitionId || 0));
+        const allowedPrimaryDuplicate = allowedPrimaryDuplicateRefs.some((ref) => rollingExactItemMatchesRef(item, ref));
+        const allowedProtectedItem = allowedProtectedItems.some((ref) => rollingExactItemMatchesRef(item, ref));
         const allowedProvisionsReserveItem = allowedProvisionsReserveItems.some((ref) => rollingItemMatchesRef(item, ref));
         if (options.allowRequiredSpecial !== true && (rollingLiveRequiredSpecial(item, runtime.primaryContext?.model) || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef))) {
           fail2(`${loopDef.name}: recovery squad attempted to consume a Required Special card`);
@@ -48668,7 +49349,7 @@
       if (!runtimeAccess?.refreshedClubPlayers && playerPreparation?.changed !== true) return;
       await saveChallengeSquad(challenge, players, label);
     }
-    async function submitRollingRequirementRecovery(loopDef, runtime, definition, options = {}) {
+    async function submitRollingRequirementRecoveryAttempt(loopDef, runtime, definition, options = {}) {
       const priorityPiles = options.priorityPiles || ["unassigned", "storage", "transfer", "club"];
       const recoveryDef = rollingRecoveryDef(definition, loopDef, {
         inventoryFirst: true,
@@ -48787,38 +49468,55 @@
         }
       )];
       runtime.lastMutation = null;
-      const attempt = await submitInventorySbcAttempt(activeDef, selection, {
-        label: `${loopDef.name} -> ${activeDef.name}`,
-        dryRun: activeDef.dryRun,
-        handleReward: false,
-        submissionMode: "background",
-        preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
-        preSaveValidators: validators,
-        postSaveValidators: validators,
-        backgroundSubmitOptions: {
-          allowItemViolationOverride: true,
-          protectActiveSquadPlayers: activeDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
-          resolveProtectedItemViolation: (conflict, submitContext) => resolveRollingActiveSquadConflict(
-            activeDef,
-            runtime,
-            {
-              ...conflict,
-              selection: submitContext?.squadPlan?.selection || selection,
-              model: null
-            }
-          ),
-          allowKnownRewardFallback: Number(activeDef.dynamicChallengeCount || 1) <= 1,
-          failureInventoryDiagnostic: ({ players }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, players)
-        },
-        onResult: async (submissionResult) => {
-          if (submissionResult.submitted) {
-            runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
-          }
+      const submission = await runRollingDuplicateSubmissionAttempt(
+        runtime,
+        `${loopDef.name} -> ${activeDef.name}`,
+        async () => {
+          const attempt = await submitInventorySbcAttempt(activeDef, selection, {
+            label: `${loopDef.name} -> ${activeDef.name}`,
+            dryRun: activeDef.dryRun,
+            handleReward: false,
+            submissionMode: "background",
+            preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
+            preSaveValidators: validators,
+            postSaveValidators: validators,
+            backgroundSubmitOptions: {
+              allowItemViolationOverride: true,
+              protectActiveSquadPlayers: activeDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+              resolveProtectedItemViolation: (conflict, submitContext) => resolveRollingActiveSquadConflict(
+                activeDef,
+                runtime,
+                {
+                  ...conflict,
+                  selection: submitContext?.squadPlan?.selection || selection,
+                  model: null
+                }
+              ),
+              allowKnownRewardFallback: Number(activeDef.dynamicChallengeCount || 1) <= 1,
+              failureInventoryDiagnostic: ({ players }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, players)
+            },
+            onResult: async (submissionResult) => {
+              if (submissionResult.submitted) {
+                runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+              }
+            },
+            afterSubmit: async () => finalizeRollingDuplicateMaterialization(
+              runtime,
+              `${loopDef.name} -> ${activeDef.name}`,
+              { submissionConfirmed: true }
+            )
+          });
+          return attempt.result;
         }
-      });
-      const submission = attempt.result;
+      );
       if (submission.status === "planned") return { ...submission, status: "planned" };
-      if (submission.status === "replan") return submission;
+      if (submission.postSubmitBlocked === true) {
+        return {
+          ...submission,
+          status: "blocked",
+          inventoryDelta: runtime.lastMutation?.delta || null
+        };
+      }
       if (!submission.submitted) {
         return {
           status: submission.status === "unavailable" ? "unavailable" : "blocked",
@@ -48883,7 +49581,7 @@
         ledgerSummary: ledger?.summary?.() || {}
       });
     }
-    async function submitRollingRatingRecovery(loopDef, runtime, definition, options = {}) {
+    async function submitRollingRatingRecoveryAttempt(loopDef, runtime, definition, options = {}) {
       const recoveryDef = rollingRecoveryDef(definition, loopDef, {
         priorityPiles: options.priorityPiles
       });
@@ -48893,6 +49591,18 @@
       const opened = await loadRollingRatingRecoveryContext(recoveryDef);
       if (opened.status !== "ready") return opened;
       await runtime.coordinator.reconcile(`${recoveryDef.name} pre-selection`, { refreshUnassigned: true });
+      const duplicateTransactionContext = rollingDuplicateTransactionPlanningContext(
+        runtime,
+        opened.set,
+        opened.challenge
+      );
+      if (!duplicateTransactionContext.ok) {
+        return {
+          status: "blocked",
+          reason: duplicateTransactionContext.reason,
+          reasonCode: duplicateTransactionContext.reasonCode
+        };
+      }
       const ledger = runtime.coordinator.getLedger();
       const allowPrimaryDuplicates = options.allowPrimaryDuplicates === true;
       const consumablePrimaryRefs = allowPrimaryDuplicates ? rollingUniqueRefs(runtime.primaryDuplicateRefs || []).filter((ref) => {
@@ -48919,29 +49629,32 @@
           relaxedPrimaryDuplicateRefs: relaxedPrimaryRefs,
           isTransientSubmissionAllowed: (item) => isRollingTransientSubmissionAllowed(item, loopDef)
         });
-        selectionPolicy = createRollingRatingRecoverySelectionPolicy({
-          ledger,
-          protectionRating: rollingProtectionRating(loopDef),
-          maxOrdinaryRating: options.maxOrdinaryRating,
-          reserveRatings: rollingProvisionsReserveRatings(loopDef),
-          requiredItems: [
-            ...options.requiredItems || [],
-            ...primaryRecoveryPolicy.requiredItems
-          ],
-          preferredItems: [
-            ...options.preferredItems || [],
-            ...primaryRecoveryPolicy.preferredItems
-          ],
-          protectedItems: [
-            ...rollingActiveSquadConflictRefs(runtime),
-            ...allowPrimaryDuplicates ? rollingNonPrimaryPendingRefs(runtime) : [
-              ...runtime.primaryDuplicateRefs || [],
-              ...runtime.pendingUnassignedRefs || []
+        selectionPolicy = applyRollingDuplicateTransactionSelectionPolicy(
+          createRollingRatingRecoverySelectionPolicy({
+            ledger,
+            protectionRating: rollingProtectionRating(loopDef),
+            maxOrdinaryRating: options.maxOrdinaryRating,
+            reserveRatings: rollingProvisionsReserveRatings(loopDef),
+            requiredItems: [
+              ...options.requiredItems || [],
+              ...primaryRecoveryPolicy.requiredItems
             ],
-            ...options.additionalProtected || [],
-            ...relaxedPrimaryRefs
-          ]
-        });
+            preferredItems: [
+              ...options.preferredItems || [],
+              ...primaryRecoveryPolicy.preferredItems
+            ],
+            protectedItems: [
+              ...rollingActiveSquadConflictRefs(runtime),
+              ...allowPrimaryDuplicates ? rollingNonPrimaryPendingRefs(runtime) : [
+                ...runtime.primaryDuplicateRefs || [],
+                ...runtime.pendingUnassignedRefs || []
+              ],
+              ...options.additionalProtected || [],
+              ...relaxedPrimaryRefs
+            ]
+          }),
+          duplicateTransactionContext
+        );
         if (options.enforceStorageHeadroom === true) {
           const mandatoryPrimaryRefs = consumablePrimaryRefs.filter((ref) => !relaxedPrimaryRefs.some((relaxedRef) => rollingItemMatchesRef(ref, relaxedRef)));
           const pressure = rollingRatingRecoveryStoragePressure(runtime, {
@@ -48970,7 +49683,7 @@
         }, {
           dryRun: recoveryDef.dryRun,
           selectionPolicy,
-          skipInventoryRefresh: relaxedPrimaryRefs.length > 0
+          skipInventoryRefresh: relaxedPrimaryRefs.length > 0 || Boolean(duplicateTransactionContext.transaction)
         });
         if (!fill.ok || !allowPrimaryDuplicates || Number(fill.optimizedRating || 0) <= Number(fill.model?.targetRating || 0)) break;
         const nextRef = relaxationOrder[relaxedPrimaryRefs.length];
@@ -49013,6 +49726,10 @@
         fill.selection,
         consumablePrimaryRefs
       );
+      const allowedPrimarySubmissionRefs = rollingSelectionSubmissionRefsForSignals(
+        fill.selection,
+        consumedPrimaryRefs
+      );
       const allowedProvisionsReserveItems = rollingUniqueRefs((fill.selection?.entries || []).map((entry) => entry?.item).filter((item) => storagePressureItemRefs.some((ref) => rollingItemMatchesRef(item, ref))).map((item) => liveItemRef(item, "storage")));
       const storageItemsConsumed = rollingSelectionStorageConsumption(runtime, fill.selection);
       if (typeof options.validateSelection === "function") {
@@ -49038,6 +49755,20 @@
         return { status: "blocked", reason: `${recoveryDef.name} squad is not submit ready` };
       }
       const players = fill.inspection?.items || fill.selection?.selected || [];
+      const duplicateManifestResult = createRollingDuplicateSubmissionManifest(
+        runtime,
+        players,
+        opened.set,
+        opened.challenge
+      );
+      if (duplicateManifestResult.ok === false) {
+        return {
+          status: "blocked",
+          reason: duplicateManifestResult.reason,
+          reasonCode: "DUPLICATE_SUBMISSION_MANIFEST_INVALID"
+        };
+      }
+      const duplicateSubmissionManifest = duplicateManifestResult.manifest || null;
       const itemRefs = players.map((item) => liveItemRef(item));
       const ledgerValidation = await runtime.coordinator.validateBeforeSubmit(itemRefs, {
         label: recoveryDef.name,
@@ -49048,91 +49779,133 @@
       }
       let backgroundSubmission = null;
       runtime.lastMutation = null;
-      const submission = await submitSbcAttempt({
-        label: `${loopDef.name} -> ${recoveryDef.name}`,
-        challengeProvider: async () => ({
-          set: opened.set,
-          challenge: opened.challenge,
-          background: true
-        }),
-        squadProvider: createExistingSquadProvider({
-          getPlayers: async () => players,
-          itemRef: liveItemRef,
-          selection: fill.selection,
-          source: "rolling-recovery-rating-squad"
-        }),
-        prepareRuntimeAccess: prepareFsuRuntimeAccess,
-        preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
-        saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess, playerPreparation }) => {
-          await saveRollingProvisionalClubSquad(
-            challenge,
-            refreshedPlayers,
-            runtimeAccess,
-            `${recoveryDef.name} provisional Club refresh`,
-            playerPreparation
-          );
-        },
-        preSaveValidators: [({ players: validatedPlayers, squadPlan }) => {
-          assertRollingRecoveryItems(loopDef, runtime, validatedPlayers, {
-            allowSpecial: true,
-            allowPrimaryDuplicates,
-            allowedPrimaryDuplicateRefs: consumedPrimaryRefs,
-            allowedProvisionsReserveItems,
-            selection: squadPlan?.selection || fill.selection
-          });
-          const validation = validateRatingSbcModelAgainstItems2(
-            fill.model,
-            validatedPlayers,
-            opened.challenge,
-            { allowOtherSpecialAsOrdinary: true }
-          );
-          if (!validation.ok) {
-            fail2(`${recoveryDef.name}: final recovery squad failed dynamic validation: ${validation.errors.join(", ")}`);
-          }
-          return true;
-        }],
-        isSubmitReady: async () => fill.fillResult?.submitReady === true,
-        submitTransport: async (context) => {
-          backgroundSubmission = await submitRatingSbcInBackground(
-            context.set,
-            context.challenge,
-            recoveryDef.name,
-            {
-              players: context.players || players,
-              allowItemViolationOverride: true,
-              protectActiveSquadPlayers: opened.activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
-              resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
-                loopDef,
-                runtime,
-                {
-                  ...conflict,
-                  selection: context.squadPlan?.selection || fill.selection,
-                  model: fill.model
-                }
-              ),
-              allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
-              failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+      const submission = await runRollingDuplicateSubmissionAttempt(
+        runtime,
+        `${loopDef.name} -> ${recoveryDef.name}`,
+        () => submitSbcAttempt({
+          label: `${loopDef.name} -> ${recoveryDef.name}`,
+          challengeProvider: async () => ({
+            set: opened.set,
+            challenge: opened.challenge,
+            background: true
+          }),
+          squadProvider: createExistingSquadProvider({
+            getPlayers: async () => players,
+            itemRef: liveItemRef,
+            selection: fill.selection,
+            source: "rolling-recovery-rating-squad"
+          }),
+          prepareRuntimeAccess: prepareFsuRuntimeAccess,
+          preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
+          saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess, playerPreparation }) => {
+            await saveRollingProvisionalClubSquad(
+              challenge,
+              refreshedPlayers,
+              runtimeAccess,
+              `${recoveryDef.name} provisional Club refresh`,
+              playerPreparation
+            );
+          },
+          readSavedPlayers: async ({ challenge }) => getSquadItems(challenge?.squad),
+          preSaveValidators: [({ players: validatedPlayers, squadPlan }) => {
+            assertRollingDuplicateSubmissionManifest(
+              runtime,
+              duplicateSubmissionManifest,
+              validatedPlayers,
+              `${recoveryDef.name} pre-save duplicate identity`
+            );
+            assertRollingRecoveryItems(loopDef, runtime, validatedPlayers, {
+              allowSpecial: true,
+              allowPrimaryDuplicates,
+              allowedPrimaryDuplicateRefs: allowedPrimarySubmissionRefs,
+              allowedProtectedItems: duplicateSubmissionManifest?.requiredRefs || [],
+              allowedProvisionsReserveItems,
+              selection: squadPlan?.selection || fill.selection
+            });
+            const validation = validateRatingSbcModelAgainstItems2(
+              fill.model,
+              validatedPlayers,
+              opened.challenge,
+              { allowOtherSpecialAsOrdinary: true }
+            );
+            if (!validation.ok) {
+              fail2(`${recoveryDef.name}: final recovery squad failed dynamic validation: ${validation.errors.join(", ")}`);
             }
-          );
-          if (backgroundSubmission?.status === "replan") return backgroundSubmission;
-          return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
-        },
-        runCommittedSubmit: runCommittedSbcSubmit,
-        onResult: async (submissionResult) => {
-          if (submissionResult.submitted) {
-            runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+            return true;
+          }],
+          postSaveValidators: [({ savedPlayers, players: validatedPlayers }) => assertRollingDuplicateSubmissionManifest(
+            runtime,
+            duplicateSubmissionManifest,
+            savedPlayers?.length ? savedPlayers : validatedPlayers,
+            `${recoveryDef.name} post-save duplicate identity`
+          )],
+          isSubmitReady: async ({ challenge }) => {
+            try {
+              return challenge?.canSubmit?.() !== false;
+            } catch {
+              return false;
+            }
+          },
+          readFinalPlayers: async ({ challenge }) => getSquadItems(challenge?.squad),
+          finalValidators: [({ finalPlayers, savedPlayers, players: validatedPlayers }) => assertRollingDuplicateSubmissionManifest(
+            runtime,
+            duplicateSubmissionManifest,
+            finalPlayers?.length ? finalPlayers : savedPlayers?.length ? savedPlayers : validatedPlayers,
+            `${recoveryDef.name} final duplicate identity`
+          )],
+          submitTransport: async (context) => {
+            const transportPlayers = context.finalPlayers?.length ? context.finalPlayers : context.savedPlayers?.length ? context.savedPlayers : context.players || players;
+            backgroundSubmission = await submitRatingSbcInBackground(
+              context.set,
+              context.challenge,
+              recoveryDef.name,
+              {
+                players: transportPlayers,
+                allowItemViolationOverride: true,
+                protectActiveSquadPlayers: opened.activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+                resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
+                  loopDef,
+                  runtime,
+                  {
+                    ...conflict,
+                    selection: context.squadPlan?.selection || fill.selection,
+                    model: fill.model
+                  }
+                ),
+                allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
+                failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+              }
+            );
+            if (backgroundSubmission?.status === "replan") return backgroundSubmission;
+            return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
+          },
+          runCommittedSubmit: runCommittedSbcSubmit,
+          onResult: async (submissionResult) => {
+            if (submissionResult.submitted) {
+              runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+            }
+          },
+          afterSubmit: async ({ players: submittedPlayers, savedPlayers, finalPlayers, squadPlan }) => {
+            const confirmedPlayers = finalPlayers?.length ? finalPlayers : savedPlayers?.length ? savedPlayers : submittedPlayers;
+            await finalizeSubmittedInventorySelection(
+              squadPlan?.selection || fill.selection,
+              recoveryDef.name,
+              confirmedPlayers
+            );
+            return finalizeRollingDuplicateMaterialization(runtime, recoveryDef.name, {
+              submissionConfirmed: true
+            });
           }
-        },
-        afterSubmit: async ({ players: submittedPlayers, savedPlayers, squadPlan }) => {
-          await finalizeSubmittedInventorySelection(
-            squadPlan?.selection || fill.selection,
-            recoveryDef.name,
-            savedPlayers?.length ? savedPlayers : submittedPlayers
-          );
-        }
-      });
+        })
+      );
       if (submission.submitted && !runtime.lastMutation) {
         runtime.lastMutation = await runtime.coordinator.recordSubmission(submission, { primary: false });
+      }
+      if (submission.postSubmitBlocked === true) {
+        return {
+          ...submission,
+          inventoryDelta: runtime.lastMutation?.delta || null
+        };
       }
       if (submission.submitted) {
         if (consumedPrimaryRefs.length) {
@@ -49240,6 +50013,608 @@
       log(`${loopDef.name}: inventory identity ${diagnosticJson(diagnostics)}`);
       return diagnostics;
     }
+    function rollingExactItemMatchesRef(item, ref) {
+      const itemId6 = Number(item?.id || item?.ref?.id || 0);
+      const refId = Number(ref?.id || ref?.ref?.id || 0);
+      const itemDefinitionId2 = Number(item?.definitionId || item?.ref?.definitionId || 0);
+      const refDefinitionId = Number(ref?.definitionId || ref?.ref?.definitionId || 0);
+      return itemId6 > 0 && refId > 0 && itemId6 === refId && refDefinitionId > 0 && itemDefinitionId2 === refDefinitionId;
+    }
+    function rollingDuplicateTransactionPlanningContext(runtime, set, challenge) {
+      const transaction = runtime?.duplicateMaterializationTransaction || null;
+      if (!transaction || ["completed", "submission-confirmed"].includes(transaction.status)) {
+        return { ok: true, transaction: null, consumeRefs: [], protectedRefs: [] };
+      }
+      if (transaction.status !== "materialized") {
+        return {
+          ok: false,
+          reason: `duplicate materialization transaction ${transaction.transactionId || "?"} requires recovery from ${transaction.status}`,
+          reasonCode: "DUPLICATE_MATERIALIZATION_RECOVERY_REQUIRED"
+        };
+      }
+      const setId = Number(set?.id || 0);
+      const challengeId = Number(challenge?.id || 0);
+      if (transaction.challengeRef?.setId && transaction.challengeRef.setId !== setId || transaction.challengeRef?.challengeId && transaction.challengeRef.challengeId !== challengeId) {
+        return {
+          ok: false,
+          reason: `duplicate materialization transaction ${transaction.transactionId} belongs to another SBC challenge`,
+          reasonCode: "DUPLICATE_MATERIALIZATION_CHALLENGE_CHANGED"
+        };
+      }
+      const ledger = runtime?.coordinator?.getLedger?.();
+      const inventoryVersion = Number(ledger?.summary?.().inventoryVersion || 0);
+      const validation = validateDuplicateMaterializationState(transaction, {
+        inventoryVersion,
+        resolveItem: (id, pile) => {
+          const item = ledger?.resolveItem?.({ id }) || null;
+          return String(item?.pile || item?.ref?.pile || "") === pile ? item : null;
+        }
+      });
+      if (!validation.ok) {
+        runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+          transaction,
+          "recovery-required",
+          { reason: validation.reason }
+        );
+        persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+        return {
+          ok: false,
+          reason: validation.reason,
+          reasonCode: "DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED"
+        };
+      }
+      return {
+        ok: true,
+        transaction,
+        inventoryVersion,
+        consumeRefs: duplicateTransactionConsumeRefs(transaction),
+        protectedRefs: duplicateTransactionProtectedRefs(transaction)
+      };
+    }
+    async function submitRollingRequirementRecovery(loopDef, runtime, definition, options = {}) {
+      const submitAttempt = options.submitAttempt || submitRollingRequirementRecoveryAttempt;
+      const result = await submitAttempt(loopDef, runtime, definition, options);
+      if (result?.status !== "replan" || runtime?.duplicateMaterializationTransaction?.status !== "materialized") return result;
+      return stopRollingDuplicateTransactionReplan(
+        runtime,
+        `${loopDef.name} -> ${definition?.name || "recovery SBC"}`,
+        {
+          ...result,
+          reason: "requirements recovery materialized a duplicate, but cannot rebind the pre-selection plan to an exact live Challenge",
+          reasonCode: "DUPLICATE_REQUIREMENTS_REPLAN_UNSUPPORTED"
+        },
+        { finalize: options.finalize }
+      );
+    }
+    async function submitRollingRatingRecovery(loopDef, runtime, definition, options = {}) {
+      return runBoundedRollingDuplicateTransactionReplans(
+        runtime,
+        `${loopDef.name} -> ${definition?.name || "rating recovery"}`,
+        () => submitRollingRatingRecoveryAttempt(loopDef, runtime, definition, options)
+      );
+    }
+    function persistRollingDuplicateTransaction(transaction) {
+      try {
+        if (transaction) {
+          adapters.userscriptStorage.set(ROLLING_DUPLICATE_TRANSACTION_KEY, transaction);
+          const stored = adapters.userscriptStorage.get(ROLLING_DUPLICATE_TRANSACTION_KEY, null);
+          if (stored?.transactionId !== transaction.transactionId || stored?.status !== transaction.status || stored?.updatedAt !== transaction.updatedAt) return false;
+        } else {
+          const removed = adapters.userscriptStorage.remove(ROLLING_DUPLICATE_TRANSACTION_KEY);
+          if (removed === false) return false;
+          const sentinel = `missing-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          if (adapters.userscriptStorage.get(ROLLING_DUPLICATE_TRANSACTION_KEY, sentinel) !== sentinel) {
+            return false;
+          }
+        }
+        return true;
+      } catch (error) {
+        log(`Rolling duplicate transaction persistence unavailable: ${error?.message || error}`);
+        return false;
+      }
+    }
+    async function persistMaterializedRollingDuplicateTransaction(runtime, label, options = {}) {
+      const transaction = runtime?.duplicateMaterializationTransaction || null;
+      if (transaction?.status !== "materialized") {
+        return {
+          ok: false,
+          reason: "duplicate materialization journal write was requested without a materialized transaction",
+          reasonCode: "DUPLICATE_JOURNAL_WRITE_FAILED"
+        };
+      }
+      if (persistRollingDuplicateTransaction(transaction)) return { ok: true };
+      const finalize = options.finalize || finalizeRollingDuplicateMaterialization;
+      const compensation = await finalize(runtime, `${label} journal-write compensation`, {
+        submissionConfirmed: false
+      });
+      const compensationFailed = compensation?.ok === false;
+      return {
+        ok: false,
+        reason: compensationFailed ? `duplicate materialization journal could not be persisted and compensation failed: ${compensation.reason || "unknown"}` : "duplicate materialization journal could not be persisted; the physical swap was compensated",
+        reasonCode: compensationFailed ? compensation.reasonCode || "DUPLICATE_MATERIALIZATION_COMPENSATION_BLOCKED" : "DUPLICATE_JOURNAL_WRITE_FAILED",
+        details: {
+          transactionId: transaction.transactionId,
+          compensationSucceeded: !compensationFailed
+        }
+      };
+    }
+    function completeRollingDuplicateTransaction(runtime, transaction, options = {}) {
+      if (!persistRollingDuplicateTransaction(null)) {
+        runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+          transaction,
+          "recovery-required",
+          { reason: "duplicate materialization journal could not be cleared after physical restoration" }
+        );
+        return {
+          ok: false,
+          reason: "protected counterpart was restored, but the duplicate materialization journal could not be cleared",
+          reasonCode: "DUPLICATE_JOURNAL_CLEAR_FAILED",
+          details: { physicalRestorationSucceeded: true }
+        };
+      }
+      runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+        transaction,
+        "completed"
+      );
+      if (options.journalWriteFailed === true) {
+        return {
+          ok: false,
+          reason: "protected counterpart was restored, but the confirmed duplicate transaction could not be persisted",
+          reasonCode: "DUPLICATE_JOURNAL_WRITE_FAILED",
+          details: { physicalRestorationSucceeded: true, journalCleared: true }
+        };
+      }
+      return { ok: true };
+    }
+    function readPersistedRollingDuplicateTransaction() {
+      try {
+        const stored = adapters.userscriptStorage.get(ROLLING_DUPLICATE_TRANSACTION_KEY, null);
+        if (!stored?.transactionId || !stored?.status) return null;
+        return transitionDuplicateMaterializationTransaction(stored, stored.status, {
+          reason: stored.reason,
+          updatedAt: stored.updatedAt
+        });
+      } catch {
+        return null;
+      }
+    }
+    async function finalizeRollingDuplicateMaterialization(runtime, label, options = {}) {
+      let transaction = runtime?.duplicateMaterializationTransaction || null;
+      let journalWriteFailed = false;
+      if (!transaction || ["completed"].includes(transaction.status)) return { ok: true };
+      if (!["materialized", "submission-confirmed", "recovery-required", "ambiguous"].includes(transaction.status)) {
+        return {
+          ok: false,
+          reason: `duplicate materialization ${transaction.transactionId} requires manual recovery from ${transaction.status}`,
+          reasonCode: "DUPLICATE_MATERIALIZATION_RECOVERY_REQUIRED"
+        };
+      }
+      if (options.submissionConfirmed === true && transaction.status === "materialized") {
+        transaction = transitionDuplicateMaterializationTransaction(transaction, "submission-confirmed");
+        runtime.duplicateMaterializationTransaction = transaction;
+        journalWriteFailed = !persistRollingDuplicateTransaction(transaction);
+      }
+      const protectedItems = transaction.pairs.map((pair) => findCachedItemById(pair.protectedCounterpartRef.id, ["unassigned"])?.item || null);
+      if (protectedItems.some((item) => !item)) {
+        await refreshInventoryCaches(`${label} duplicate counterpart lookup`, {
+          includePacks: false,
+          quiet: true
+        });
+      }
+      const liveProtectedItems = transaction.pairs.map((pair) => findCachedItemById(pair.protectedCounterpartRef.id, ["unassigned"])?.item || null);
+      if (liveProtectedItems.some((item) => !item)) {
+        transaction = transitionDuplicateMaterializationTransaction(transaction, "recovery-required", {
+          reason: "a protected duplicate counterpart is missing from Unassigned"
+        });
+        runtime.duplicateMaterializationTransaction = transaction;
+        persistRollingDuplicateTransaction(transaction);
+        return {
+          ok: false,
+          reason: "a protected duplicate counterpart is missing from Unassigned",
+          reasonCode: "DUPLICATE_COUNTERPART_MISSING"
+        };
+      }
+      log(`${label}: returning ${liveProtectedItems.length} protected duplicate counterpart(s) to Club for transaction ${transaction.transactionId}`);
+      try {
+        await moveItems(liveProtectedItems, inventoryPile("club"), true);
+        await refreshInventoryCaches(`${label} duplicate counterpart restored`, {
+          includePacks: false,
+          quiet: true
+        });
+        const reconciliation = await runtime.coordinator.reconcile(
+          `${label} duplicate counterpart restored`,
+          { refreshUnassigned: true }
+        );
+        if (!reconciliation.ok) throw new Error(reconciliation.reason || "inventory reconciliation failed");
+      } catch (error) {
+        transaction = transitionDuplicateMaterializationTransaction(transaction, "recovery-required", {
+          reason: error?.message || String(error)
+        });
+        runtime.duplicateMaterializationTransaction = transaction;
+        persistRollingDuplicateTransaction(transaction);
+        return {
+          ok: false,
+          reason: `protected duplicate counterpart restore failed: ${error?.message || error}`,
+          reasonCode: "DUPLICATE_COUNTERPART_RESTORE_BLOCKED"
+        };
+      }
+      const protectedValidation = validateDuplicateProtectedRestoration(
+        ["submission-confirmed", "completed"].includes(transaction.status) ? transaction : transitionDuplicateMaterializationTransaction(transaction, "submission-confirmed"),
+        {
+          resolveItem: (id, pile) => findCachedItemById(id, [pile])?.item || null
+        }
+      );
+      if (!protectedValidation.ok) {
+        transaction = transitionDuplicateMaterializationTransaction(transaction, "recovery-required", {
+          reason: protectedValidation.reason
+        });
+        runtime.duplicateMaterializationTransaction = transaction;
+        persistRollingDuplicateTransaction(transaction);
+        return {
+          ok: false,
+          reason: protectedValidation.reason,
+          reasonCode: "DUPLICATE_COUNTERPART_IDENTITY_CHANGED"
+        };
+      }
+      if (options.submissionConfirmed !== true) {
+        const consumeLocations = transaction.pairs.map((pair) => findCachedItemById(pair.materializedConsumeRef.id, ["unassigned", "storage", "transfer", "club"]));
+        const rolledBack = consumeLocations.every((location) => location?.pileName === "unassigned");
+        if (!rolledBack) {
+          transaction = transitionDuplicateMaterializationTransaction(transaction, "ambiguous", {
+            reason: "consume item presence is ambiguous after protected counterpart restoration"
+          });
+          runtime.duplicateMaterializationTransaction = transaction;
+          persistRollingDuplicateTransaction(transaction);
+          return {
+            ok: false,
+            reason: "duplicate submission outcome is ambiguous after protected counterpart restoration",
+            reasonCode: "DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS"
+          };
+        }
+      }
+      const completion = completeRollingDuplicateTransaction(runtime, transaction, {
+        journalWriteFailed
+      });
+      if (!completion.ok) return completion;
+      log(`${label}: duplicate materialization ${transaction.transactionId} completed; protected counterpart identity preserved`);
+      return { ok: true };
+    }
+    async function runRollingDuplicateSubmissionAttempt(runtime, label, operation, options = {}) {
+      const finalize = options.finalize || finalizeRollingDuplicateMaterialization;
+      const recover = options.recover || recoverPersistedRollingDuplicateTransaction;
+      const compensate = async (suffix) => {
+        const transaction = runtime?.duplicateMaterializationTransaction || null;
+        if (!transaction || transaction.status === "completed") return { ok: true };
+        if (transaction.status === "materialized") {
+          return finalize(runtime, `${label} ${suffix}`, { submissionConfirmed: false });
+        }
+        const recovery = await recover(runtime, `${label} ${suffix}`);
+        return recovery?.status === "ready" ? { ok: true } : {
+          ok: false,
+          reason: recovery?.reason || "duplicate materialization recovery failed",
+          reasonCode: recovery?.reasonCode || "DUPLICATE_MATERIALIZATION_RECOVERY_REQUIRED"
+        };
+      };
+      try {
+        const result = await operation();
+        if (result?.submitted === true || result?.status === "replan" || !runtime?.duplicateMaterializationTransaction || runtime.duplicateMaterializationTransaction.status === "completed") {
+          return result;
+        }
+        const compensation = await compensate("pre-submit compensation");
+        if (compensation.ok !== false) return result;
+        return {
+          ...result,
+          status: "blocked",
+          submitted: false,
+          reason: compensation.reason || result?.reason || "duplicate materialization compensation failed",
+          reasonCode: compensation.reasonCode || "DUPLICATE_MATERIALIZATION_COMPENSATION_BLOCKED",
+          details: {
+            ...result?.details || {},
+            originalFailure: {
+              status: result?.status || null,
+              reason: result?.reason || null,
+              reasonCode: result?.reasonCode || null
+            }
+          }
+        };
+      } catch (error) {
+        if (!runtime?.duplicateMaterializationTransaction || runtime.duplicateMaterializationTransaction.status === "completed") throw error;
+        const compensation = await compensate("exception compensation");
+        if (compensation.ok !== false) throw error;
+        const combined = new Error(
+          `${error?.message || error}; duplicate materialization compensation blocked: ${compensation.reason || "unknown"}`
+        );
+        combined.cause = error;
+        combined.reasonCode = compensation.reasonCode || "DUPLICATE_MATERIALIZATION_COMPENSATION_BLOCKED";
+        throw combined;
+      }
+    }
+    async function stopRollingDuplicateTransactionReplan(runtime, label, result = {}, options = {}) {
+      const finalize = options.finalize || finalizeRollingDuplicateMaterialization;
+      const compensation = await finalize(runtime, `${label} transaction replan compensation`, {
+        submissionConfirmed: false
+      });
+      const compensationFailed = compensation?.ok === false;
+      return {
+        ...result,
+        status: "blocked",
+        submitted: false,
+        reason: compensationFailed ? compensation.reason || "duplicate materialization compensation failed" : result.reason || "duplicate transaction replanning stopped before a confirmed submission",
+        reasonCode: compensationFailed ? compensation.reasonCode || "DUPLICATE_MATERIALIZATION_COMPENSATION_BLOCKED" : result.reasonCode || options.reasonCode || "DUPLICATE_TRANSACTION_REPLAN_BLOCKED",
+        details: {
+          ...result.details || {},
+          transactionReplanStopped: true,
+          compensationSucceeded: !compensationFailed
+        }
+      };
+    }
+    async function runBoundedRollingDuplicateTransactionReplans(runtime, label, attempt, options = {}) {
+      const maxReplans = Math.max(0, Math.min(5, Number(options.maxReplans ?? 3) || 0));
+      const finalize = options.finalize || finalizeRollingDuplicateMaterialization;
+      let replans = 0;
+      let transactionReplanStarted = false;
+      while (true) {
+        let result;
+        try {
+          result = await attempt({ replan: replans, maxReplans });
+        } catch (error) {
+          const transaction2 = runtime?.duplicateMaterializationTransaction || null;
+          if (!transactionReplanStarted || !transaction2 || transaction2.status === "completed") throw error;
+          const compensation = await finalize(runtime, `${label} transaction replan exception`, {
+            submissionConfirmed: false
+          });
+          if (compensation?.ok !== false) throw error;
+          const combined = new Error(
+            `${error?.message || error}; duplicate materialization compensation blocked: ${compensation.reason || "unknown"}`
+          );
+          combined.cause = error;
+          combined.reasonCode = compensation.reasonCode || "DUPLICATE_MATERIALIZATION_COMPENSATION_BLOCKED";
+          throw combined;
+        }
+        if (result?.submitted === true) return result;
+        const transaction = runtime?.duplicateMaterializationTransaction || null;
+        const materialized = transaction?.status === "materialized";
+        if (result?.status === "replan" && materialized) {
+          transactionReplanStarted = true;
+          replans++;
+          if (replans > maxReplans) {
+            return stopRollingDuplicateTransactionReplan(runtime, label, {
+              ...result,
+              reason: `${label} exceeded ${maxReplans} transaction-local replan(s)`,
+              reasonCode: "DUPLICATE_TRANSACTION_REPLAN_LIMIT"
+            }, { finalize });
+          }
+          log(`${label}: duplicate transaction ${transaction.transactionId || "?"} remains bound to the current Challenge; replanning locally (${replans}/${maxReplans}) after ${result.reasonCode || "replan request"}`);
+          continue;
+        }
+        if (transactionReplanStarted && transaction && transaction.status !== "completed") {
+          return stopRollingDuplicateTransactionReplan(runtime, label, result, { finalize });
+        }
+        return result;
+      }
+    }
+    async function restoreAmbiguousPlannedDuplicateCounterparts(runtime, transaction, label) {
+      const protectedItems = transaction.pairs.map((pair) => findCachedItemById(pair.protectedCounterpartRef.id, ["unassigned"])?.item || null);
+      if (protectedItems.some((item) => !item)) {
+        return {
+          status: "blocked",
+          reason: "a protected duplicate counterpart is missing from Unassigned after an interrupted swap",
+          reasonCode: "DUPLICATE_COUNTERPART_MISSING"
+        };
+      }
+      try {
+        await moveItems(protectedItems, inventoryPile("club"), true);
+        await refreshInventoryCaches(`${label} interrupted duplicate restore`, {
+          includePacks: false,
+          quiet: true
+        });
+        const reconciliation = await runtime.coordinator.reconcile(
+          `${label} interrupted duplicate restore`,
+          { refreshUnassigned: true }
+        );
+        if (!reconciliation.ok) throw new Error(reconciliation.reason || "inventory reconciliation failed");
+      } catch (error) {
+        return {
+          status: "blocked",
+          reason: `protected duplicate counterpart restore failed: ${error?.message || error}`,
+          reasonCode: "DUPLICATE_COUNTERPART_RESTORE_BLOCKED"
+        };
+      }
+      const restored = transaction.pairs.every((pair) => {
+        const location = findCachedItemById(pair.protectedCounterpartRef.id, ["club"]);
+        return location?.pileName === "club" && rollingExactItemMatchesRef(location.item, pair.protectedCounterpartRef) && duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, location.item);
+      });
+      if (!restored) {
+        return {
+          status: "blocked",
+          reason: "a protected duplicate counterpart could not be verified in Club after interrupted recovery",
+          reasonCode: "DUPLICATE_COUNTERPART_IDENTITY_CHANGED"
+        };
+      }
+      runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+        transaction,
+        "ambiguous",
+        { reason: "interrupted swap was restored without a confirmed materialized consume item identity" }
+      );
+      persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+      return {
+        status: "blocked",
+        reason: "interrupted duplicate swap restored the protected Club card, but the consume identity is unknown; manual inventory review is required",
+        reasonCode: "DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS"
+      };
+    }
+    async function recoverPersistedRollingDuplicateTransaction(runtime, label) {
+      const transaction = runtime?.duplicateMaterializationTransaction || null;
+      if (!transaction) return { status: "ready" };
+      await refreshInventoryCaches(`${label} duplicate transaction recovery`, {
+        includePacks: false,
+        quiet: true
+      });
+      const reconciliation = await runtime.coordinator.reconcile(
+        `${label} duplicate transaction recovery`,
+        { refreshUnassigned: true }
+      );
+      if (!reconciliation.ok) {
+        return {
+          status: "blocked",
+          reason: reconciliation.reason || "inventory reconciliation failed before duplicate recovery",
+          reasonCode: "INVENTORY_RECONCILIATION_FAILED"
+        };
+      }
+      const recovery = planDuplicateMaterializationRecovery(transaction, {
+        resolveItem: (id) => findCachedItemById(
+          id,
+          ["unassigned", "storage", "transfer", "club"]
+        )?.item || null
+      });
+      if (!recovery.ok || recovery.action === "block") {
+        runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+          transaction,
+          "ambiguous",
+          { reason: recovery.reason }
+        );
+        persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+        return {
+          status: "blocked",
+          reason: recovery.reason || "duplicate materialization recovery is ambiguous",
+          reasonCode: "DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS"
+        };
+      }
+      if (recovery.action === "clear") {
+        if (!persistRollingDuplicateTransaction(null)) {
+          return {
+            status: "blocked",
+            reason: "duplicate materialization is physically safe, but its journal could not be cleared",
+            reasonCode: "DUPLICATE_JOURNAL_CLEAR_FAILED"
+          };
+        }
+        runtime.duplicateMaterializationTransaction = null;
+        log(`${label}: cleared completed or untouched duplicate materialization ${transaction.transactionId}`);
+        return { status: "ready" };
+      }
+      if (recovery.action === "restore-ambiguous" && !transaction.pairs.every((pair) => pair.materializedConsumeRef?.id)) {
+        return restoreAmbiguousPlannedDuplicateCounterparts(runtime, transaction, label);
+      }
+      if (recovery.action === "rollback") {
+        runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+          transaction,
+          "materialized",
+          { reason: "startup recovery verified both swapped identities" }
+        );
+        persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+      } else if (recovery.action === "restore-ambiguous") {
+        runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+          transaction,
+          "ambiguous",
+          { reason: "startup recovery cannot confirm whether the consume item was submitted" }
+        );
+        persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+      }
+      const finalized = await finalizeRollingDuplicateMaterialization(runtime, `${label} startup recovery`, {
+        submissionConfirmed: recovery.action === "restore-confirmed"
+      });
+      return finalized.ok ? { status: "ready" } : {
+        status: "blocked",
+        reason: finalized.reason,
+        reasonCode: finalized.reasonCode
+      };
+    }
+    function applyRollingDuplicateTransactionSelectionPolicy(selectionPolicy, context = {}) {
+      const consumeRefs = context.consumeRefs || [];
+      if (!consumeRefs.length) return selectionPolicy;
+      const removeConsumeAuthorization = (ref) => !consumeRefs.some((consumeRef) => rollingExactItemMatchesRef(ref, consumeRef));
+      return {
+        ...selectionPolicy,
+        duplicateTransactionConsumeRefs: consumeRefs,
+        requiredItems: rollingUniqueRefs([
+          ...selectionPolicy.requiredItems || [],
+          ...consumeRefs
+        ]),
+        preferredItems: rollingUniqueRefs([
+          ...selectionPolicy.preferredItems || [],
+          ...consumeRefs
+        ]),
+        protectedItems: rollingUniqueRefs([
+          ...(selectionPolicy.protectedItems || []).filter(removeConsumeAuthorization),
+          ...context.protectedRefs || []
+        ])
+      };
+    }
+    function createRollingDuplicateSubmissionManifest(runtime, players, set, challenge) {
+      const context = rollingDuplicateTransactionPlanningContext(runtime, set, challenge);
+      if (!context.ok || !context.transaction) return context;
+      return createDuplicateSubmissionManifest({
+        transaction: context.transaction,
+        inventoryVersion: context.inventoryVersion,
+        players
+      });
+    }
+    function assertRollingDuplicateSubmissionManifest(runtime, manifest, players, label) {
+      if (!manifest) return true;
+      const inventoryVersion = Number(runtime?.coordinator?.getLedger?.()?.summary?.().inventoryVersion || 0);
+      const validation = validateDuplicateSubmissionManifest(manifest, players || [], { inventoryVersion });
+      if (!validation.ok) fail2(`${label}: ${validation.reason}`);
+      return true;
+    }
+    function classifyRollingProtectedRefreshEvidence(refs = [], evidence2 = {}) {
+      const responseArrays = evidence2?.response?.itemArrays || [];
+      const responseItems2 = responseArrays.flatMap((entry) => entry?.items || []);
+      const repositoryIds = new Set((evidence2?.afterRequest?.mergedItemIds || []).map(Number));
+      const responseIds = new Set(responseItems2.map((item) => Number(item?.id || 0)).filter(Boolean));
+      const responseDefinitions = /* @__PURE__ */ new Map();
+      for (const item of responseItems2) {
+        const definitionId3 = Number(item?.definitionId || 0);
+        if (!definitionId3) continue;
+        if (!responseDefinitions.has(definitionId3)) responseDefinitions.set(definitionId3, []);
+        responseDefinitions.get(definitionId3).push(Number(item?.id || 0));
+      }
+      return refs.map((value) => {
+        const ref = liveItemRef(value, value?.pile || value?.ref?.pile || "unassigned");
+        const id = Number(ref.id || 0);
+        const definitionId3 = Number(ref.definitionId || 0);
+        const responseHasExactId = id > 0 && responseIds.has(id);
+        const repositoryHasExactId = id > 0 && repositoryIds.has(id);
+        let outcome3 = "response-items-unobserved";
+        if (responseArrays.length) {
+          if (!responseHasExactId) outcome3 = "absent-from-response";
+          else if (!repositoryHasExactId) outcome3 = "response-not-materialized";
+          else outcome3 = "verified";
+        }
+        return {
+          ref,
+          outcome: outcome3,
+          responseHasExactId,
+          repositoryHasExactId,
+          sameDefinitionResponseIds: (responseDefinitions.get(definitionId3) || []).filter(Boolean)
+        };
+      });
+    }
+    async function refreshRollingProtectedStorageCaches(options = {}) {
+      const inventoryAdapter = options.inventoryAdapter || eaInventoryAdapter();
+      const refreshStorage = options.refreshStorage || (() => refreshPileCacheByCandidates("storage", { quiet: true }));
+      const invalidatePurchased = options.invalidatePurchased || (() => inventoryAdapter.invalidateUnassigned());
+      const refreshPurchased = options.refreshPurchased || (() => refreshUnassigned({ attempts: 1, allowCacheFallback: false, quiet: true }));
+      const readPurchasedState = options.readPurchasedState || (() => inventoryAdapter.unassignedState());
+      const notifyStage = async (stage) => {
+        if (typeof options.onStage === "function") await options.onStage(stage);
+      };
+      await refreshStorage();
+      await notifyStage("storage");
+      const beforeInvalidation = readPurchasedState();
+      const invalidation = await invalidatePurchased();
+      const afterInvalidation = readPurchasedState();
+      const purchasedResult = await refreshPurchased();
+      const afterRequest = readPurchasedState();
+      const evidence2 = {
+        beforeInvalidation,
+        invalidation,
+        afterInvalidation,
+        response: captureUnassignedRefreshResult(purchasedResult),
+        afterRequest
+      };
+      await notifyStage("unassigned");
+      return { purchasedResult, evidence: evidence2 };
+    }
     async function retryRollingProtectedStorage(loopDef, runtime) {
       const routing = runtime.openRouting;
       if (!routing || routing.status !== "blocked") return { status: "ready" };
@@ -49259,11 +50634,27 @@
         logRollingInventoryIdentityState(loopDef, runtime, retryRefs, `protected-storage-retry:${stage}`);
       };
       logRetryState("before-refresh");
-      await refreshInventoryCaches(`${loopDef.name} protected Storage retry`, {
-        includePacks: false,
-        quiet: true,
-        onStage: (stage) => logRetryState(`after-${stage}`)
-      });
+      let purchasedRefresh = null;
+      try {
+        const refresh = await refreshRollingProtectedStorageCaches({
+          onStage: (stage) => logRetryState(`after-${stage}`)
+        });
+        purchasedRefresh = refresh.evidence;
+        purchasedRefresh.deferredRefs = classifyRollingProtectedRefreshEvidence(retryRefs, refresh.evidence);
+        log(`${loopDef.name}: protected Storage retry Purchased refresh evidence: ${diagnosticJson(purchasedRefresh)}`);
+      } catch (error) {
+        const details = {
+          error: error?.message || String(error),
+          retryState: captureRollingInventoryIdentityState(runtime, retryRefs, "protected-storage-retry:refresh-failed")
+        };
+        log(`${loopDef.name}: protected Storage retry refresh failed: ${diagnosticJson(details)}`);
+        return {
+          status: "blocked",
+          reason: `fresh Unassigned inventory could not be verified before Storage retry: ${details.error}`,
+          reasonCode: "OPENED_ITEM_ROUTING_PENDING",
+          details
+        };
+      }
       logRetryState("after-refresh");
       const resolved = (routing.storageItems || []).map((item) => ({
         original: item,
@@ -49273,6 +50664,7 @@
         const missingRefs = resolved.filter(({ live }) => !live).map(({ original }) => liveItemRef(original, original?.pile || "unassigned"));
         const details = {
           missingRefs,
+          purchasedRefresh,
           retryState: captureRollingInventoryIdentityState(runtime, retryRefs, "protected-storage-retry:missing-after-refresh")
         };
         log(`${loopDef.name}: protected Storage retry could not resolve ${missingRefs.length} deferred item(s): ${diagnosticJson(details)}`);
@@ -49330,8 +50722,8 @@
     function rollingSignalKey(ref) {
       const id = Number(ref?.id || 0);
       if (id) return `id:${id}`;
-      const definitionId2 = Number(ref?.definitionId || 0);
-      return definitionId2 ? `definition:${definitionId2}` : null;
+      const definitionId3 = Number(ref?.definitionId || 0);
+      return definitionId3 ? `definition:${definitionId3}` : null;
     }
     function rollingUniqueRefs(refs = []) {
       const seen = /* @__PURE__ */ new Set();
@@ -49419,6 +50811,12 @@
         pendingStorageItems: routing.pendingRefs.length,
         storageItemsConsumed
       });
+    }
+    function rollingSelectionSubmissionRefsForSignals(selection, expectedRefs = []) {
+      return rollingUniqueRefs((selection?.entries || []).filter((entry) => expectedRefs.some((ref) => rollingItemMatchesRef(entry?.signal, ref))).map((entry) => liveItemRef(
+        entry?.item,
+        rollingSelectionSubmissionPile(entry)
+      )).filter((ref) => Number(ref?.id || 0) > 0 && Number(ref?.definitionId || 0) > 0));
     }
     function rollingRatingRecoveryStoragePressure(runtime, options = {}) {
       const routing = rollingPendingStorageRoutingState(runtime, {
@@ -49779,6 +51177,7 @@
         selectionPolicy.protectedItems = selectionPolicy.protectedItems.filter((ref) => !consumableItemRefs.some((candidate) => rollingItemMatchesRef(ref, candidate)));
       }
       const candidateFilter = createRollingStorageSinkCandidateFilter({
+        exactConsumeRefs: options.duplicateTransactionContext?.consumeRefs || [],
         constraintIndexes: requiredSpecialRoles.map((role) => role.constraintIndex),
         isPrimaryRequiredSpecial: (item) => rollingLiveRequiredSpecial(item, runtime.primaryContext?.model) || rollingSnapshotRequiredSpecial(
           item,
@@ -49788,7 +51187,10 @@
         resolveSubmissionPile: (entry) => entry?.signal && entry?.pileName === "unassigned" ? "unassigned" : rollingSelectionSubmissionPile(entry)
       });
       return {
-        ...selectionPolicy,
+        ...applyRollingDuplicateTransactionSelectionPolicy(
+          selectionPolicy,
+          options.duplicateTransactionContext
+        ),
         candidateFilter
       };
     }
@@ -49866,11 +51268,20 @@
       };
     }
     async function selectRollingStorageSink89Squad(loopDef, runtime, context, snapshot) {
+      const duplicateTransactionContext = rollingDuplicateTransactionPlanningContext(
+        runtime,
+        context.set,
+        context.challenge
+      );
+      if (!duplicateTransactionContext.ok) return duplicateTransactionContext;
       const activeLoopDef = rollingStorageSinkLoopDefForPiles(
         context,
         storageSinkSquadSourceStrategy(89).priorityPiles
       );
-      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model });
+      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
+        model: context.model,
+        duplicateTransactionContext
+      });
       const candidates = buildRatingSbcCandidateEntries(
         activeLoopDef,
         context.model,
@@ -49892,7 +51303,8 @@
       }
       const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
         requiredItems: prepared.requiredItems,
-        model: context.model
+        model: context.model,
+        duplicateTransactionContext
       });
       const selection = await findOptimalRatingSbcSelection(
         prepared.entries,
@@ -49906,9 +51318,18 @@
       };
     }
     async function selectRollingStorageSink88Squad(loopDef, runtime, context, snapshot) {
+      const duplicateTransactionContext = rollingDuplicateTransactionPlanningContext(
+        runtime,
+        context.set,
+        context.challenge
+      );
+      if (!duplicateTransactionContext.ok) return duplicateTransactionContext;
       const buildFor = (priorityPiles) => {
         const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, priorityPiles);
-        const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model });
+        const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
+          model: context.model,
+          duplicateTransactionContext
+        });
         return buildRatingSbcCandidateEntries(
           activeLoopDef,
           context.model,
@@ -49921,7 +51342,8 @@
         const entries = forcedClubEntries.length ? candidates.entries.filter((entry) => entry.pileName === "storage" || entry.pileName === "club" && forcedClubIds.has(Number(entry.item?.id || 0))) : candidates.entries;
         const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
           requiredItems: forcedClubEntries.map((entry) => liveItemRef(entry.item, entry.pileName)),
-          model: context.model
+          model: context.model,
+          duplicateTransactionContext
         });
         return {
           candidates,
@@ -49942,7 +51364,10 @@
         count: STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
         maxRating,
         requiredConstraintIndexes: storageSinkRequiredSpecialRoles(context.model).map((role) => role.constraintIndex),
-        protectedItems: rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model }).protectedItems
+        protectedItems: rollingStorageSinkSelectionPolicy(loopDef, runtime, {
+          model: context.model,
+          duplicateTransactionContext
+        }).protectedItems
       });
       let lastFailure = storageOnly.selection;
       for (let clubCount = 1; clubCount <= STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD; clubCount++) {
@@ -50100,76 +51525,122 @@
         label
       );
       validators.validatePlannedPlayers(resolved.players, plan.selection);
+      const duplicateManifestResult = createRollingDuplicateSubmissionManifest(
+        runtime,
+        resolved.players,
+        context.set,
+        context.challenge
+      );
+      if (duplicateManifestResult.ok === false) {
+        return {
+          status: "blocked",
+          reason: duplicateManifestResult.reason,
+          reasonCode: "DUPLICATE_SUBMISSION_MANIFEST_INVALID"
+        };
+      }
+      const duplicateSubmissionManifest = duplicateManifestResult.manifest || null;
       let backgroundSubmission = null;
       runtime.lastMutation = null;
-      const submission = await submitSbcAttempt({
+      const submission = await runRollingDuplicateSubmissionAttempt(
+        runtime,
         label,
-        challengeProvider: async () => ({
-          set: context.set,
-          challenge: context.challenge,
-          background: true
-        }),
-        squadProvider: createExistingSquadProvider({
-          getPlayers: async () => resolved.players,
-          itemRef: liveItemRef,
-          selection: plan.selection,
-          source: "rolling-storage-sink-squad"
-        }),
-        prepareRuntimeAccess: prepareFsuRuntimeAccess,
-        preparePlayers: (submitContext) => prepareRollingUntradeableDuplicateSwaps(submitContext, runtime),
-        saveSquad: async ({ challenge, players }) => {
-          await applyPlayersToRatingChallenge(challenge, players, label);
-        },
-        readSavedPlayers: async ({ challenge }) => getSquadItems(challenge?.squad),
-        preSaveValidators: [validators.preSave],
-        postSaveValidators: [validators.postSave],
-        isSubmitReady: async ({ challenge }) => {
-          try {
-            return challenge?.canSubmit?.() !== false;
-          } catch {
-            return false;
-          }
-        },
-        submitTransport: async (submitContext) => {
-          backgroundSubmission = await submitRatingSbcInBackground(
-            submitContext.set,
-            submitContext.challenge,
-            label,
-            {
-              players: submitContext.players || resolved.players,
-              allowItemViolationOverride: true,
-              protectActiveSquadPlayers: loopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
-              resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
-                loopDef,
-                runtime,
-                {
-                  ...conflict,
-                  selection: submitContext.squadPlan?.selection || plan.selection,
-                  model: context.model
-                }
-              ),
-              rewardObservationAttempts: 1,
-              allowKnownRewardFallback: false,
-              failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+        () => submitSbcAttempt({
+          label,
+          challengeProvider: async () => ({
+            set: context.set,
+            challenge: context.challenge,
+            background: true
+          }),
+          squadProvider: createExistingSquadProvider({
+            getPlayers: async () => resolved.players,
+            itemRef: liveItemRef,
+            selection: plan.selection,
+            source: "rolling-storage-sink-squad"
+          }),
+          prepareRuntimeAccess: prepareFsuRuntimeAccess,
+          preparePlayers: (submitContext) => prepareRollingUntradeableDuplicateSwaps(submitContext, runtime),
+          saveSquad: async ({ challenge, players }) => {
+            await applyPlayersToRatingChallenge(challenge, players, label);
+          },
+          readSavedPlayers: async ({ challenge }) => getSquadItems(challenge?.squad),
+          preSaveValidators: [
+            validators.preSave,
+            ({ players }) => assertRollingDuplicateSubmissionManifest(
+              runtime,
+              duplicateSubmissionManifest,
+              players,
+              `${label} pre-save duplicate identity`
+            )
+          ],
+          postSaveValidators: [
+            validators.postSave,
+            ({ savedPlayers, players }) => assertRollingDuplicateSubmissionManifest(
+              runtime,
+              duplicateSubmissionManifest,
+              savedPlayers?.length ? savedPlayers : players,
+              `${label} post-save duplicate identity`
+            )
+          ],
+          isSubmitReady: async ({ challenge }) => {
+            try {
+              return challenge?.canSubmit?.() !== false;
+            } catch {
+              return false;
             }
-          );
-          if (backgroundSubmission?.status === "replan") return backgroundSubmission;
-          return { submitted: true, rewardPackId: null };
-        },
-        runCommittedSubmit: runCommittedSbcSubmit,
-        onResult: async (submissionResult) => {
-          if (submissionResult.submitted) {
-            runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+          },
+          readFinalPlayers: async ({ challenge }) => getSquadItems(challenge?.squad),
+          finalValidators: [({ finalPlayers, savedPlayers, players }) => assertRollingDuplicateSubmissionManifest(
+            runtime,
+            duplicateSubmissionManifest,
+            finalPlayers?.length ? finalPlayers : savedPlayers?.length ? savedPlayers : players,
+            `${label} final duplicate identity`
+          )],
+          submitTransport: async (submitContext) => {
+            const transportPlayers = submitContext.finalPlayers?.length ? submitContext.finalPlayers : submitContext.savedPlayers?.length ? submitContext.savedPlayers : submitContext.players || resolved.players;
+            backgroundSubmission = await submitRatingSbcInBackground(
+              submitContext.set,
+              submitContext.challenge,
+              label,
+              {
+                players: transportPlayers,
+                allowItemViolationOverride: true,
+                protectActiveSquadPlayers: loopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+                resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
+                  loopDef,
+                  runtime,
+                  {
+                    ...conflict,
+                    selection: submitContext.squadPlan?.selection || plan.selection,
+                    model: context.model
+                  }
+                ),
+                rewardObservationAttempts: 1,
+                allowKnownRewardFallback: false,
+                failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+              }
+            );
+            if (backgroundSubmission?.status === "replan") return backgroundSubmission;
+            return { submitted: true, rewardPackId: null };
+          },
+          runCommittedSubmit: runCommittedSbcSubmit,
+          onResult: async (submissionResult) => {
+            if (submissionResult.submitted) {
+              runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+            }
+          },
+          afterSubmit: async ({ players, savedPlayers, finalPlayers }) => {
+            const confirmedPlayers = finalPlayers?.length ? finalPlayers : savedPlayers?.length ? savedPlayers : players;
+            await finalizeSubmittedInventorySelection(
+              plan.selection,
+              label,
+              confirmedPlayers
+            );
+            return finalizeRollingDuplicateMaterialization(runtime, label, {
+              submissionConfirmed: true
+            });
           }
-        },
-        afterSubmit: async ({ players, savedPlayers }) => {
-          await finalizeSubmittedInventorySelection(
-            plan.selection,
-            label,
-            savedPlayers?.length ? savedPlayers : players
-          );
-        }
-      });
+        })
+      );
       if (submission.submitted && !runtime.lastMutation) {
         runtime.lastMutation = await runtime.coordinator.recordSubmission(submission, { primary: false });
       }
@@ -50223,8 +51694,15 @@
       refreshRollingPendingUnassignedRefs(runtime);
       return { status: "selected", pickedCards };
     }
-    async function runRollingLegacyStorageSinkRecovery(loopDef, runtime, capability) {
-      const pendingSelection = await selectPendingRollingStorageSinkPick(
+    async function runRollingLegacyStorageSinkRecovery(loopDef, runtime, capability, options = {}) {
+      const selectPending = options.selectPending || selectPendingRollingStorageSinkPick;
+      const refreshCaches = options.refreshCaches || refreshInventoryCaches;
+      const loadContexts = options.loadContexts || loadRollingStorageSinkContexts;
+      const planSquad = options.planSquad || planRollingStorageSinkSquad;
+      const validateHeadroom = options.validateHeadroom || validateRollingStorageSinkHeadroom;
+      const runReplans = options.runReplans || runBoundedRollingDuplicateTransactionReplans;
+      const submitSquad = options.submitSquad || submitRollingStorageSinkSquad;
+      const pendingSelection = await selectPending(
         loopDef,
         runtime,
         capability,
@@ -50234,14 +51712,14 @@
       const pickDef = rollingRecoveryDef(capability?.loop, loopDef, {
         priorityPiles: ["unassigned", "storage", "transfer", "club"]
       });
-      await refreshInventoryCaches(`${pickDef.name} sequential recovery`, { includePacks: false, quiet: true });
+      await refreshCaches(`${pickDef.name} sequential recovery`, { includePacks: false, quiet: true });
       const reconciled = await runtime.coordinator.reconcile(`${pickDef.name} sequential recovery`, {
         refreshUnassigned: true
       });
       if (!reconciled.ok) {
         return { status: "blocked", reason: reconciled.reason, reasonCode: "INVENTORY_RECONCILIATION_FAILED" };
       }
-      const loaded = await loadRollingStorageSinkContexts(loopDef, pickDef);
+      const loaded = options.loadContexts ? await loadContexts(loopDef, pickDef) : await loadRollingStorageSinkContexts(loopDef, pickDef);
       if (loaded.status !== "ready") return loaded;
       const pendingContexts = [...loaded.contexts];
       let submitted = 0;
@@ -50258,7 +51736,7 @@
             details: { partialCompletion: submitted, submittedRatings }
           };
         }
-        const squadPlan = await planRollingStorageSinkSquad(loopDef, runtime, context);
+        let squadPlan = await planSquad(loopDef, runtime, context);
         if (!squadPlan.ok) {
           const rating2 = Number(context.targetRating || 0) || "?";
           log(`${loopDef.name}: ${pickDef.name} ${rating2} squad deferred [${squadPlan.reasonCode || "unknown"}]: ${squadPlan.reason || "no safe source plan"}`);
@@ -50287,9 +51765,9 @@
             details: squadPlan.details
           };
         }
-        const plan = squadPlan.plans[0];
+        let plan = squadPlan.plans[0];
         const rating = Number(context.targetRating || 0);
-        const headroom = validateRollingStorageSinkHeadroom(runtime, squadPlan, {
+        let headroom = validateHeadroom(runtime, squadPlan, {
           reservePickResult: rating === 88
         });
         if (!headroom.ok) {
@@ -50324,14 +51802,43 @@
             details: { headroom, rating }
           };
         }
-        const result = await submitRollingStorageSinkSquad(
-          loopDef,
+        const result = await runReplans(
           runtime,
-          pickDef,
-          plan,
-          Number(loaded.completedCount || 0) + submitted,
-          2
+          `${loopDef.name} -> ${pickDef.name} ${rating} squad`,
+          async ({ replan }) => {
+            if (replan > 0) {
+              squadPlan = await planSquad(loopDef, runtime, context);
+              if (!squadPlan.ok) {
+                return {
+                  status: "blocked",
+                  submitted: false,
+                  reason: squadPlan.reason || `${pickDef.name} ${rating} squad became infeasible during transaction-local replanning`,
+                  reasonCode: squadPlan.reasonCode || "RECOVERY_MATERIAL_SHORTAGE"
+                };
+              }
+              plan = squadPlan.plans[0];
+              headroom = validateHeadroom(runtime, squadPlan, {
+                reservePickResult: rating === 88
+              });
+              if (!headroom.ok) return { status: "blocked", submitted: false, ...headroom };
+            }
+            return submitSquad(
+              loopDef,
+              runtime,
+              pickDef,
+              plan,
+              Number(loaded.completedCount || 0) + submitted,
+              2
+            );
+          }
         );
+        if (result.postSubmitBlocked === true) {
+          return {
+            ...result,
+            status: "blocked",
+            details: { ...result.details || {}, partialCompletion: submitted }
+          };
+        }
         if (!result.submitted) {
           return {
             ...result,
@@ -50531,8 +52038,8 @@
       ]));
       const candidateByDefinition = /* @__PURE__ */ new Map();
       candidateEntries.forEach((entry) => {
-        const definitionId2 = Number(entry.item?.definitionId || 0);
-        if (definitionId2 && !candidateByDefinition.has(definitionId2)) candidateByDefinition.set(definitionId2, entry);
+        const definitionId3 = Number(entry.item?.definitionId || 0);
+        if (definitionId3 && !candidateByDefinition.has(definitionId3)) candidateByDefinition.set(definitionId3, entry);
       });
       const rejectedByReason = {};
       const rejectedSamples = {};
@@ -50552,8 +52059,8 @@
       let representedByUnassigned = 0;
       const storagePlayers = (snapshot?.piles?.storage || []).filter(isPlayer2);
       for (const item of storagePlayers) {
-        const itemId5 = Number(item?.id || 0);
-        const exactCandidate = candidateByItemId.get(itemId5);
+        const itemId6 = Number(item?.id || 0);
+        const exactCandidate = candidateByItemId.get(itemId6);
         if (exactCandidate?.pileName === "storage") {
           acceptedAsStorage++;
           continue;
@@ -50592,8 +52099,17 @@
           reasonCode: "LIVE_REQUIREMENT_UNAVAILABLE"
         };
       }
+      const duplicateTransactionContext = rollingDuplicateTransactionPlanningContext(
+        runtime,
+        context.set,
+        context.challenge
+      );
+      if (!duplicateTransactionContext.ok) return duplicateTransactionContext;
       const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, strategy.priorityPiles);
-      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model });
+      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
+        model: context.model,
+        duplicateTransactionContext
+      });
       const candidates = buildRatingSbcCandidateEntries(
         activeLoopDef,
         context.model,
@@ -50663,7 +52179,8 @@
             consumablePendingRefs: prepared.eligiblePendingEntries.map((entry) => entry.signal).filter(Boolean),
             consumableItemRefs: prepared.eligiblePendingItems,
             additionalRoles: pressureRole ? [pressureRole] : [],
-            model: context.model
+            model: context.model,
+            duplicateTransactionContext
           });
           const selection = await findOptimalRatingSbcSelection(
             prepared.entries,
@@ -50886,29 +52403,61 @@
       const pressure = rollingStorageSinkPressureRequirement(runtime, { reservePickResult });
       if (!pressure.ok) return { status: "unavailable", ...pressure };
       log(`${loopDef.name}: ${loaded.sinkDef.name} Storage pressure requires at least ${pressure.minimumConsumption} consuming card(s) before planning; pending:${pressure.pendingStorageItems}, free:${pressure.currentFree}, reward reserve:${pressure.reserveSlots}`);
-      const squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context, {
+      let squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context, {
         minimumPressureConsumption: pressure.minimumConsumption,
         pendingStorageRefs: pressure.pendingRefs
       });
       if (!squadPlan.ok) return { status: "unavailable", ...squadPlan };
-      const headroom = validateRollingStorageSinkHeadroom(runtime, squadPlan, {
+      let headroom = validateRollingStorageSinkHeadroom(runtime, squadPlan, {
         reservePickResult
       });
       if (!headroom.ok) return { status: "unavailable", ...headroom };
-      const plan = squadPlan.plans[0];
+      let plan = squadPlan.plans[0];
       log(`${loopDef.name}: ${loaded.sinkDef.name} generic ${context.targetRating} squad ready; sources:${formatSelectionStats(squadPlan.pileCounts)}, source order:${squadPlan.details.sourceOrder.join(" -> ")}, Club cap:${squadPlan.details.maxClubPerSquad}, pressure cards:${squadPlan.details.storagePressureConsumed}/${squadPlan.details.minimumPressureConsumption} required, Storage cards:${squadPlan.storageItemsConsumed}, projected free:${headroom.projectedFree}/${headroom.requiredFree} required`);
       logInventorySelection(`${loopDef.name}: ${loaded.sinkDef.name} ${context.targetRating} squad`, plan.selection, { maxItems: 30 });
       if (loaded.sinkDef.dryRun) {
         return { status: "planned", reason: `dry-run ${loaded.sinkDef.name} next ${context.targetRating} squad plan complete` };
       }
-      const result = await submitRollingStorageSinkSquad(
-        loopDef,
+      const result = await runBoundedRollingDuplicateTransactionReplans(
         runtime,
-        loaded.sinkDef,
-        plan,
-        loaded.completedCount,
-        loaded.totalChallengeCount
+        `${loopDef.name} -> ${loaded.sinkDef.name} ${context.targetRating} squad`,
+        async ({ replan }) => {
+          if (replan > 0) {
+            squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context, {
+              minimumPressureConsumption: pressure.minimumConsumption,
+              pendingStorageRefs: pressure.pendingRefs
+            });
+            if (!squadPlan.ok) {
+              return {
+                status: "blocked",
+                submitted: false,
+                reason: squadPlan.reason || `${loaded.sinkDef.name} ${context.targetRating} squad became infeasible during transaction-local replanning`,
+                reasonCode: squadPlan.reasonCode || "RECOVERY_MATERIAL_SHORTAGE"
+              };
+            }
+            headroom = validateRollingStorageSinkHeadroom(runtime, squadPlan, {
+              reservePickResult
+            });
+            if (!headroom.ok) return { status: "blocked", submitted: false, ...headroom };
+            plan = squadPlan.plans[0];
+          }
+          return submitRollingStorageSinkSquad(
+            loopDef,
+            runtime,
+            loaded.sinkDef,
+            plan,
+            loaded.completedCount,
+            loaded.totalChallengeCount
+          );
+        }
       );
+      if (result.postSubmitBlocked === true) {
+        return {
+          ...result,
+          status: "blocked",
+          inventoryDelta: runtime.lastMutation?.delta || null
+        };
+      }
       if (!result.submitted) return result;
       const consumedSignalRefs = plan.signalRefs || [];
       runtime.primaryDuplicateRefs = (runtime.primaryDuplicateRefs || []).filter((ref) => !consumedSignalRefs.some((consumedRef) => rollingItemMatchesRef(ref, consumedRef)));
@@ -51279,6 +52828,7 @@
       const runtime = {
         primaryContext: null,
         coordinator: null,
+        duplicateMaterializationTransaction: readPersistedRollingDuplicateTransaction(),
         openRouting: null,
         primaryDuplicateRefs: [],
         pendingUnassignedRefs: [],
@@ -51356,6 +52906,22 @@
             }
             return { status: "blocked", reason: initialized.reason, reasonCode: "INVENTORY_INDEX_UNAVAILABLE" };
           },
+          recoverDuplicateTransaction: async () => recoverPersistedRollingDuplicateTransaction(
+            runtime,
+            loopDef.name
+          ),
+          hasActiveDuplicateTransaction: () => runtime.duplicateMaterializationTransaction?.status === "materialized",
+          abortActiveDuplicateTransaction: async ({ trigger, value, plan, submission, replans, maxReplans }) => stopRollingDuplicateTransactionReplan(runtime, loopDef.name, {
+            ...submission || plan || value || {},
+            reason: submission?.reason || plan?.reason || value?.reason || `${loopDef.name} stopped active duplicate transaction during ${trigger}`,
+            reasonCode: trigger === "primary-replan-limit" ? "DUPLICATE_TRANSACTION_REPLAN_LIMIT" : submission?.reasonCode || plan?.reasonCode || value?.reasonCode || "DUPLICATE_TRANSACTION_REPLAN_BLOCKED",
+            details: {
+              ...submission?.details || plan?.details || value?.details || {},
+              trigger,
+              replans,
+              maxReplans
+            }
+          }),
           resumePendingPlayerPick: async () => {
             if (loopDef.rollingStorageSinkEnabled !== true) return { status: "skipped" };
             return resumePendingRollingStorageSinkReward(
@@ -51785,6 +53351,18 @@
               };
             }
             const { activeLoopDef, challenge, model, set } = runtime.primaryContext;
+            const duplicateTransactionContext = rollingDuplicateTransactionPlanningContext(
+              runtime,
+              set,
+              challenge
+            );
+            if (!duplicateTransactionContext.ok) {
+              return {
+                ok: false,
+                reason: duplicateTransactionContext.reason,
+                reasonCode: duplicateTransactionContext.reasonCode
+              };
+            }
             const preservedPrimary = runtime.openRouting ? preserveRollingPrimaryDuplicateRefs(runtime, runtime.openRouting) : { captured: true, count: 0 };
             if ((runtime.openRouting?.reservedItems || []).length && preservedPrimary.captured !== true && !(runtime.primaryDuplicateRefs || []).length) {
               log(`${loopDef.name}: primary duplicate context was lost before primary squad planning: ${diagnosticJson({
@@ -51874,7 +53452,7 @@
             let selectionPolicy = null;
             let fill = null;
             while (true) {
-              selectionPolicy = {
+              selectionPolicy = applyRollingDuplicateTransactionSelectionPolicy({
                 ...createRollingPrimarySelectionPolicy({
                   ledger: runtime.coordinator.getLedger(),
                   model,
@@ -51886,7 +53464,7 @@
                   protectedItems: rollingActiveSquadConflictRefs(runtime)
                 }),
                 candidateFilter: requiredSpecialSourceFilter
-              };
+              }, duplicateTransactionContext);
               fill = await fillSbcSquadRatingOptimized(activeLoopDef, {
                 set,
                 challenge,
@@ -51894,7 +53472,7 @@
               }, {
                 dryRun: loopDef.dryRun === true,
                 selectionPolicy,
-                skipInventoryRefresh: relaxedPrimaryDuplicateRefs.length > 0
+                skipInventoryRefresh: relaxedPrimaryDuplicateRefs.length > 0 || Boolean(duplicateTransactionContext.transaction)
               });
               if (!fill.ok || Number(fill.optimizedRating || 0) <= Number(model.targetRating || 0)) break;
               const nextRef = relaxationOrder[relaxedPrimaryDuplicateRefs.length];
@@ -51979,20 +53557,41 @@
                 reasonCode: "PRIMARY_SUBMISSION_NOT_READY"
               };
             }
+            const plannedPlayers = fill.inspection?.items || fill.selection?.selected || [];
+            const duplicateManifestResult = createRollingDuplicateSubmissionManifest(
+              runtime,
+              plannedPlayers,
+              set,
+              challenge
+            );
+            if (duplicateManifestResult.ok === false) {
+              return {
+                ok: false,
+                reason: duplicateManifestResult.reason,
+                reasonCode: "DUPLICATE_SUBMISSION_MANIFEST_INVALID"
+              };
+            }
             return {
               ok: true,
               opened: { set, challenge, background: true },
               activeLoopDef,
               selectionPolicy,
               fill,
-              deferredPrimaryRefs
+              deferredPrimaryRefs,
+              duplicateSubmissionManifest: duplicateManifestResult.manifest || null
             };
           },
           submitPrimary: async ({ plan }) => {
             if (loopDef.dryRun) {
               return { status: "planned", reason: "dry-run primary squad plan complete" };
             }
-            const { opened, activeLoopDef, selectionPolicy, fill } = plan;
+            const {
+              opened,
+              activeLoopDef,
+              selectionPolicy,
+              fill,
+              duplicateSubmissionManifest
+            } = plan;
             const players = fill.inspection?.items || fill.selection?.selected || [];
             const itemRefs = players.map((item) => liveItemRef(item));
             const ledgerValidation = await runtime.coordinator.validateBeforeSubmit(itemRefs, {
@@ -52008,100 +53607,148 @@
             }
             let backgroundSubmission = null;
             runtime.lastMutation = null;
-            const submission = await submitSbcAttempt({
-              label: loopDef.name,
-              challengeProvider: async () => opened,
-              squadProvider: createExistingSquadProvider({
-                getPlayers: async () => players,
-                itemRef: liveItemRef,
-                selection: fill.selection,
-                source: "rolling-rating-squad"
-              }),
-              prepareRuntimeAccess: prepareFsuRuntimeAccess,
-              preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
-              saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess, playerPreparation }) => {
-                await saveRollingProvisionalClubSquad(
-                  challenge,
-                  refreshedPlayers,
-                  runtimeAccess,
-                  `${loopDef.name} provisional Club refresh`,
-                  playerPreparation
-                );
-              },
-              preSaveValidators: [({ squadPlan }) => {
-                assertSbcSquadSafe(activeLoopDef, fill.inspection);
-                const finalSelection = squadPlan?.selection || fill.selection;
-                const sourceErrors = rollingRequiredSpecialSourceErrors(finalSelection, fill.model);
-                if (sourceErrors.length) {
-                  fail2(`${loopDef.name}: final Rolling squad violated Required Special source policy: ${sourceErrors.join(", ")}`);
-                }
-                const strictSourceErrors = rollingClubNonTotwSpecialSourceErrors(
-                  finalSelection,
-                  activeLoopDef
-                );
-                if (strictSourceErrors.length) {
-                  fail2(`${loopDef.name}: final Rolling squad violated strict Club special protection: ${strictSourceErrors.join(", ")}`);
-                }
-                const validation = validateRatingSbcModelAgainstItems2(
-                  fill.model,
-                  fill.inspection.items,
-                  opened.challenge,
-                  {
-                    exclusiveRoles: selectionPolicy.exclusiveRoles,
-                    allowOtherSpecialAsOrdinary: true
+            const submission = await runRollingDuplicateSubmissionAttempt(
+              runtime,
+              loopDef.name,
+              () => submitSbcAttempt({
+                label: loopDef.name,
+                challengeProvider: async () => opened,
+                squadProvider: createExistingSquadProvider({
+                  getPlayers: async () => players,
+                  itemRef: liveItemRef,
+                  selection: fill.selection,
+                  source: "rolling-rating-squad"
+                }),
+                prepareRuntimeAccess: prepareFsuRuntimeAccess,
+                preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
+                saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess, playerPreparation }) => {
+                  await saveRollingProvisionalClubSquad(
+                    challenge,
+                    refreshedPlayers,
+                    runtimeAccess,
+                    `${loopDef.name} provisional Club refresh`,
+                    playerPreparation
+                  );
+                },
+                readSavedPlayers: async ({ challenge }) => getSquadItems(challenge?.squad),
+                preSaveValidators: [({ players: preparedPlayers, squadPlan }) => {
+                  assertRollingDuplicateSubmissionManifest(
+                    runtime,
+                    duplicateSubmissionManifest,
+                    preparedPlayers,
+                    `${loopDef.name} pre-save duplicate identity`
+                  );
+                  const finalSelection = squadPlan?.selection || fill.selection;
+                  const finalInspection = inspectSbcItems(activeLoopDef, preparedPlayers, {
+                    expectedPlayerCount: fill.model.requiredPlayerCount,
+                    model: fill.model,
+                    selectionPolicy
+                  });
+                  logSbcSquadInspection(activeLoopDef, finalInspection);
+                  assertSbcSquadSafe(activeLoopDef, finalInspection);
+                  const sourceErrors = rollingRequiredSpecialSourceErrors(finalSelection, fill.model);
+                  if (sourceErrors.length) {
+                    fail2(`${loopDef.name}: final Rolling squad violated Required Special source policy: ${sourceErrors.join(", ")}`);
                   }
-                );
-                if (!validation.ok) {
-                  fail2(`${loopDef.name}: final Rolling squad failed dynamic requirement validation: ${validation.errors.join(", ")}`);
-                }
-                return true;
-              }],
-              isSubmitReady: async () => fill.fillResult?.submitReady === true,
-              submitTransport: async (context) => {
-                backgroundSubmission = await submitRatingSbcInBackground(
-                  context.set,
-                  context.challenge,
-                  loopDef.name,
-                  {
-                    players: context.players || players,
-                    allowItemViolationOverride: true,
-                    protectActiveSquadPlayers: activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
-                    resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
-                      activeLoopDef,
-                      runtime,
-                      {
-                        ...conflict,
-                        selection: context.squadPlan?.selection || fill.selection,
-                        model: fill.model
-                      }
-                    ),
-                    allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
-                    failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+                  const strictSourceErrors = rollingClubNonTotwSpecialSourceErrors(
+                    finalSelection,
+                    activeLoopDef,
+                    { allowedItems: duplicateSubmissionManifest?.requiredRefs || [] }
+                  );
+                  if (strictSourceErrors.length) {
+                    fail2(`${loopDef.name}: final Rolling squad violated strict Club special protection: ${strictSourceErrors.join(", ")}`);
                   }
-                );
-                if (backgroundSubmission?.status === "replan") return backgroundSubmission;
-                return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
-              },
-              runCommittedSubmit: runCommittedSbcSubmit,
-              onResult: async (submissionResult) => {
-                if (submissionResult.submitted) {
-                  runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, {
-                    primary: true
+                  const validation = validateRatingSbcModelAgainstItems2(
+                    fill.model,
+                    preparedPlayers,
+                    opened.challenge,
+                    {
+                      exclusiveRoles: selectionPolicy.exclusiveRoles,
+                      allowOtherSpecialAsOrdinary: true
+                    }
+                  );
+                  if (!validation.ok) {
+                    fail2(`${loopDef.name}: final Rolling squad failed dynamic requirement validation: ${validation.errors.join(", ")}`);
+                  }
+                  return true;
+                }],
+                postSaveValidators: [({ savedPlayers, players: preparedPlayers }) => assertRollingDuplicateSubmissionManifest(
+                  runtime,
+                  duplicateSubmissionManifest,
+                  savedPlayers?.length ? savedPlayers : preparedPlayers,
+                  `${loopDef.name} post-save duplicate identity`
+                )],
+                isSubmitReady: async ({ challenge }) => {
+                  try {
+                    return challenge?.canSubmit?.() !== false;
+                  } catch {
+                    return false;
+                  }
+                },
+                readFinalPlayers: async ({ challenge }) => getSquadItems(challenge?.squad),
+                finalValidators: [({ finalPlayers, savedPlayers, players: preparedPlayers }) => assertRollingDuplicateSubmissionManifest(
+                  runtime,
+                  duplicateSubmissionManifest,
+                  finalPlayers?.length ? finalPlayers : savedPlayers?.length ? savedPlayers : preparedPlayers,
+                  `${loopDef.name} final duplicate identity`
+                )],
+                submitTransport: async (context) => {
+                  const transportPlayers = context.finalPlayers?.length ? context.finalPlayers : context.savedPlayers?.length ? context.savedPlayers : context.players || players;
+                  backgroundSubmission = await submitRatingSbcInBackground(
+                    context.set,
+                    context.challenge,
+                    loopDef.name,
+                    {
+                      players: transportPlayers,
+                      allowItemViolationOverride: true,
+                      protectActiveSquadPlayers: activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+                      resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
+                        activeLoopDef,
+                        runtime,
+                        {
+                          ...conflict,
+                          selection: context.squadPlan?.selection || fill.selection,
+                          model: fill.model
+                        }
+                      ),
+                      allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
+                      failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+                    }
+                  );
+                  if (backgroundSubmission?.status === "replan") return backgroundSubmission;
+                  return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
+                },
+                runCommittedSubmit: runCommittedSbcSubmit,
+                onResult: async (submissionResult) => {
+                  if (submissionResult.submitted) {
+                    runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, {
+                      primary: true
+                    });
+                  }
+                },
+                afterSubmit: async ({ players: submittedPlayers, savedPlayers, finalPlayers, squadPlan }) => {
+                  const confirmedPlayers = finalPlayers?.length ? finalPlayers : savedPlayers?.length ? savedPlayers : submittedPlayers;
+                  await finalizeSubmittedInventorySelection(
+                    squadPlan?.selection || fill.selection,
+                    loopDef.name,
+                    confirmedPlayers
+                  );
+                  return finalizeRollingDuplicateMaterialization(runtime, loopDef.name, {
+                    submissionConfirmed: true
                   });
                 }
-              },
-              afterSubmit: async ({ players: submittedPlayers, savedPlayers, squadPlan }) => {
-                await finalizeSubmittedInventorySelection(
-                  squadPlan?.selection || fill.selection,
-                  loopDef.name,
-                  savedPlayers?.length ? savedPlayers : submittedPlayers
-                );
-              }
-            });
+              })
+            );
             if (submission.submitted && !runtime.lastMutation) {
               runtime.lastMutation = await runtime.coordinator.recordSubmission(submission, {
                 primary: true
               });
+            }
+            if (submission.postSubmitBlocked === true) {
+              return {
+                ...submission,
+                inventoryDelta: runtime.lastMutation?.delta || null
+              };
             }
             if (submission.submitted) {
               runtime.pendingRewardPackId = submission.rewardPackId || null;

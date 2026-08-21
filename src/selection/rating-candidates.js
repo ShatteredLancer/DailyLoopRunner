@@ -254,6 +254,7 @@ export async function selectRatingCandidateEntries(options = {}) {
     preferredItems,
     protectedItems,
     exclusiveRoles,
+    maxPlayerRating,
     maxOrdinaryRating,
     protectionPolicy,
   } = options;
@@ -289,6 +290,7 @@ export async function selectRatingCandidateEntries(options = {}) {
     preferredItems,
     protectedItems,
     exclusiveRoles,
+    maxPlayerRating,
     maxOrdinaryRating,
     protectionPolicy,
   });
