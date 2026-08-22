@@ -110,15 +110,25 @@ export async function loadUserscript(options = {}) {
       inspectSbcItems,
       isRatingSbcCandidateSafe,
       rollingDuplicateMaterializationPair,
+      prepareRollingUntradeableDuplicateSwaps,
       runRollingDuplicateSubmissionAttempt,
       runBoundedRollingDuplicateTransactionReplans,
       submitRollingRequirementRecovery,
       runRollingLegacyStorageSinkRecovery,
+      recordRollingSbcSubmissionResult,
       persistRollingDuplicateTransaction,
+      persistRollingPendingRequiredSpecialReward,
+      readPersistedRollingPendingRequiredSpecialReward,
+      queueRollingPendingRequiredSpecialReward,
+      clearRollingPendingRequiredSpecialReward,
+      restoreRollingPendingRequiredSpecialReward,
+      detectRollingPendingRequiredSpecialReward,
       persistMaterializedRollingDuplicateTransaction,
       completeRollingDuplicateTransaction,
+      finalizeRollingDuplicateMaterialization,
       rollingDuplicateTransactionPlanningContext,
       readPersistedRollingDuplicateTransaction,
+      cancelPriorRunRollingDuplicateTransaction,
       recoverPersistedRollingDuplicateTransaction,
       rollingDuplicatePlayerCount,
       rollingOrdinaryGoldDuplicate,
@@ -134,6 +144,7 @@ export async function loadUserscript(options = {}) {
       rollingPrimaryReservesAllSpecialSlots,
       classifyRollingProtectedRefreshEvidence,
       refreshRollingProtectedStorageCaches,
+      retryRollingProtectedStorage,
       assertRollingRecoveryItems,
       preserveRollingPrimaryDuplicateRefs,
       createRollingRequiredSpecialSourceFilter,
@@ -143,10 +154,14 @@ export async function loadUserscript(options = {}) {
       rollingPendingStorageRoutingState,
       validateRollingEmergencyProvisionsSelection,
       rollingRatingRecoveryStoragePressure,
+      rollingStorageSinkConsumablePendingRefs,
+      rollingEmergencyProvisionsProtectedRefs,
       rollingStorageSinkSelectionPolicy,
       selectRollingGenericStorageSinkSquad,
       validateRollingStorageSinkPlayers,
       createRollingStorageSinkSubmissionValidators,
+      rollingStorageSinkMissingPlayerPickResult,
+      confirmRollingStorageSinkSetCompletion,
       completedRollingStorageSinkUnavailable,
       rollingStorageSinkFailure,
       runRollingStorageSinkRecovery,
@@ -184,13 +199,19 @@ export async function loadUserscript(options = {}) {
 
   const document = createDocument();
   const userscriptValues = new Map(Object.entries(options.userscriptStorage || {}));
+  const inventoryPiles = {
+    club: [...(options.club || [])],
+    storage: [...(options.storage || [])],
+    transfer: [...(options.transfer || [])],
+    unassigned: [...(options.unassigned || [])],
+  };
   const itemRepository = {
-    club: { items: collection(options.club) },
-    storage: collection(options.storage),
-    transfer: collection(options.transfer),
-    getUnassignedItems: () => [...(options.unassigned || [])],
-    getStorageItems: () => [...(options.storage || [])],
-    getTransferItems: () => [...(options.transfer || [])],
+    club: { items: { _collection: inventoryPiles.club } },
+    storage: { _collection: inventoryPiles.storage },
+    transfer: { _collection: inventoryPiles.transfer },
+    getUnassignedItems: () => [...inventoryPiles.unassigned],
+    getStorageItems: () => [...inventoryPiles.storage],
+    getTransferItems: () => [...inventoryPiles.transfer],
     getPileSize: (pile) => Number(options.pileSizes?.[pile] ?? 100),
     numItemsInCache: (pile) => Number(options.pileCounts?.[pile] ?? 0),
   };
@@ -224,6 +245,21 @@ export async function loadUserscript(options = {}) {
     },
     console,
   };
+  if (options.pageReady === true) {
+    const controller = { className: 'UTHomeViewController' };
+    window.getAppMain = () => ({
+      getRootViewController: () => ({
+        getPresentedViewController: () => ({
+          getCurrentViewController: () => ({
+            getCurrentController: () => controller,
+          }),
+        }),
+      }),
+    });
+  }
+  const sandboxSetTimeout = options.fastTimers === true
+    ? ((callback, delay, ...args) => setTimeout(callback, Math.min(Number(delay) || 0, 1), ...args))
+    : setTimeout;
   const sandbox = {
     window,
     unsafeWindow: window,
@@ -243,7 +279,7 @@ export async function loadUserscript(options = {}) {
       : ((key) => userscriptValues.delete(String(key))),
     setInterval: () => 1,
     clearInterval: () => {},
-    setTimeout,
+    setTimeout: sandboxSetTimeout,
     clearTimeout,
     URL,
     Blob,
@@ -264,7 +300,7 @@ export async function loadUserscript(options = {}) {
     Error,
   };
   window.window = window;
-  window.setTimeout = setTimeout;
+  window.setTimeout = sandboxSetTimeout;
   window.clearTimeout = clearTimeout;
   window.setInterval = sandbox.setInterval;
   window.clearInterval = sandbox.clearInterval;
@@ -290,5 +326,5 @@ export async function loadUserscript(options = {}) {
     lockedDefinitionIds: [],
   });
 
-  return { api, window, sandbox, userscriptValues };
+  return { api, window, sandbox, userscriptValues, inventoryPiles };
 }

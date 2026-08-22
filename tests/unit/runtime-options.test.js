@@ -33,6 +33,8 @@ describe('loop runtime option projection', () => {
       rollingProvisionsShortageRecoveryEnabled: false,
       rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
+      rollingDuplicateSwapEnabled: false,
+      rollingDuplicateSwapMode: 'off',
       rollingProvisionsMaxRating: 88,
       rollingRecoveryStorageFirst: false,
       rollingOpenDuplicateProvisionsRewards: false,
@@ -61,6 +63,8 @@ describe('loop runtime option projection', () => {
       rollingProvisionsShortageRecoveryEnabled: false,
       rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
+      rollingDuplicateSwapEnabled: false,
+      rollingDuplicateSwapMode: 'off',
       rollingProvisionsMaxRating: 88,
       rollingRecoveryStorageFirst: false,
       rollingOpenDuplicateProvisionsRewards: false,
@@ -391,6 +395,51 @@ describe('loop runtime option projection', () => {
         rollingStorageSinkEnabled: true,
         rollingStorageSinkMode: 'automatic',
         rollingStorageSinkSetId: null,
+      },
+    });
+  });
+
+  it('keeps Rolling duplicate swaps disabled by default and projects explicit opt-in', () => {
+    expect(normalizePickRuntimeOptions({})).toMatchObject({
+      rollingDuplicateSwapEnabled: false,
+    });
+    expect(normalizePickRuntimeOptions({ rollingDuplicateSwapEnabled: true })).toMatchObject({
+      rollingDuplicateSwapEnabled: true,
+      rollingDuplicateSwapMode: 'special-only',
+    });
+    expect(normalizePickRuntimeOptions({ rollingDuplicateSwapMode: 'special-only' })).toMatchObject({
+      rollingDuplicateSwapEnabled: true,
+      rollingDuplicateSwapMode: 'special-only',
+    });
+    expect(resolvePickRuntimeOptions(
+      { rollingDuplicateSwapEnabled: true },
+      { pickOptions: { rollingDuplicateSwapEnabled: false } },
+    )).toMatchObject({ rollingDuplicateSwapEnabled: false });
+
+    const disabled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(disabled, { pickOptions: {} });
+    expect(disabled.rollingDuplicateSwapEnabled).toBe(false);
+
+    const enabled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(enabled, {
+      pickOptions: { rollingDuplicateSwapEnabled: true },
+    });
+    expect(enabled).toMatchObject({
+      rollingDuplicateSwapEnabled: true,
+      rollingDuplicateSwapMode: 'special-only',
+      runtimePickOptions: { rollingDuplicateSwapEnabled: true },
+    });
+
+    const controlled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(controlled, {
+      pickOptions: { rollingDuplicateSwapMode: 'special-only' },
+    });
+    expect(controlled).toMatchObject({
+      rollingDuplicateSwapEnabled: true,
+      rollingDuplicateSwapMode: 'special-only',
+      runtimePickOptions: {
+        rollingDuplicateSwapEnabled: true,
+        rollingDuplicateSwapMode: 'special-only',
       },
     });
   });

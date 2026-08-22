@@ -917,6 +917,132 @@ describe('Rolling inventory policy', () => {
     expect(storageSink.exclusiveRoles).toHaveLength(1);
   });
 
+  it('routes every duplicate to Storage when native duplicate swaps are disabled', () => {
+    const plan = planRollingOpenedItemRouting([
+      item(1, 85),
+      item(2, 87),
+      item(3, 92, { special: true }),
+    ], {
+      storageFree: 3,
+      duplicateSwapEnabled: false,
+      proactiveProvisionsEnabled: true,
+      provisionsRequiredCount: 1,
+      isRequiredSpecial: (value) => value.id === 3,
+    });
+
+    expect(plan).toMatchObject({
+      status: 'ready',
+      counts: {
+        primaryDuplicates: 0,
+        provisionsImmediate: 0,
+        storageRequired: 3,
+        duplicateSwapDisabledStorage: 3,
+      },
+    });
+    expect(plan.storageItems.map((value) => value.id)).toEqual([1, 2, 3]);
+    expect(plan.reservedItems).toEqual([]);
+    expect(plan.provisionsItems).toEqual([]);
+  });
+
+  it('lets the explicit disabled flag override a stale controlled mode', () => {
+    const plan = planRollingOpenedItemRouting([item(4, 85, { special: true })], {
+      storageFree: 1,
+      duplicateSwapEnabled: false,
+      duplicateSwapMode: 'special-only',
+      duplicateSwapEligible: () => true,
+    });
+
+    expect(plan).toMatchObject({
+      status: 'ready',
+      counts: { duplicateSwapDisabledStorage: 1, storageRequired: 1, primaryDuplicates: 0 },
+    });
+    expect(plan.reservedItems).toEqual([]);
+    expect(plan.storageItems.map((value) => value.id)).toEqual([4]);
+  });
+
+  it('blocks without reserving duplicates when native swaps are disabled and Storage is full', () => {
+    const plan = planRollingOpenedItemRouting([
+      item(1, 86),
+    ], {
+      storageFree: 0,
+      duplicateSwapEnabled: false,
+      isRequiredSpecial: () => false,
+    });
+
+    expect(plan).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED',
+      counts: {
+        primaryDuplicates: 0,
+        storageRequired: 1,
+        duplicateSwapDisabledStorage: 1,
+      },
+    });
+    expect(plan.reservedItems).toEqual([]);
+    expect(plan.pendingItems.map((value) => value.id)).toEqual([1]);
+  });
+
+  it('routes duplicate cards outside a controlled swap scope to Storage', () => {
+    const plan = planRollingOpenedItemRouting([
+      item(1, 85),
+      item(2, 92, { special: true }),
+    ], {
+      storageFree: 1,
+      duplicateSwapMode: 'special-only',
+      duplicateSwapEligible: (value) => value.special === true,
+    });
+
+    expect(plan).toMatchObject({
+      status: 'ready',
+      counts: {
+        swapEligibleDuplicates: 1,
+        swapIneligibleDuplicates: 1,
+        primaryDuplicates: 1,
+        storageRequired: 1,
+      },
+    });
+    expect(plan.reservedItems.map((value) => value.id)).toEqual([2]);
+    expect(plan.storageItems.map((value) => value.id)).toEqual([1]);
+  });
+
+  it('limits controlled duplicate swaps to one pair and stores the remainder', () => {
+    const plan = planRollingOpenedItemRouting([
+      item(11, 85, { special: true }),
+      item(12, 86, { special: true }),
+      item(13, 87, { special: true }),
+    ], {
+      storageFree: 2,
+      duplicateSwapMode: 'special-only',
+      duplicateSwapEligible: () => true,
+    });
+
+    expect(plan).toMatchObject({
+      status: 'ready',
+      counts: {
+        swapEligibleDuplicates: 1,
+        swapIneligibleDuplicates: 2,
+        swapPairLimit: 1,
+        storageRequired: 2,
+      },
+    });
+    expect(plan.reservedItems.map((value) => value.id)).toEqual([11]);
+    expect(plan.storageItems.map((value) => value.id)).toEqual([12, 13]);
+  });
+
+  it('does not retain an out-of-scope Required Special as a transient primary signal', () => {
+    const requiredOrdinary = item(10, 91, { special: false });
+    const plan = planRollingOpenedItemRouting([requiredOrdinary], {
+      storageFree: 1,
+      duplicateSwapMode: 'special-only',
+      duplicateSwapEligible: (value) => value.special === true,
+      isRequiredSpecial: () => true,
+    });
+
+    expect(plan.reservedItems).toEqual([]);
+    expect(plan.provisionsItems).toEqual([]);
+    expect(plan.storageItems.map((value) => value.id)).toEqual([10]);
+  });
+
   it('protects an Active Squad conflict by exact item ID without protecting the card definition', () => {
     const conflicted = item(70, 84, { pile: 'club', definitionId: 700 });
     const sameVersionAlternative = item(71, 84, { pile: 'club', definitionId: 700 });

@@ -8,6 +8,7 @@ import { createWaitAdapter } from './browser/wait.js';
 import { createFsuAdapter } from './ea/fsu.js';
 import { createEaInventoryAdapter } from './ea/inventory.js';
 import { createEaLocalizationAdapter } from './ea/localization.js';
+import { createNativeDuplicateSwapTrace } from './ea/native-duplicate-swap-trace.js';
 import { createEaPackAdapter } from './ea/pack.js';
 import { createEaPlayerPickAdapter } from './ea/player-pick.js';
 import { createEaRarityAdapter } from './ea/rarity.js';
@@ -27,6 +28,7 @@ export function createRuntimeAdapters(runtime, documentObject = runtime?.documen
   });
   return Object.freeze({
     inventory: (options = {}) => createEaInventoryAdapter(runtime, options),
+    nativeDuplicateSwapTrace: (traceOptions = {}) => createNativeDuplicateSwapTrace(runtime, traceOptions),
     localization: createEaLocalizationAdapter(runtime),
     pack: () => createEaPackAdapter(runtime),
     playerPick: () => createEaPlayerPickAdapter(runtime),

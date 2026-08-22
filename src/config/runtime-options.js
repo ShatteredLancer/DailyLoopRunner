@@ -17,6 +17,10 @@ import {
   normalizePlayerPickSelectionMode,
   PLAYER_PICK_SELECTION_MODES,
 } from '../domain/player-pick.js';
+import {
+  DUPLICATE_SWAP_MODES,
+  normalizeDuplicateSwapMode,
+} from '../sbc/untradeable-duplicate-swap.js';
 
 export const INVENTORY_MODES = Object.freeze(['inherit', 'inventory-only', 'normal']);
 export const RUNTIME_QUANTITY_MODES = Object.freeze(['user', 'ea-remaining', 'exhaust', 'fixed']);
@@ -26,7 +30,7 @@ export const RUNTIME_QUANTITY_TARGETS = Object.freeze([
   'maxPacks',
   'validationRounds',
 ]);
-export { PLAYER_PICK_SELECTION_MODES };
+export { DUPLICATE_SWAP_MODES, PLAYER_PICK_SELECTION_MODES };
 const PICK_OPTIONS_APPLIED = Symbol('pick-options-applied');
 
 function boundedNumber(value, fallback, min, max) {
@@ -96,6 +100,22 @@ function pickOptionOverrides(input = {}) {
     input.rollingProtectAllClubNonTotwSpecials,
   );
   assign(
+    'rollingDuplicateSwapEnabled',
+    nested.rollingDuplicateSwapEnabled,
+    input.rollingDuplicateSwapEnabled,
+  );
+  assign(
+    'rollingDuplicateSwapMode',
+    nested.rollingDuplicateSwapMode,
+    input.rollingDuplicateSwapMode,
+  );
+  if (result.rollingDuplicateSwapMode === undefined
+    && result.rollingDuplicateSwapEnabled !== undefined) {
+    result.rollingDuplicateSwapMode = result.rollingDuplicateSwapEnabled
+      ? 'special-only'
+      : 'off';
+  }
+  assign(
     'rollingProvisionsMaxRating',
     nested.rollingProvisionsMaxRating,
     input.rollingProvisionsMaxRating,
@@ -155,6 +175,10 @@ export function normalizePickRuntimeOptions(input = {}) {
     input.pickSelectionMode,
     input.autoSelectBelow90 === false ? 'rating-review' : 'rating-auto',
   );
+  const rollingDuplicateSwapMode = normalizeDuplicateSwapMode(
+    input.rollingDuplicateSwapMode,
+    input.rollingDuplicateSwapEnabled === true,
+  );
   return {
     autoSelectBelow90: pickSelectionMode !== 'rating-review',
     pickSelectionMode,
@@ -173,6 +197,8 @@ export function normalizePickRuntimeOptions(input = {}) {
       input.rollingRequiredSpecialRecoveryEnabled === true,
     rollingProtectAllClubNonTotwSpecials:
       input.rollingProtectAllClubNonTotwSpecials === true,
+    rollingDuplicateSwapEnabled: rollingDuplicateSwapMode !== 'off',
+    rollingDuplicateSwapMode,
     rollingProvisionsMaxRating: normalizeRollingProvisionsMaxRating(
       input.rollingProvisionsMaxRating,
     ),
@@ -380,6 +406,8 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
       resolvedPickOptions.rollingRequiredSpecialRecoveryEnabled;
     loopDef.rollingProtectAllClubNonTotwSpecials =
       resolvedPickOptions.rollingProtectAllClubNonTotwSpecials;
+    loopDef.rollingDuplicateSwapEnabled = resolvedPickOptions.rollingDuplicateSwapEnabled;
+    loopDef.rollingDuplicateSwapMode = resolvedPickOptions.rollingDuplicateSwapMode;
     loopDef.runtimeProvisionsMaxRating = resolvedPickOptions.rollingProvisionsMaxRating;
     loopDef.runtimeRecoveryStorageFirst = resolvedPickOptions.rollingRecoveryStorageFirst;
     loopDef.rollingOpenDuplicateProvisionsRewards =

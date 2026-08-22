@@ -301,6 +301,14 @@ export function rollingDuplicateTargetProtectionReasons(item = {}, options = {})
 }
 
 export function planRollingOpenedItemRouting(items = [], options = {}) {
+  const duplicateSwapEnabled = options.duplicateSwapEnabled === false
+    ? false
+    : options.duplicateSwapMode !== undefined
+      ? options.duplicateSwapMode !== 'off'
+      : true;
+  const duplicateSwapEligible = typeof options.duplicateSwapEligible === 'function'
+    ? options.duplicateSwapEligible
+    : () => duplicateSwapEnabled;
   const provisionsRequiredCount = Math.max(1, Number(options.provisionsRequiredCount || 4) || 4);
   const provisionsRecoveryAvailable = options.provisionsRecoveryAvailable !== false;
   const proactiveProvisionsEnabled = options.proactiveProvisionsEnabled === true;
@@ -324,18 +332,41 @@ export function planRollingOpenedItemRouting(items = [], options = {}) {
     return { item, classification };
   });
   const duplicates = entries.filter(({ classification }) => classification.duplicate === true);
+  const swapEligibleCandidates = duplicates.filter(({ item, classification }) => {
+    if (!duplicateSwapEnabled || classification.protected) return false;
+    try { return duplicateSwapEligible(item, classification) === true; } catch { return false; }
+  });
+  const controlledSwapMode = ['special-only', 'safe-only'].includes(
+    String(options.duplicateSwapMode || '').trim().toLowerCase(),
+  );
+  const configuredPairLimit = Number(options.duplicateSwapMaxPairs);
+  const swapPairLimit = controlledSwapMode
+    ? (Number.isSafeInteger(configuredPairLimit) && configuredPairLimit > 0
+      ? configuredPairLimit
+      : 1)
+    : Number.POSITIVE_INFINITY;
+  const swapEligibleDuplicates = swapEligibleCandidates.slice(0, swapPairLimit);
+  const swapEligibleEntries = new Set(swapEligibleDuplicates);
+  const swapIneligibleDuplicates = duplicates.filter((entry) => (
+    !swapEligibleEntries.has(entry)
+  ));
   const requiredSpecialDuplicates = duplicates
     .filter(({ classification }) => classification.requiredSpecial === true)
     .sort((left, right) => sortByRatingAndIdentity(left.item, right.item));
   const usableRequiredSpecial = requiredSpecialDuplicates
     .filter(({ classification }) => !classification.protected);
-  const keptRequiredSpecial = usableRequiredSpecial.slice(0, 1);
+  const keptRequiredSpecial = duplicateSwapEnabled
+    ? usableRequiredSpecial.filter((entry) => swapEligibleEntries.has(entry)).slice(0, 1)
+    : [];
   const extraRequiredSpecial = usableRequiredSpecial.slice(1);
   const protectedDuplicates = duplicates.filter(({ classification }) => classification.protected);
-  const provisionsReserve = duplicates.filter(({ classification }) => (
-    classification.provisionsReserve && !classification.protected
+  const provisionsReserve = duplicates.filter((entry) => (
+    entry.classification.provisionsReserve
+      && !entry.classification.protected
+      && (!duplicateSwapEnabled || swapEligibleEntries.has(entry))
   ));
-  const immediateProvisionCount = provisionsRecoveryAvailable && proactiveProvisionsEnabled
+  const immediateProvisionCount = duplicateSwapEnabled
+    && provisionsRecoveryAvailable && proactiveProvisionsEnabled
     ? Math.floor(provisionsReserve.length / provisionsRequiredCount) * provisionsRequiredCount
     : 0;
   const provisionRecoveryEntries = provisionsReserve.slice(0, immediateProvisionCount);
@@ -350,30 +381,38 @@ export function planRollingOpenedItemRouting(items = [], options = {}) {
           && !provisionRecoverySet.has(entry)
       ))
     : [];
-  const storageEntries = [...new Set([
-    ...protectedDuplicates,
-    ...extraRequiredSpecial,
-    ...otherSpecialStorageEntries,
-    ...storedProvisionEntries,
-  ])];
+  const storageEntries = duplicateSwapEnabled
+    ? [...new Set([
+        ...swapIneligibleDuplicates,
+        ...protectedDuplicates,
+        ...extraRequiredSpecial,
+        ...otherSpecialStorageEntries,
+        ...storedProvisionEntries,
+      ])]
+    : [...duplicates];
   const storageEntrySet = new Set(storageEntries);
-  const reservedPrimaryDuplicates = duplicates.filter((entry) => (
+  const reservedPrimaryDuplicates = duplicateSwapEnabled ? swapEligibleDuplicates.filter((entry) => (
     !storageEntrySet.has(entry)
       && entry.classification.requiredSpecial !== true
       && (!entry.classification.provisionsReserve || !proactiveProvisionsEnabled)
       && !entry.classification.protected
-  ));
+  )) : [];
   const reservedEntries = [...keptRequiredSpecial, ...reservedPrimaryDuplicates];
   const directClubEntries = entries.filter(({ classification }) => classification.duplicate !== true);
   const storageBlocked = storageEntries.length > 0
     && (storageFree === null || storageEntries.length > storageFree);
 
+  const storageBlockReasonCode = storageBlocked
+    ? duplicateSwapEnabled ? 'PROTECTED_STORAGE_BLOCKED' : 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED'
+    : null;
   return {
     status: storageBlocked ? 'blocked' : 'ready',
     reason: storageBlocked
-      ? `SBC storage has ${storageFree === null ? 'an unknown number of' : storageFree} free slot(s), but ${storageEntries.length} protected/reserved item(s) require storage`
+      ? duplicateSwapEnabled
+        ? `SBC storage has ${storageFree === null ? 'an unknown number of' : storageFree} free slot(s), but ${storageEntries.length} protected/reserved item(s) require storage`
+        : `native duplicate swaps are disabled and SBC storage has ${storageFree === null ? 'an unknown number of' : storageFree} free slot(s), but ${storageEntries.length} duplicate item(s) require storage`
       : null,
-    reasonCode: storageBlocked ? 'PROTECTED_STORAGE_BLOCKED' : null,
+    reasonCode: storageBlockReasonCode,
     entries,
     directClubItems: directClubEntries.map(({ item }) => item),
     storageItems: storageEntries.map(({ item }) => item),
@@ -391,7 +430,11 @@ export function planRollingOpenedItemRouting(items = [], options = {}) {
       provisionsImmediate: provisionRecoveryEntries.length,
       otherSpecialStored: otherSpecialStorageEntries.length,
       protectedDuplicates: protectedDuplicates.length,
+      swapEligibleDuplicates: swapEligibleDuplicates.length,
+      swapPairLimit: Number.isFinite(swapPairLimit) ? swapPairLimit : null,
+      swapIneligibleDuplicates: swapIneligibleDuplicates.length,
       primaryDuplicates: reservedPrimaryDuplicates.length,
+      duplicateSwapDisabledStorage: duplicateSwapEnabled ? 0 : duplicates.length,
       storageRequired: storageEntries.length,
       storageFree,
     },

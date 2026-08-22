@@ -39,9 +39,9 @@ describe('main panel view template', () => {
       'bronze-loop-runtime-cycle',
       'bronze-loop-runtime-refreshing',
       'bronze-loop-runtime-special',
-      'bronze-loop-runtime-direct',
+      'bronze-loop-runtime-storage-pressure',
       'bronze-loop-runtime-provisions',
-      'bronze-loop-runtime-totw',
+      'bronze-loop-runtime-totw-sbc',
       'bronze-loop-runtime-storage-value',
       'bronze-loop-runtime-storage-track',
       'bronze-loop-runtime-storage-bar',
@@ -55,6 +55,8 @@ describe('main panel view template', () => {
     expect(html).toContain('<div class="bronze-loop-title-label"><span id="bronze-loop-title">Loop Runner v0.6.10</span><button id="bronze-loop-help-overview"');
     expect(html).toContain('id="bronze-loop-rounds" type="number" min="1" max="50" value="7"');
     expect(html).toContain('type="checkbox"> Inventory only');
+    expect(html).toContain('Storage Pressure SBCs');
+    expect(html).toContain('TOTW SBCs');
   });
 
   it('contains every advanced option and command control expected by entry bindings', () => {

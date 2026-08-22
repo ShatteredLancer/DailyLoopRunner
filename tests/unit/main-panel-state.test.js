@@ -158,6 +158,8 @@ describe('main panel state rendering', () => {
       .toContain('Required Special/TOTW recovery off');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Club non-TOTW specials fallback allowed');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('duplicate swap experimental off');
     renderSelectionPolicySummary({
       panel,
       sbcFodderOptions: { ratingSbcMaxCardRating: 87 },
@@ -169,6 +171,7 @@ describe('main panel state rendering', () => {
         rollingProvisionsShortageRecoveryEnabled: true,
         rollingRequiredSpecialRecoveryEnabled: true,
         rollingProtectAllClubNonTotwSpecials: true,
+        rollingDuplicateSwapEnabled: true,
         rollingProvisionsMaxRating: 89,
         rollingRecoveryStorageFirst: true,
         rollingOpenDuplicateProvisionsRewards: true,
@@ -194,6 +197,8 @@ describe('main panel state rendering', () => {
       .toContain('Required Special/TOTW recovery allowed');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Club non-TOTW specials protected');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('duplicate swap experimental enabled');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Active Squad 409 replace/review');
   });

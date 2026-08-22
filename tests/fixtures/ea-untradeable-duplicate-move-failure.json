@@ -1,0 +1,36 @@
+{
+  "request": {
+    "items": [
+      {
+        "id": 101,
+        "definitionId": 501,
+        "pile": 6,
+        "duplicateId": 201,
+        "tradeable": false
+      }
+    ],
+    "destinationPile": 7,
+    "allowStorage": true
+  },
+  "response": {
+    "success": false,
+    "status": 0,
+    "data": {
+      "sourcePile": 0,
+      "destinationPile": 7,
+      "itemIds": [],
+      "clubDuplicates": [],
+      "untradeableSwap": true
+    }
+  },
+  "inventory": {
+    "before": {
+      "unassignedItemIds": [101],
+      "clubItemIds": [201]
+    },
+    "after": {
+      "unassignedItemIds": [101],
+      "clubItemIds": [201]
+    }
+  }
+}

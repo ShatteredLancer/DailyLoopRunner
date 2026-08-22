@@ -3,6 +3,197 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.40] - 2026-08-22
+
+### Release
+
+- Promote the guarded native duplicate-swap transaction, Storage-pressure
+  recovery hardening, background Rolling SBC submission, and confirmed
+  Storage Pressure/TOTW submission telemetry to the `0.8.40` release.
+- Rebuild and validate the root/dist userscripts and release metadata.
+
+## [0.8.35] - 2026-08-22
+
+### Fixed
+
+- Replace the unavailable live `Direct cycles` and `TOTW recoveries` estimates
+  with exact per-run submission counters: `Storage Pressure` increments once
+  per confirmed Storage Pressure challenge, and `TOTW SBCs` increments once per
+  confirmed TOTW challenge. Planned, failed, cancelled, and ambiguous submits
+  are excluded.
+- Productized native duplicate-swap scope: the UI now exposes `off`,
+  `special-only`, `safe-only`, and explicit test-only `all-eligible` modes.
+  Legacy boolean opt-in migrates to `special-only`; controlled swaps require
+  known tradeability, complete value fingerprints, and are limited to one
+  pair per attempt. Unknown card state, extra EA identity mappings, and
+  incomplete responses fail closed.
+- Keep every pending Storage-routed Unassigned duplicate protected during
+  emergency Provisions while native duplicate swaps are disabled. A pending
+  reserve-rated card can no longer inherit the ordinary Provisions reserve
+  consumption permission and resolve to its Club counterpart.
+- Validate the selected duplicate signals again immediately before saving and
+  submitting the recovery squad. If candidate protection ever regresses, a
+  pending Storage signal is rejected independently of the submitted Club item.
+- Preserve the existing Storage-pressure fallback: an infeasible safe
+  Provisions squad remains unavailable, so Rolling can try the configured
+  Storage pressure SBC and gain headroom only by consuming real Storage cards.
+
+## [0.8.34] - 2026-08-22
+
+### Fixed
+
+- Route `DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED` through the existing safe
+  Storage-pressure recovery chain instead of stopping immediately. Rolling
+  first tries emergency Provisions, then the explicitly enabled Storage
+  pressure SBC, and retries the exact pending Storage route only after enough
+  capacity was verifiably released.
+- While native duplicate swaps are disabled, require Storage-pressure recovery
+  squads to consume enough real Storage cards. The pending Unassigned
+  duplicates remain protected and cannot be submitted as duplicate signals by
+  the recovery SBC.
+- Reuse only the exact reverse duplicate mapping created by the active
+  materialization transaction during same-Challenge replanning. This mapping
+  submits the newly materialized Club entity without issuing a second native
+  exchange; every changed, missing, or additional mapping remains blocked.
+- Treat the Repository location as authoritative when restoring the protected
+  Club counterpart. A stale EA entity `pile` scalar no longer blocks an exact
+  Unassigned entity, while item ID, definition, tradeability, chemistry,
+  evolution, upgrades, cosmetics, rarity, and other value fingerprints remain
+  strict.
+
+## [0.8.33] - 2026-08-22
+
+### Changed
+
+- Add `Enable experimental native duplicate swaps` to Selection Policy and
+  keep it disabled for new and existing configurations by default. Enabling it
+  retains the current native Unassigned/Club exchange transaction for targeted
+  real-page testing.
+- With the switch disabled, Rolling routes every newly materialized Unassigned
+  duplicate to SBC Storage before any squad can consume its duplicate signal.
+  If Storage cannot accept the complete batch, Rolling stops with
+  `DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED` without moving a card, creating a
+  journal, or submitting an SBC.
+- Add a final submission guard for any duplicate signal missed by routing. It
+  returns `DUPLICATE_SWAP_DISABLED` before the native EA move and journal write,
+  so disabling the experiment can never fall back to submitting the original
+  Club counterpart.
+- Keep prior-run journal cancellation independent of the new switch. An
+  exchange already performed by an earlier run is still classified and its
+  exact protected Club ID is restored or safely cleared before current
+  inventory is replanned.
+
+### Fixed
+
+- Isolate the still-experimental duplicate materialization chain from normal
+  Rolling submissions. Ordinary cycles and duplicates that fit in Storage no
+  longer enter that chain while the switch is off.
+
+## [0.8.32] - 2026-08-21
+
+### Fixed
+
+- Treat every persisted duplicate-materialization transaction as cancelled at
+  startup instead of attempting to continue the previous run. The reconciled
+  Ledger now classifies every original protected Club item ID independently;
+  the stale journal no longer depends on the old authorized consume item,
+  squad, Challenge, or submission result still being present.
+- If an original protected item is still displaced at startup, restore it and
+  then clear the prior-run journal. Startup recovery never resumes the old SBC
+  submission or requires the old squad and consume-card placement to survive
+  across sessions.
+- Classify every protected ID independently across Club, Unassigned, Storage,
+  Transfer, and missing states. Restore only exact IDs still in Unassigned;
+  preserve external Storage/Transfer moves, warn and continue for IDs that no
+  longer exist, never substitute a same-definition card, and discard malformed
+  journals instead of retrying them forever.
+- Fail closed and retain a valid journal when the reconciled Ledger is absent,
+  throws, returns another item ID or an unknown pile, when an exact Unassigned
+  entity cannot be loaded or moved, when post-move Club reconciliation fails,
+  or when journal deletion fails. A partially restored multi-pair journal is
+  reclassified from current piles on the next startup instead of assuming the
+  previous attempt completed atomically.
+
+## [0.8.31] - 2026-08-21
+
+### Fixed
+
+- Validate an active duplicate transaction against the reconciled Inventory
+  Ledger by exact item ID, definition ID, pile, and a non-stale inventory
+  version. Normalized Ledger snapshots no longer fail transaction-local
+  replanning merely because they omit complete EA chemistry, upgrade, cosmetic,
+  or attribute fields; those value fingerprints remain strictly checked on the
+  live EA entities at the physical swap and restoration boundaries.
+- Verify post-compensation Club restoration and reverse-swap placement through
+  the reconciled Ledger. A transiently missing Club Repository entity can no
+  longer override confirmed exact restoration, while a wrong ID, definition,
+  or pile still fails closed.
+- Clear a `recovery-required` journal automatically when every recorded consume
+  item is exactly back in Unassigned and every original protected counterpart
+  is unchanged in Club. Ambiguous submission outcomes remain blocked.
+- Preserve and log the original transaction-local replan failure when its
+  compensation also fails, so the triggering planner error is not hidden by a
+  later restoration error.
+
+## [0.8.30] - 2026-08-21
+
+### Fixed
+
+- Persist each native untradeable duplicate exchange pair immediately from
+  the strict live EA postcondition, before any cache or Ledger refresh. This
+  prevents a transiently missing new Club entity from invalidating a confirmed
+  swap and incorrectly compensating it.
+- Reconcile the persisted exact IDs and piles through the Inventory Ledger
+  after refresh, while retaining full value-fingerprint validation against the
+  live EA entities. The original Club counterpart remains hard-protected.
+
+## [0.8.29] - 2026-08-21
+
+### Fixed
+
+- Treat EA's pile-local `loyaltyBonus` normalization as runtime state rather
+  than persistent card value identity. An old never-materialized duplicate
+  journal can now be cleared when its exact source is safely in Storage and
+  only loyalty changed from `1` to `0`; card version, tradeability, EVO,
+  upgrades, cosmetics, chemistry style, attributes, and rarity remain strict.
+
+## [0.8.28] - 2026-08-21
+
+### Fixed
+
+- Use EA's native two-argument single-entity `Item.move(item, CLUB)` contract
+  for untradeable duplicate exchanges. Multiple pairs are exchanged
+  sequentially; each exact new Club ID and protected counterpart ID is
+  persisted before the next pair, with no Storage staging.
+- Preserve and recover partial duplicate-swap progress by exact identity. A
+  later pair failure compensates only pairs that were physically exchanged;
+  ambiguous or incomplete EA mappings remain fail-closed.
+- Load Rolling Provisions and 5x80 requirement-recovery Challenges directly
+  through the SBC DAO. These guarded background submissions no longer open the
+  SBC Squad screen before saving and submitting their verified inventory squad.
+- Normalize live EA pile enums during duplicate-transaction recovery. A failed
+  swap that left both exact cards unchanged no longer turns a planned journal
+  into a false ambiguous state.
+- Recover the narrow interruption window where EA completed the native swap
+  but Runner had not yet persisted the new Club entity ID. After restoring the
+  protected card, Runner clears the journal only when exactly one remaining
+  Unassigned entity matches the source's complete value fingerprint; changed
+  or non-unique identities remain blocked.
+- Clear a legacy never-materialized journal without moving cards when the exact
+  source has already been routed to Storage and the exact protected counterpart
+  remains unchanged in Club. This does not use Storage as swap staging, and any
+  value-identity change continues to block recovery.
+
+### Diagnostics
+
+- Add an opt-in, bounded native duplicate-swap trace to the console API. It
+  observes the EA Unassigned controller, matching Item service methods, and
+  Observable results without changing the production swap path, and restores
+  every wrapper when stopped or when Runner is destroyed.
+- Report the exact journal role, live pile, expected fingerprint, actual
+  fingerprint, and changed fields when duplicate recovery blocks on value
+  identity, so repository-model drift is distinguishable from a changed card.
+
 ## [0.8.27] - 2026-08-21
 
 ### Fixed

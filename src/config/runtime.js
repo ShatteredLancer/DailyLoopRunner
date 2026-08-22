@@ -17,6 +17,7 @@ export const TRADE_BULK_RELIST_JOURNAL_KEY = 'fc-loop-runner-trade-bulk-relist-j
 export const TRADE_REQUEST_PACING_KEY = 'fc-loop-runner-trade-request-pacing-v1';
 export const TRADE_RECOVERY_AUDIT_KEY = 'fc-loop-runner-trade-recovery-audit-v1';
 export const ROLLING_DUPLICATE_TRANSACTION_KEY = 'fc-loop-runner-rolling-duplicate-transaction-v1';
+export const ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY = 'fc-loop-runner-rolling-pending-required-special-reward-v1';
 
 export const CFG = Object.freeze({
   sourcePackIds: [105],

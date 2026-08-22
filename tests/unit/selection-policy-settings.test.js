@@ -55,6 +55,7 @@ describe('selection policy settings modal', () => {
         rollingProvisionsShortageRecoveryEnabled: false,
         rollingRequiredSpecialRecoveryEnabled: false,
         rollingProtectAllClubNonTotwSpecials: false,
+        rollingDuplicateSwapEnabled: false,
         rollingProvisionsMaxRating: 88,
         rollingRecoveryStorageFirst: false,
         rollingOpenDuplicateProvisionsRewards: false,
@@ -77,6 +78,8 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap-mode').value).toBe('off');
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').children
       .map((option) => [option.value, option.textContent]))
@@ -102,6 +105,7 @@ describe('selection policy settings modal', () => {
     ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked = true;
+    ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap').checked = true;
     ui.byId.get('#bronze-loop-policy-pick-open-at-end').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value = '91';
     ui.byId.get('#bronze-loop-policy-rolling-recovery-storage-first').checked = true;
@@ -126,6 +130,8 @@ describe('selection policy settings modal', () => {
         rollingProvisionsShortageRecoveryEnabled: true,
         rollingRequiredSpecialRecoveryEnabled: true,
         rollingProtectAllClubNonTotwSpecials: true,
+        rollingDuplicateSwapEnabled: true,
+        rollingDuplicateSwapMode: 'special-only',
         rollingProvisionsMaxRating: 91,
         rollingRecoveryStorageFirst: true,
         rollingOpenDuplicateProvisionsRewards: true,
@@ -155,6 +161,8 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap-mode').value).toBe('off');
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
     expect(ui.byId.get('#bronze-loop-policy-rolling-recovery-storage-first').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');

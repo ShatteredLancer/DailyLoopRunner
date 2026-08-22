@@ -118,11 +118,11 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.submitPrimary).toHaveBeenCalledWith(expect.objectContaining({ bootstrap: false }));
   });
 
-  it('recovers a persisted duplicate transaction before pending Pick, Unassigned, or pack work', async () => {
+  it('cancels a prior-run duplicate transaction before pending Pick, Unassigned, or pack work', async () => {
     const calls = [];
     const options = harness({
       initializeInventory: vi.fn(async () => { calls.push('inventory'); return { status: 'ready' }; }),
-      recoverDuplicateTransaction: vi.fn(async () => { calls.push('duplicate-recovery'); return { status: 'ready' }; }),
+      recoverDuplicateTransaction: vi.fn(async () => { calls.push('duplicate-startup-cancellation'); return { status: 'ready' }; }),
       resumePendingPlayerPick: vi.fn(async () => { calls.push('pick'); return { status: 'ready' }; }),
       resumePendingUnassigned: vi.fn(async () => { calls.push('unassigned'); return { status: 'ready' }; }),
       findPrimaryPack: vi.fn(async () => { calls.push('pack'); return null; }),
@@ -130,17 +130,17 @@ describe('10x85+ Rolling workflow', () => {
 
     await runRollingUpgradeWorkflow(options);
 
-    expect(calls).toEqual(['inventory', 'duplicate-recovery', 'pick', 'unassigned', 'pack']);
+    expect(calls).toEqual(['inventory', 'duplicate-startup-cancellation', 'pick', 'unassigned', 'pack']);
   });
 
-  it('stops before any pending inventory or pack work when duplicate recovery is ambiguous', async () => {
+  it('stops before pending inventory or pack work when startup identity classification is untrusted', async () => {
     const resumePendingPlayerPick = vi.fn(async () => ({ status: 'ready' }));
     const resumePendingUnassigned = vi.fn(async () => ({ status: 'ready' }));
     const options = harness({
       recoverDuplicateTransaction: vi.fn(async () => ({
         status: 'blocked',
-        reason: 'duplicate submission outcome is ambiguous',
-        reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
+        reason: 'reconciled Inventory Ledger is unavailable',
+        reasonCode: 'DUPLICATE_STARTUP_INVENTORY_UNTRUSTWORTHY',
       })),
       resumePendingPlayerPick,
       resumePendingUnassigned,
@@ -150,7 +150,7 @@ describe('10x85+ Rolling workflow', () => {
 
     expect(result).toMatchObject({
       status: 'blocked',
-      reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
+      reasonCode: 'DUPLICATE_STARTUP_INVENTORY_UNTRUSTWORTHY',
     });
     expect(resumePendingPlayerPick).not.toHaveBeenCalled();
     expect(resumePendingUnassigned).not.toHaveBeenCalled();
@@ -534,6 +534,61 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.planPrimarySquad).not.toHaveBeenCalled();
   });
 
+  it('recovers Storage headroom before routing duplicates while native swaps are disabled', async () => {
+    const recoverProvisions = vi.fn(async () => ({ status: 'skipped' }));
+    const recoverStorageSink = vi.fn(async () => ({ status: 'submitted', submitted: true }));
+    const options = harness({
+      storageSinkEnabled: true,
+      recoverProvisions,
+      recoverStorageSink,
+      resolveProtectedStorage: vi.fn()
+        .mockResolvedValueOnce({
+          status: 'blocked',
+          reason: 'native duplicate swaps are disabled and SBC storage is full',
+          reasonCode: 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED',
+        })
+        .mockResolvedValue({ status: 'ready' }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({ status: 'completed', completions: 1 });
+    expect(recoverProvisions).toHaveBeenCalledWith(expect.objectContaining({
+      context: expect.objectContaining({ trigger: 'storage-pressure' }),
+    }));
+    expect(recoverStorageSink).toHaveBeenCalledWith(expect.objectContaining({
+      context: expect.objectContaining({ trigger: 'storage-pressure' }),
+    }));
+    expect(options.resolveProtectedStorage).toHaveBeenCalledTimes(2);
+    expect(options.submitPrimary).toHaveBeenCalledOnce();
+  });
+
+  it('keeps disabled-swap duplicates blocked when no Storage pressure sink is enabled', async () => {
+    const recoverProvisions = vi.fn(async () => ({ status: 'skipped' }));
+    const recoverStorageSink = vi.fn(async () => ({ status: 'submitted', submitted: true }));
+    const options = harness({
+      storageSinkEnabled: false,
+      recoverProvisions,
+      recoverStorageSink,
+      resolveProtectedStorage: vi.fn(async () => ({
+        status: 'blocked',
+        reason: 'native duplicate swaps are disabled and SBC storage is full',
+        reasonCode: 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED',
+      })),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      phase: ROLLING_UPGRADE_PHASES.RECOVER_PROVISIONS,
+      reasonCode: 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED',
+    });
+    expect(recoverProvisions).toHaveBeenCalledOnce();
+    expect(recoverStorageSink).not.toHaveBeenCalled();
+    expect(options.submitPrimary).not.toHaveBeenCalled();
+  });
+
   it('preserves the structured Solver reason when the primary squad is infeasible', async () => {
     const options = harness({
       findPrimaryPack: vi.fn(async () => null),
@@ -615,6 +670,97 @@ describe('10x85+ Rolling workflow', () => {
     });
     expect(options.planPrimarySquad).toHaveBeenCalledTimes(2);
     expect(options.recoverRequiredSpecial).toHaveBeenCalledOnce();
+  });
+
+  it('opens a newly submitted Required Special reward before planning another primary squad', async () => {
+    let inventoryVersion = 1;
+    let pendingReward = false;
+    let specialReady = false;
+    const calls = [];
+    const options = harness({
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push(specialReady ? 'plan-primary-ready' : 'plan-primary-shortage');
+        return specialReady
+          ? { ok: true, itemRefs: [{ id: 1 }] }
+          : { ok: false, missing: { code: 'REQUIRED_SPECIAL_SHORTAGE' } };
+      }),
+      recoverRequiredSpecial: vi.fn(async () => {
+        calls.push('submit-totw');
+        pendingReward = true;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true, rewardPackId: 20707 };
+      }),
+      processPendingRecoveryReward: vi.fn(async () => {
+        if (!pendingReward) return { status: 'skipped' };
+        calls.push('open-totw-reward');
+        pendingReward = false;
+        specialReady = true;
+        inventoryVersion++;
+        return { status: 'opened' };
+      }),
+      hasPendingRecoveryReward: vi.fn(async () => pendingReward),
+      submitPrimary: vi.fn(async () => {
+        calls.push('submit-primary');
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      completions: 1,
+      recoveries: { requiredSpecial: 1, reward: 1 },
+    });
+    expect(calls).toEqual([
+      'plan-primary-shortage',
+      'submit-totw',
+      'open-totw-reward',
+      'plan-primary-ready',
+      'submit-primary',
+    ]);
+  });
+
+  it('resumes a persisted recovery reward before finding or opening a primary reward', async () => {
+    let inventoryVersion = 1;
+    let pendingReward = true;
+    const calls = [];
+    const options = harness({
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      resumePendingUnassigned: vi.fn(async () => {
+        calls.push('settle-unassigned');
+        return { status: 'ready' };
+      }),
+      processPendingRecoveryReward: vi.fn(async () => {
+        if (!pendingReward) return { status: 'skipped' };
+        calls.push('open-totw-reward');
+        pendingReward = false;
+        inventoryVersion++;
+        return { status: 'opened' };
+      }),
+      hasPendingRecoveryReward: vi.fn(async () => pendingReward),
+      findPrimaryPack: vi.fn(async () => {
+        calls.push('find-primary-reward');
+        return null;
+      }),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push('plan-primary');
+        return { ok: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      recoveries: { reward: 1 },
+    });
+    expect(calls).toEqual([
+      'settle-unassigned',
+      'open-totw-reward',
+      'find-primary-reward',
+      'plan-primary',
+    ]);
   });
 
   it('uses the Storage pressure SBC when a pending Required Special reward cannot open', async () => {
@@ -1430,6 +1576,40 @@ describe('10x85+ Rolling workflow', () => {
     expect(result).toMatchObject({ status: 'completed', recoveries: { storageSink: 1 } });
     expect(options.recoverStorageSink).toHaveBeenCalledOnce();
     expect(options.resolveProtectedStorage).toHaveBeenCalledTimes(2);
+  });
+
+  it('continues after a submitted Storage Sink Pick has no observable Pick reward', async () => {
+    let inventoryVersion = 1;
+    let storageReady = false;
+    const options = harness({
+      storageSinkEnabled: true,
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      resolveProtectedStorage: vi.fn(async () => storageReady
+        ? { status: 'ready' }
+        : { status: 'blocked', reasonCode: 'PROTECTED_STORAGE_BLOCKED' }),
+      recoverProvisions: vi.fn(async () => ({ status: 'unavailable' })),
+      recoverStorageSink: vi.fn(async () => {
+        storageReady = true;
+        inventoryVersion++;
+        return {
+          status: 'submitted',
+          submitted: true,
+          reason: 'Storage Sink challenge submitted; Player Pick reward was not observed',
+          reasonCode: 'STORAGE_SINK_REWARD_NOT_FOUND_SKIPPED',
+          details: { rewardMissing: true },
+        };
+      }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      completions: 1,
+      recoveries: { storageSink: 1 },
+    });
+    expect(options.recoverStorageSink).toHaveBeenCalledOnce();
+    expect(options.planPrimarySquad).toHaveBeenCalled();
   });
 
   it('keeps the Storage sink disabled by default and preserves the Storage block', async () => {

@@ -8,7 +8,10 @@ import {
   validateDuplicateSubmissionManifest,
 } from '../../src/inventory/duplicate-materialization-transaction.js';
 import { submitSbcAttempt } from '../../src/sbc/submit-attempt.js';
-import { ROLLING_DUPLICATE_TRANSACTION_KEY } from '../../src/config/runtime.js';
+import {
+  ROLLING_DUPLICATE_TRANSACTION_KEY,
+  ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY,
+} from '../../src/config/runtime.js';
 
 function materializedDuplicateTransaction() {
   const source = {
@@ -42,9 +45,1021 @@ function materializedDuplicateTransaction() {
   return { transaction: result.transaction, consume, displaced };
 }
 
+function interruptedUnrecordedDuplicateTransaction() {
+  const source = {
+    id: 101,
+    definitionId: 7001,
+    rating: 95,
+    rareflag: 64,
+    tradeable: false,
+    pile: 'unassigned',
+    playStyle: 250,
+    cosmetics: null,
+  };
+  const counterpart = {
+    ...source,
+    id: 102,
+    pile: 'club',
+    playStyle: 268,
+    cosmetics: [{ id: 7 }],
+  };
+  const transaction = createDuplicateMaterializationTransaction({
+    transactionId: 'tx-interrupted-unrecorded',
+    challengeRef: { setId: 500, challengeId: 501 },
+    beforeInventoryVersion: 8,
+    pairs: [{ sourceSignal: source, protectedCounterpart: counterpart }],
+  });
+  return {
+    transaction,
+    source,
+    materializedConsume: { ...source, id: 103, pile: 'club' },
+    displacedCounterpart: { ...counterpart, pile: 'unassigned' },
+  };
+}
+
+function successfulObservable(result = { success: true, status: 200 }) {
+  return {
+    observe(controller, callback) { callback(this, result); },
+    unobserve() {},
+  };
+}
+
+function installInventoryRecoveryService(window, inventoryPiles, onMove) {
+  window.services.Item.requestUnassignedItems = () => successfulObservable();
+  window.services.Item.requestClubItems = () => ({ success: true });
+  window.services.Item.move = (item, destination) => {
+    onMove(item, destination);
+    return successfulObservable();
+  };
+  return window.services.Item;
+}
+
 describe('Rolling runtime recovery helpers', () => {
-  it('persists recovery-required before returning an identity validation block', async () => {
+  it('counts only confirmed Storage Pressure and TOTW SBC submissions', async () => {
+    const { api } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const runtime = {
+      telemetryActive: false,
+      storagePressureSbcCount: 0,
+      totwSbcCount: 0,
+    };
+    const loopDef = { maxCompletions: 0, name: '10x85+ Rolling Loop' };
+
+    expect(api.recordRollingSbcSubmissionResult(
+      runtime,
+      loopDef,
+      'storage-pressure',
+      { status: 'planned', submitted: false },
+    )).toBe(0);
+    expect(runtime.storagePressureSbcCount).toBe(0);
+    expect(api.recordRollingSbcSubmissionResult(
+      runtime,
+      loopDef,
+      'storage-pressure',
+      { status: 'submitted', submitted: true },
+    )).toBe(1);
+    expect(api.recordRollingSbcSubmissionResult(
+      runtime,
+      loopDef,
+      'storage-pressure',
+      { status: 'submitted', submitted: true },
+    )).toBe(2);
+    expect(api.recordRollingSbcSubmissionResult(
+      runtime,
+      loopDef,
+      'totw',
+      { status: 'submitted', submitted: true },
+    )).toBe(1);
+    expect(api.recordRollingSbcSubmissionResult(
+      runtime,
+      loopDef,
+      'totw',
+      { status: 'blocked', submitted: false },
+    )).toBe(1);
+    expect(runtime).toMatchObject({ storagePressureSbcCount: 2, totwSbcCount: 1 });
+  });
+
+  it('persists a submitted TOTW recovery reward so restart can open it before the primary loop', async () => {
+    const { api, userscriptValues } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const runtime = { pendingRecoveryReward: null };
+    const loopDef = { id: 'rolling-upgrade-900-85', name: '10x85+ Rolling Loop' };
+    const definition = {
+      name: '84+ TOTW Upgrade',
+      dynamicSbcFamily: 'totw-upgrade',
+    };
+
+    const result = api.queueRollingPendingRequiredSpecialReward(
+      runtime,
+      loopDef,
+      definition,
+      { status: 'submitted', submitted: true, rewardPackId: 20707 },
+    );
+
+    expect(result).toMatchObject({ submitted: true });
+    expect(runtime.pendingRecoveryReward).toMatchObject({
+      rewardPackId: 20707,
+      loopId: loopDef.id,
+      persisted: true,
+    });
+    expect(userscriptValues.get(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY)).toMatchObject({
+      version: 1,
+      loopId: loopDef.id,
+      rewardPackId: 20707,
+    });
+
+    api.clearRollingPendingRequiredSpecialReward(runtime);
+    expect(runtime.pendingRecoveryReward).toBeNull();
+    expect(userscriptValues.has(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY)).toBe(false);
+  });
+
+  it('detects one pre-journal TOTW reward from the live My Packs repository on startup', async () => {
+    const rewardPack = { id: 20707, name: '84+ TOTW Player Pack' };
+    const { api } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      packs: [rewardPack],
+    });
+    const runtime = { pendingRecoveryReward: null };
+    const loopDef = {
+      id: 'rolling-upgrade-900-85',
+      name: '10x85+ Rolling Loop',
+      rollingTotwUpgrade: {
+        name: '84+ TOTW Upgrade',
+        dynamicSbcFamily: 'totw-upgrade',
+        activityResolved: true,
+        sbcSetIds: [20841],
+        rewardPackIds: [20707],
+      },
+    };
+
+    expect(await api.detectRollingPendingRequiredSpecialReward(loopDef, runtime)).toBe(true);
+    expect(runtime.pendingRecoveryReward).toMatchObject({
+      definition: expect.objectContaining({ dynamicSbcFamily: 'totw-upgrade' }),
+      rewardPackId: null,
+      detectedExisting: true,
+    });
+
+  });
+
+  it('blocks an overlooked duplicate before any native move or journal when swaps are disabled', async () => {
+    const signal = makePlayer({
+      id: 91,
+      definitionId: 9091,
+      rating: 87,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: 92,
+      untradeable: true,
+    });
+    signal.pile = 'unassigned';
+    const counterpart = makePlayer({
+      id: 92,
+      definitionId: 9091,
+      rating: 87,
+      rareflag: 1,
+      untradeable: true,
+    });
+    counterpart.pile = 'club';
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [counterpart],
+      unassigned: [signal],
+    });
+    const move = vi.fn(() => successfulObservable());
+    window.services = { Item: { move } };
+    const runtime = {
+      duplicateSwapEnabled: false,
+      duplicateMaterializationTransaction: null,
+    };
+
+    const result = await api.prepareRollingUntradeableDuplicateSwaps({
+      label: 'Rolling duplicate switch guard',
+      players: [counterpart],
+      squadPlan: {
+        selection: {
+          entries: [{ pileName: 'unassigned', signal, item: counterpart }],
+        },
+      },
+    }, runtime);
+
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'DUPLICATE_SWAP_DISABLED',
+    });
+    expect(move).not.toHaveBeenCalled();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(inventoryPiles.club).toEqual([counterpart]);
+    expect(inventoryPiles.unassigned).toEqual([signal]);
+  });
+
+  it('reuses the exact reverse duplicate signal after native swap without starting another swap', async () => {
     const { transaction, consume, displaced } = materializedDuplicateTransaction();
+    consume.tradeable = false;
+    displaced.tradeable = false;
+    displaced.duplicateId = consume.id;
+    const { api } = await loadUserscript({
+      club: [consume],
+      unassigned: [displaced],
+    });
+    const runtime = {
+      duplicateSwapEnabled: true,
+      duplicateMaterializationTransaction: transaction,
+    };
+
+    const result = await api.prepareRollingUntradeableDuplicateSwaps({
+      label: 'Rolling reverse signal replan',
+      players: [consume],
+      squadPlan: {
+        selection: {
+          entries: [{ pileName: 'unassigned', signal: displaced, item: consume }],
+        },
+      },
+    }, runtime);
+
+    expect(result).toMatchObject({
+      ok: true,
+      changed: false,
+      transactionReused: true,
+      details: { matchedSwapCount: 1 },
+    });
+    expect(runtime.duplicateMaterializationTransaction).toBe(transaction);
+  });
+
+  it('starts ready without a persisted duplicate journal', async () => {
+    const { api } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const runtime = {
+      duplicateMaterializationTransaction: api.readPersistedRollingDuplicateTransaction(),
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: () => null }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'No journal');
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(runtime.coordinator.reconcile).not.toHaveBeenCalled();
+  });
+
+  it('recovers an interrupted unrecorded swap from one exact Unassigned fingerprint match', async () => {
+    const { transaction, materializedConsume, displacedCounterpart } = interruptedUnrecordedDuplicateTransaction();
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [materializedConsume],
+      unassigned: [displacedCounterpart],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const moves = [];
+    installInventoryRecoveryService(window, inventoryPiles, (item, destination) => {
+      moves.push({ id: item.id, destination });
+      inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(displacedCounterpart), 1);
+      inventoryPiles.club.splice(inventoryPiles.club.indexOf(materializedConsume), 1);
+      displacedCounterpart.pile = 'club';
+      materializedConsume.pile = 'unassigned';
+      inventoryPiles.club.push(displacedCounterpart);
+      inventoryPiles.unassigned.push(materializedConsume);
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: { reconcile: vi.fn(async () => ({ ok: true })) },
+    };
+
+    const result = await api.recoverPersistedRollingDuplicateTransaction(runtime, 'Interrupted swap');
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(moves).toEqual([{ id: 102, destination: 'club' }]);
+    expect(inventoryPiles.club).toEqual([displacedCounterpart]);
+    expect(inventoryPiles.unassigned).toEqual([materializedConsume]);
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('clears the legacy ambiguous journal after the protected card was already restored exactly', async () => {
+    const { transaction, materializedConsume, displacedCounterpart } = interruptedUnrecordedDuplicateTransaction();
+    const legacyAmbiguous = transitionDuplicateMaterializationTransaction(
+      transaction,
+      'ambiguous',
+      { reason: 'interrupted swap was restored without a confirmed materialized consume item identity' },
+    );
+    displacedCounterpart.pile = 'club';
+    materializedConsume.pile = 'unassigned';
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [displacedCounterpart],
+      unassigned: [materializedConsume],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: legacyAmbiguous },
+    });
+    const move = vi.fn();
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const runtime = {
+      duplicateMaterializationTransaction: legacyAmbiguous,
+      coordinator: { reconcile: vi.fn(async () => ({ ok: true })) },
+    };
+
+    const result = await api.recoverPersistedRollingDuplicateTransaction(runtime, 'Legacy restored swap');
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(move).not.toHaveBeenCalled();
+    expect(inventoryPiles.club).toEqual([displacedCounterpart]);
+    expect(inventoryPiles.unassigned).toEqual([materializedConsume]);
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('clears a legacy ambiguous journal after the exact source was safely routed to Storage', async () => {
+    const { transaction, source, displacedCounterpart } = interruptedUnrecordedDuplicateTransaction();
+    const legacyAmbiguous = transitionDuplicateMaterializationTransaction(
+      transaction,
+      'ambiguous',
+      { reason: 'planned duplicate materialization journal has ambiguous inventory state' },
+    );
+    source.pile = 'storage';
+    displacedCounterpart.pile = 'club';
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [displacedCounterpart],
+      storage: [source],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: legacyAmbiguous },
+    });
+    const move = vi.fn();
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const runtime = {
+      duplicateMaterializationTransaction: legacyAmbiguous,
+      coordinator: { reconcile: vi.fn(async () => ({ ok: true })) },
+    };
+
+    const result = await api.recoverPersistedRollingDuplicateTransaction(runtime, 'Safely stored source');
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(move).not.toHaveBeenCalled();
+    expect(inventoryPiles.club).toEqual([displacedCounterpart]);
+    expect(inventoryPiles.storage).toEqual([source]);
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('clears the safely stored legacy source when EA normalized only its loyalty bonus', async () => {
+    const { transaction, source, displacedCounterpart } = interruptedUnrecordedDuplicateTransaction();
+    source.loyaltyBonus = 1;
+    const journalWithLoyalty = createDuplicateMaterializationTransaction({
+      ...transaction,
+      pairs: [{ sourceSignal: source, protectedCounterpart: displacedCounterpart }],
+    });
+    const legacyAmbiguous = transitionDuplicateMaterializationTransaction(
+      journalWithLoyalty,
+      'ambiguous',
+      { reason: 'planned duplicate materialization journal has ambiguous inventory state' },
+    );
+    source.pile = 'storage';
+    source.loyaltyBonus = 0;
+    displacedCounterpart.pile = 'club';
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [displacedCounterpart],
+      storage: [source],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: legacyAmbiguous },
+    });
+    const move = vi.fn();
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const runtime = {
+      duplicateMaterializationTransaction: legacyAmbiguous,
+      coordinator: { reconcile: vi.fn(async () => ({ ok: true })) },
+    };
+
+    const result = await api.recoverPersistedRollingDuplicateTransaction(
+      runtime,
+      'Loyalty-normalized stored source',
+    );
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(move).not.toHaveBeenCalled();
+    expect(inventoryPiles.club).toEqual([displacedCounterpart]);
+    expect(inventoryPiles.storage).toEqual([source]);
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('keeps the journal blocked when an interrupted unrecorded swap has two fingerprint matches', async () => {
+    const { transaction, materializedConsume, displacedCounterpart } = interruptedUnrecordedDuplicateTransaction();
+    const secondCandidate = { ...materializedConsume, id: 104, pile: 'unassigned' };
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [materializedConsume],
+      unassigned: [displacedCounterpart, secondCandidate],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    installInventoryRecoveryService(window, inventoryPiles, () => {
+      inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(displacedCounterpart), 1);
+      inventoryPiles.club.splice(inventoryPiles.club.indexOf(materializedConsume), 1);
+      displacedCounterpart.pile = 'club';
+      materializedConsume.pile = 'unassigned';
+      inventoryPiles.club.push(displacedCounterpart);
+      inventoryPiles.unassigned.push(materializedConsume);
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: { reconcile: vi.fn(async () => ({ ok: true })) },
+    };
+
+    const result = await api.recoverPersistedRollingDuplicateTransaction(runtime, 'Ambiguous swap');
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_MATERIALIZATION_COMPENSATION_BLOCKED',
+    });
+    expect(result.reason).toContain('could not uniquely identify');
+    expect(runtime.duplicateMaterializationTransaction).toMatchObject({ status: 'recovery-required' });
+    expect(userscriptValues.get(ROLLING_DUPLICATE_TRANSACTION_KEY)).toMatchObject({ status: 'recovery-required' });
+  });
+
+  it('does not restore an interrupted protected counterpart whose value fingerprint changed', async () => {
+    const { transaction, materializedConsume, displacedCounterpart } = interruptedUnrecordedDuplicateTransaction();
+    displacedCounterpart.playStyle = 250;
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [materializedConsume],
+      unassigned: [displacedCounterpart],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const move = vi.fn();
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: { reconcile: vi.fn(async () => ({ ok: true })) },
+    };
+
+    const result = await api.recoverPersistedRollingDuplicateTransaction(runtime, 'Changed protected card');
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
+    });
+    expect(result.reason).toContain('changed value identity');
+    expect(move).not.toHaveBeenCalled();
+    expect(userscriptValues.get(ROLLING_DUPLICATE_TRANSACTION_KEY)).toMatchObject({ status: 'ambiguous' });
+  });
+
+  it('cancels a prior-run transaction even when new duplicate swaps are disabled', async () => {
+    const { transaction, displaced } = materializedDuplicateTransaction();
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [],
+      unassigned: [displaced],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    installInventoryRecoveryService(window, inventoryPiles, () => {
+      inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(displaced), 1);
+      displaced.pile = 'club';
+      inventoryPiles.club.push(displaced);
+    });
+    const runtime = {
+      duplicateSwapEnabled: false,
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: ({ id }) => id === displaced.id ? displaced : null }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Unknown submission');
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(inventoryPiles.club).toEqual([displaced]);
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('clears an ambiguous prior-run journal from reconciled Ledger when Repository omits the restored Club card', async () => {
+    const { transaction, displaced } = materializedDuplicateTransaction();
+    const ambiguous = transitionDuplicateMaterializationTransaction(transaction, 'ambiguous', {
+      reason: 'submission outcome is unknown from a prior run',
+    });
+    displaced.pile = 'club';
+    const { api, userscriptValues } = await loadUserscript({
+      club: [],
+      unassigned: [],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: ambiguous },
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: ambiguous,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({
+          resolveItem: ({ id }) => id === displaced.id ? displaced : null,
+        }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Ledger-only restored transaction');
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it.each(['storage', 'transfer'])('keeps a prior-run protected ID in %s and clears the journal', async (pile) => {
+    const { transaction, displaced } = materializedDuplicateTransaction();
+    displaced.pile = pile;
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      [pile]: [displaced],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const move = vi.fn();
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: ({ id }) => id === displaced.id ? displaced : null }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, `Protected in ${pile}`);
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(move).not.toHaveBeenCalled();
+    expect(displaced.pile).toBe(pile);
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('warns and clears when a prior-run protected ID no longer exists in any pile', async () => {
+    const { transaction } = materializedDuplicateTransaction();
+    const { api, userscriptValues } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: () => null }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Missing protected identity');
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('restores an exact prior-run protected ID even when its definition changed', async () => {
+    const { transaction, displaced } = materializedDuplicateTransaction();
+    displaced.definitionId = 7999;
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      unassigned: [displaced],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    installInventoryRecoveryService(window, inventoryPiles, () => {
+      inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(displaced), 1);
+      displaced.pile = 'club';
+      inventoryPiles.club.push(displaced);
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: ({ id }) => id === displaced.id ? displaced : null }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Changed definition');
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(displaced).toMatchObject({ id: 102, definitionId: 7999, pile: 'club' });
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('clears a malformed persisted journal instead of retrying it forever', async () => {
+    const { api, userscriptValues } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: { broken: true } },
+    });
+    const invalid = api.readPersistedRollingDuplicateTransaction();
+    const runtime = {
+      duplicateMaterializationTransaction: invalid,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: () => null }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Malformed journal');
+
+    expect(invalid).toMatchObject({ status: 'invalid', pairs: [] });
+    expect(result).toEqual({ status: 'ready' });
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('discards a malformed journal before inventory reconciliation', async () => {
+    const { api } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: { broken: true } },
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: api.readPersistedRollingDuplicateTransaction(),
+      coordinator: { reconcile: vi.fn(async () => ({ ok: false, reason: 'inventory unavailable' })) },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Malformed before inventory');
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(runtime.coordinator.reconcile).not.toHaveBeenCalled();
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+  });
+
+  it('blocks a valid prior-run journal when initial inventory reconciliation fails', async () => {
+    const { transaction } = materializedDuplicateTransaction();
+    const { api, userscriptValues } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: { reconcile: vi.fn(async () => ({ ok: false, reason: 'inventory unavailable' })) },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Inventory unavailable');
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reason: 'inventory unavailable',
+      reasonCode: 'INVENTORY_RECONCILIATION_FAILED',
+    });
+    expect(runtime.duplicateMaterializationTransaction).toBe(transaction);
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(true);
+  });
+
+  it('blocks and retains a valid journal when initial inventory reconciliation throws', async () => {
+    const { transaction } = materializedDuplicateTransaction();
+    const { api, userscriptValues } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: { reconcile: vi.fn(async () => { throw new Error('ledger crashed'); }) },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Inventory exception');
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'INVENTORY_RECONCILIATION_FAILED',
+    });
+    expect(result.reason).toContain('ledger crashed');
+    expect(runtime.duplicateMaterializationTransaction).toBe(transaction);
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(true);
+  });
+
+  it('blocks when reconciled inventory returns a different item for the protected ID', async () => {
+    const { transaction } = materializedDuplicateTransaction();
+    const wrongItem = { id: 999, definitionId: 7001, pile: 'club' };
+    const { api, userscriptValues } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: () => wrongItem }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Untrusted inventory');
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_STARTUP_INVENTORY_UNTRUSTWORTHY',
+    });
+    expect(runtime.duplicateMaterializationTransaction).toBe(transaction);
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(true);
+  });
+
+  it('blocks and retains the journal when reconciliation returns without a usable Ledger', async () => {
+    const { transaction } = materializedDuplicateTransaction();
+    const { api, userscriptValues } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => null,
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Missing Ledger');
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_STARTUP_INVENTORY_UNTRUSTWORTHY',
+    });
+    expect(runtime.duplicateMaterializationTransaction).toBe(transaction);
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(true);
+  });
+
+  it('blocks when Ledger sees the protected ID in Unassigned but its live EA entity is unavailable', async () => {
+    const { transaction, displaced } = materializedDuplicateTransaction();
+    const { api, userscriptValues } = await loadUserscript({
+      unassigned: [],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: ({ id }) => id === displaced.id ? displaced : null }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Missing live entity');
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_STARTUP_PROTECTED_ENTITY_UNAVAILABLE',
+    });
+    expect(runtime.duplicateMaterializationTransaction).toBe(transaction);
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(true);
+  });
+
+  it('blocks and retains the journal when prior-run protected restoration throws', async () => {
+    const { transaction, displaced } = materializedDuplicateTransaction();
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      unassigned: [displaced],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    installInventoryRecoveryService(window, inventoryPiles, () => {
+      throw new Error('EA move rejected');
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: ({ id }) => id === displaced.id ? displaced : null }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Restore rejected');
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_STARTUP_PROTECTED_RESTORE_FAILED',
+    });
+    expect(result.reason).toContain('EA move rejected');
+    expect(runtime.duplicateMaterializationTransaction).toBe(transaction);
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(true);
+  });
+
+  it('blocks when a prior-run restoration cannot be reconciled in Club', async () => {
+    const { transaction, displaced } = materializedDuplicateTransaction();
+    const staleLedgerItem = { ...displaced };
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      unassigned: [displaced],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    installInventoryRecoveryService(window, inventoryPiles, () => {
+      inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(displaced), 1);
+      displaced.pile = 'club';
+      inventoryPiles.club.push(displaced);
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: ({ id }) => id === staleLedgerItem.id ? staleLedgerItem : null }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Unverified restore');
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_STARTUP_PROTECTED_RESTORE_UNVERIFIED',
+    });
+    expect(runtime.duplicateMaterializationTransaction).toBe(transaction);
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(true);
+  });
+
+  it('blocks after safe startup classification when journal deletion is unavailable', async () => {
+    const { transaction, displaced } = materializedDuplicateTransaction();
+    displaced.pile = 'club';
+    const { api, userscriptValues } = await loadUserscript({
+      club: [displaced],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+      gmDeleteValue: null,
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ resolveItem: ({ id }) => id === displaced.id ? displaced : null }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Journal deletion unavailable');
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_JOURNAL_CLEAR_FAILED',
+    });
+    expect(runtime.duplicateMaterializationTransaction).toBe(transaction);
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(true);
+  });
+
+  it('restores only Unassigned protected IDs in a mixed multi-pair prior run and then clears it', async () => {
+    const makePair = (sourceId, protectedId, definitionId) => ({
+      sourceSignal: {
+        id: sourceId,
+        definitionId,
+        rating: 90,
+        rareflag: 64,
+        pile: 'unassigned',
+      },
+      protectedCounterpart: {
+        id: protectedId,
+        definitionId,
+        rating: 90,
+        rareflag: 64,
+        pile: 'club',
+      },
+    });
+    const transaction = createDuplicateMaterializationTransaction({
+      transactionId: 'tx-startup-mixed-runtime',
+      challengeRef: { setId: 500, challengeId: 501 },
+      pairs: [
+        makePair(101, 102, 7001),
+        makePair(201, 202, 7002),
+        makePair(301, 302, 7003),
+        makePair(401, 402, 7004),
+      ],
+    });
+    const inClub = { id: 102, definitionId: 7001, pile: 'club' };
+    const inUnassigned = { id: 202, definitionId: 7002, pile: 'unassigned' };
+    const inStorage = { id: 302, definitionId: 7003, pile: 'storage' };
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [inClub],
+      unassigned: [inUnassigned],
+      storage: [inStorage],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const move = vi.fn((item) => {
+      inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(item), 1);
+      item.pile = 'club';
+      inventoryPiles.club.push(item);
+    });
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const items = [inClub, inUnassigned, inStorage];
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({
+          resolveItem: ({ id }) => items.find((item) => item.id === id) || null,
+        }),
+      },
+    };
+
+    const result = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Mixed prior run');
+
+    expect(result).toEqual({ status: 'ready' });
+    expect(move).toHaveBeenCalledTimes(1);
+    expect(move.mock.calls[0][0]).toBe(inUnassigned);
+    expect(inClub.pile).toBe('club');
+    expect(inUnassigned.pile).toBe('club');
+    expect(inStorage.pile).toBe('storage');
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('resumes a partially restored multi-pair cancellation from actual piles on the next run', async () => {
+    const makePair = (sourceId, protectedId, definitionId) => ({
+      sourceSignal: { id: sourceId, definitionId, rating: 90, rareflag: 64, pile: 'unassigned' },
+      protectedCounterpart: { id: protectedId, definitionId, rating: 90, rareflag: 64, pile: 'club' },
+    });
+    const transaction = createDuplicateMaterializationTransaction({
+      transactionId: 'tx-startup-partial-restore',
+      challengeRef: { setId: 500, challengeId: 501 },
+      pairs: [makePair(101, 102, 7001), makePair(201, 202, 7002)],
+    });
+    const firstProtected = { id: 102, definitionId: 7001, pile: 'unassigned' };
+    const secondProtected = { id: 202, definitionId: 7002, pile: 'unassigned' };
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      unassigned: [firstProtected, secondProtected],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const moveToClub = (item) => {
+      inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(item), 1);
+      item.pile = 'club';
+      inventoryPiles.club.push(item);
+    };
+    let moveAttempts = 0;
+    installInventoryRecoveryService(window, inventoryPiles, (item) => {
+      moveAttempts++;
+      if (moveAttempts === 2) throw new Error('second restore interrupted');
+      moveToClub(item);
+    });
+    const protectedItems = [firstProtected, secondProtected];
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({
+          resolveItem: ({ id }) => protectedItems.find((item) => item.id === id) || null,
+        }),
+      },
+    };
+
+    const interrupted = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Partial restore');
+
+    expect(interrupted).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_STARTUP_PROTECTED_RESTORE_FAILED',
+    });
+    expect(firstProtected.pile).toBe('club');
+    expect(secondProtected.pile).toBe('unassigned');
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(true);
+
+    installInventoryRecoveryService(window, inventoryPiles, moveToClub);
+    const resumed = await api.cancelPriorRunRollingDuplicateTransaction(runtime, 'Partial restore retry');
+
+    expect(resumed).toEqual({ status: 'ready' });
+    expect(firstProtected.pile).toBe('club');
+    expect(secondProtected.pile).toBe('club');
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('accepts a newer normalized Ledger snapshot when exact materialized identities and piles remain bound', async () => {
+    const { transaction, consume, displaced } = materializedDuplicateTransaction();
+    const { api } = await loadUserscript({
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        getLedger: () => ({
+          summary: () => ({ inventoryVersion: 10 }),
+          resolveItem: ({ id }) => [consume, displaced].find((item) => item.id === id) || null,
+        }),
+      },
+    };
+
+    const result = api.rollingDuplicateTransactionPlanningContext(
+      runtime,
+      { id: 500 },
+      { id: 501 },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      inventoryVersion: 10,
+      consumeRefs: [{ id: consume.id, pile: 'club' }],
+      protectedRefs: [{ id: displaced.id, pile: 'unassigned' }],
+    });
+    expect(runtime.duplicateMaterializationTransaction).toMatchObject({ status: 'materialized' });
+  });
+
+  it('persists recovery-required before returning an exact Ledger identity or pile block', async () => {
+    const { transaction, consume, displaced } = materializedDuplicateTransaction();
+    displaced.pile = 'club';
     const { api, userscriptValues } = await loadUserscript({
       userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
     });
@@ -68,15 +1083,8 @@ describe('Rolling runtime recovery helpers', () => {
       ok: false,
       reasonCode: 'DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED',
     });
-    expect(runtime.duplicateMaterializationTransaction).toMatchObject({
-      status: 'recovery-required',
-    });
-    expect(userscriptValues.get(ROLLING_DUPLICATE_TRANSACTION_KEY)).toMatchObject({
-      status: 'recovery-required',
-    });
-    expect(api.readPersistedRollingDuplicateTransaction()).toMatchObject({
-      status: 'recovery-required',
-    });
+    expect(runtime.duplicateMaterializationTransaction).toMatchObject({ status: 'recovery-required' });
+    expect(userscriptValues.get(ROLLING_DUPLICATE_TRANSACTION_KEY)).toMatchObject({ status: 'recovery-required' });
   });
 
   it('compensates a materialized duplicate transaction when submission blocks', async () => {
@@ -359,6 +1367,133 @@ describe('Rolling runtime recovery helpers', () => {
       reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
       details: { originalFailure: { reason: 'saved squad changed' } },
     });
+    expect(result.reason).toContain('materialized consume item disappeared');
+  });
+
+  it('completes compensation from reconciled Ledger when Club Repository briefly omits restored cards', async () => {
+    const { transaction, consume, displaced } = materializedDuplicateTransaction();
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [consume],
+      unassigned: [displaced],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const moves = [];
+    installInventoryRecoveryService(window, inventoryPiles, (item, destination) => {
+      moves.push({ id: item.id, destination });
+      inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(displaced), 1);
+      inventoryPiles.club.splice(inventoryPiles.club.indexOf(consume), 1);
+      displaced.pile = 'club';
+      consume.pile = 'unassigned';
+      inventoryPiles.unassigned.push(consume);
+      // Intentionally leave the restored card out of the Club Repository.
+      // The post-move Ledger snapshot is the authoritative identity/pile view.
+    });
+    const ledger = {
+      resolveItem: ({ id }) => [consume, displaced].find((item) => item.id === id) || null,
+    };
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ledger,
+      },
+    };
+
+    const result = await api.finalizeRollingDuplicateMaterialization(
+      runtime,
+      'Repository-lag compensation',
+      { submissionConfirmed: false },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(moves).toEqual([{ id: displaced.id, destination: 'club' }]);
+    expect(inventoryPiles.club).not.toContain(displaced);
+    expect(runtime.duplicateMaterializationTransaction).toMatchObject({ status: 'completed' });
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('restores a protected counterpart from the Unassigned Repository when its EA pile scalar is stale', async () => {
+    const { transaction, consume, displaced } = materializedDuplicateTransaction();
+    displaced.pile = 'club';
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [consume],
+      unassigned: [displaced],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const moves = [];
+    installInventoryRecoveryService(window, inventoryPiles, (item, destination) => {
+      moves.push({ id: item.id, destination });
+      inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(displaced), 1);
+      inventoryPiles.club.splice(inventoryPiles.club.indexOf(consume), 1);
+      displaced.pile = 'club';
+      consume.pile = 'unassigned';
+      inventoryPiles.club.push(displaced);
+      inventoryPiles.unassigned.push(consume);
+    });
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({
+          resolveItem: ({ id }) => [consume, displaced].find((item) => item.id === id) || null,
+        }),
+      },
+    };
+
+    const result = await api.finalizeRollingDuplicateMaterialization(
+      runtime,
+      'Stale protected pile scalar',
+      { submissionConfirmed: false },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(moves).toEqual([{ id: displaced.id, destination: 'club' }]);
+    expect(runtime.duplicateMaterializationTransaction).toMatchObject({ status: 'completed' });
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('fails closed after compensation when reconciled Ledger reports the wrong restored definition', async () => {
+    const { transaction, consume, displaced } = materializedDuplicateTransaction();
+    const { api, window, inventoryPiles } = await loadUserscript({
+      club: [consume],
+      unassigned: [displaced],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    installInventoryRecoveryService(window, inventoryPiles, () => {
+      inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(displaced), 1);
+      inventoryPiles.club.splice(inventoryPiles.club.indexOf(consume), 1);
+      displaced.pile = 'club';
+      consume.pile = 'unassigned';
+      inventoryPiles.unassigned.push(consume);
+    });
+    const wrongProtectedSnapshot = { ...displaced, definitionId: 7999, pile: 'club' };
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({
+          resolveItem: ({ id }) => id === displaced.id ? wrongProtectedSnapshot : consume,
+        }),
+      },
+    };
+
+    const result = await api.finalizeRollingDuplicateMaterialization(
+      runtime,
+      'Wrong Ledger identity',
+      { submissionConfirmed: false },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'DUPLICATE_COUNTERPART_IDENTITY_CHANGED',
+    });
+    expect(runtime.duplicateMaterializationTransaction).toMatchObject({ status: 'recovery-required' });
   });
 
   it('runs swap, local replan, all identity guards, transport, and B restoration in order', async () => {
@@ -970,6 +2105,60 @@ describe('Rolling runtime recovery helpers', () => {
       .toEqual(primaryDuplicates.map((item) => item.id));
   });
 
+  it('retries disabled-swap routing after recovery creates enough Storage headroom', async () => {
+    const duplicate = makePlayer({
+      id: 725,
+      definitionId: 9725,
+      rating: 95,
+      duplicate: true,
+      duplicateId: 1725,
+    });
+    duplicate.pile = 'unassigned';
+    const { api, window, inventoryPiles } = await loadUserscript({
+      unassigned: [duplicate],
+      pileSizes: { storage: 100 },
+      pileCounts: { storage: 99 },
+      fastTimers: true,
+    });
+    window.services.Item.requestUnassignedItems = () => successfulObservable();
+    window.services.Item.requestStorageItems = () => successfulObservable();
+    window.services.Item.move = (items, destination) => {
+      for (const item of items) {
+        inventoryPiles.unassigned.splice(inventoryPiles.unassigned.indexOf(item), 1);
+        item.pile = 'storage';
+        inventoryPiles.storage.push(item);
+      }
+      return successfulObservable();
+    };
+    const runtime = {
+      duplicateSwapEnabled: false,
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [duplicate],
+      openRouting: {
+        status: 'blocked',
+        reason: 'native duplicate swaps are disabled and SBC storage needs one slot',
+        reasonCode: 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED',
+        reservedItems: [],
+        storageItems: [duplicate],
+        deferredPrimaryRefs: [],
+      },
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ classifiedEntries: () => [] }),
+      },
+    };
+
+    const result = await api.retryRollingProtectedStorage(
+      { name: 'Disabled swap Storage retry' },
+      runtime,
+    );
+
+    expect(result).toMatchObject({ status: 'ready' });
+    expect(inventoryPiles.unassigned).toEqual([]);
+    expect(inventoryPiles.storage).toContain(duplicate);
+    expect(runtime.openRouting).toMatchObject({ status: 'ready', reasonCode: null });
+  });
+
   it('preserves the existing primary duplicate behavior for a ready route', async () => {
     const duplicate = makePlayer({
       id: 660,
@@ -1143,6 +2332,47 @@ describe('Rolling runtime recovery helpers', () => {
     expect(pressure.role.matches(storage[2])).toBe(false);
   });
 
+  it('keeps pending Unassigned duplicates protected from Storage Sink while swaps are disabled', async () => {
+    const pending = [
+      { id: 761, definitionId: 9761, pile: 'unassigned' },
+      { id: 762, definitionId: 9762, pile: 'unassigned' },
+    ];
+    const { api } = await loadUserscript();
+
+    expect(api.rollingStorageSinkConsumablePendingRefs({
+      duplicateSwapEnabled: false,
+    }, pending)).toEqual([]);
+    expect(api.rollingStorageSinkConsumablePendingRefs({
+      duplicateSwapEnabled: true,
+      duplicateSwapMode: 'all-eligible',
+    }, pending)).toEqual(pending);
+    expect(api.rollingStorageSinkConsumablePendingRefs({
+      duplicateSwapEnabled: true,
+      duplicateSwapMode: 'special-only',
+    }, pending)).toEqual([]);
+  });
+
+  it('protects every pending emergency Provisions item while swaps are disabled', async () => {
+    const reserve = makePlayer({ id: 763, definitionId: 9763, rating: 88, duplicate: true });
+    const ordinary = makePlayer({ id: 764, definitionId: 9764, rating: 86, duplicate: true });
+    const reserveIds = new Set([reserve.id]);
+    const { api } = await loadUserscript();
+
+    expect(api.rollingEmergencyProvisionsProtectedRefs({
+      duplicateSwapEnabled: false,
+      openRouting: { storageItems: [reserve, ordinary] },
+    }, reserveIds)).toEqual([
+      expect.objectContaining({ id: reserve.id, pile: 'unassigned' }),
+      expect.objectContaining({ id: ordinary.id, pile: 'unassigned' }),
+    ]);
+    expect(api.rollingEmergencyProvisionsProtectedRefs({
+      duplicateSwapEnabled: true,
+      openRouting: { storageItems: [reserve, ordinary] },
+    }, reserveIds)).toEqual([
+      expect.objectContaining({ id: ordinary.id, pile: 'unassigned' }),
+    ]);
+  });
+
   it('releases only explicitly eligible pending Storage cards from Sink protection', async () => {
     const pending = makePlayer({
       id: 721,
@@ -1287,6 +2517,57 @@ describe('Rolling runtime recovery helpers', () => {
     })).toThrow('recovery squad attempted to consume a protected card');
   });
 
+  it('rejects a pending Storage signal at final recovery validation while swaps are disabled', async () => {
+    const pendingSignal = makePlayer({
+      id: 1741,
+      definitionId: 9741,
+      rating: 86,
+      duplicate: true,
+      duplicateId: 2741,
+    });
+    const clubCounterpart = makePlayer({
+      id: 2741,
+      definitionId: 9741,
+      rating: 86,
+    });
+    const { api } = await loadUserscript();
+    const runtime = {
+      duplicateSwapEnabled: false,
+      openRouting: { storageItems: [pendingSignal] },
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      primaryContext: {},
+      coordinator: {
+        getLedger: () => ({
+          classifiedEntries: () => [{
+            item: clubCounterpart,
+            pile: 'club',
+            classification: { requiredSpecial: false, protected: false },
+          }],
+        }),
+      },
+    };
+    const loopDef = {
+      name: 'Rolling disabled-swap emergency Provisions',
+      runtimeProtectionRating: 95,
+      runtimeProvisionsMaxRating: 88,
+    };
+    const selection = {
+      entries: [{
+        pileName: 'unassigned',
+        signal: pendingSignal,
+        item: clubCounterpart,
+      }],
+    };
+
+    expect(() => api.assertRollingRecoveryItems(loopDef, runtime, [clubCounterpart], {
+      allowProvisionsReserve: true,
+      allowSpecial: true,
+      selection,
+      rejectPendingStorageSignals: true,
+    })).toThrow('recovery squad attempted to consume a pending Storage-routed duplicate signal');
+  });
+
   it('does not transfer protected-item authorization to same-definition B or C cards', async () => {
     const allowedA = makePlayer({ id: 1801, definitionId: 9801, rating: 86 });
     const protectedB = makePlayer({ id: 1802, definitionId: 9801, rating: 86 });
@@ -1401,6 +2682,52 @@ describe('Rolling runtime recovery helpers', () => {
           totalChallengeCount: 2,
         },
       });
+  });
+
+  it('treats a submitted Storage Sink Pick without an observable reward as progress', async () => {
+    const { api } = await loadUserscript();
+
+    expect(api.rollingStorageSinkMissingPlayerPickResult(
+      { name: '1 of 4 95+ FOF or FUTTIES T1-T4 Player Pick' },
+      { status: 'missing', reasonCode: 'STORAGE_SINK_REWARD_NOT_FOUND' },
+      { targetRating: 90 },
+      { projectedFree: 14, requiredFree: 9 },
+    )).toEqual({
+      status: 'submitted',
+      submitted: true,
+      reason: '1 of 4 95+ FOF or FUTTIES T1-T4 Player Pick challenge submitted; Player Pick reward was not observed, continuing Rolling',
+      reasonCode: 'STORAGE_SINK_REWARD_NOT_FOUND_SKIPPED',
+      details: {
+        rewardMissing: true,
+        submittedRating: 90,
+        headroom: { projectedFree: 14, requiredFree: 9 },
+      },
+    });
+  });
+
+  it('does not assume the final challenge completed the Pick Set when live challenge state disagrees', async () => {
+    const { api, window } = await loadUserscript({ pageReady: true, fastTimers: true });
+    window.services.SBC.requestChallengesForSet = vi.fn(() => successfulObservable({
+      success: true,
+      status: 200,
+      data: {
+        challenges: [
+          { id: 3932, completed: true },
+          { id: 3933, completed: false },
+        ],
+      },
+    }));
+
+    await expect(api.confirmRollingStorageSinkSetCompletion(
+      { id: 1378 },
+      'Storage Sink completion confirmation',
+      2,
+    )).resolves.toMatchObject({
+      confirmed: false,
+      challengeCount: 2,
+      expectedChallengeCount: 2,
+      incompleteChallengeIds: [3933],
+    });
   });
 
   it('falls back from an exhausted automatic Storage Sink to the next cached candidate', async () => {

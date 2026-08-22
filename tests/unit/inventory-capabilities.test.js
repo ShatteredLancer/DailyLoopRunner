@@ -50,11 +50,7 @@ describe('inventory capability calculation', () => {
     })).resolves.toMatchObject({
       inventoryVersion: 1,
       specialSlots: 2,
-      directCycles: null,
-      directCyclesLimited: false,
       provisionsBatches: 2,
-      totwRecoveries: null,
-      totwRecoveriesLimited: false,
       storageUsed: 10,
       storageCapacity: 100,
       calculating: false,
@@ -93,7 +89,7 @@ describe('inventory capability calculation', () => {
     });
     const result = await createInventoryCapabilityCalculator().calculate({ ledger, policyKey: 'unknown' });
 
-    expect(result).toMatchObject({ specialSlots: null, directCycles: null, totwRecoveries: null });
+    expect(result).toMatchObject({ specialSlots: null });
     expect(result.diagnostics.requiredSpecialUnknown).toBe(true);
   });
 

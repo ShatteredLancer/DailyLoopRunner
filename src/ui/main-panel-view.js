@@ -282,13 +282,13 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
         <div class="bronze-loop-scan-progress-head"><span id="bronze-loop-scan-progress-label">Refreshing SBC index</span><span id="bronze-loop-scan-progress-count"></span></div>
         <div id="bronze-loop-scan-progress-track" role="progressbar" aria-label="Dynamic SBC scan progress"><div id="bronze-loop-scan-progress-bar"></div></div>
       </div>
-      <section id="bronze-loop-runtime-telemetry" role="status" aria-live="polite" aria-hidden="true" title="Live ledger metrics; exact Direct and TOTW counts are evaluated only when needed">
+      <section id="bronze-loop-runtime-telemetry" role="status" aria-live="polite" aria-hidden="true" title="Live Rolling submission counters and inventory metrics">
         <div class="bronze-loop-runtime-head"><span id="bronze-loop-runtime-phase">Indexing inventory</span><span id="bronze-loop-runtime-cycle">Cycle 1 / No limit</span><span id="bronze-loop-runtime-refreshing"></span></div>
         <div class="bronze-loop-runtime-grid">
           <span class="bronze-loop-runtime-label">Special ready</span><strong class="bronze-loop-runtime-value" id="bronze-loop-runtime-special">-</strong>
-          <span class="bronze-loop-runtime-label">Direct cycles</span><strong class="bronze-loop-runtime-value" id="bronze-loop-runtime-direct">-</strong>
+          <span class="bronze-loop-runtime-label">Storage Pressure SBCs</span><strong class="bronze-loop-runtime-value" id="bronze-loop-runtime-storage-pressure">0</strong>
           <span class="bronze-loop-runtime-label">Provisions</span><strong class="bronze-loop-runtime-value" id="bronze-loop-runtime-provisions">-</strong>
-          <span class="bronze-loop-runtime-label">TOTW recoveries</span><strong class="bronze-loop-runtime-value" id="bronze-loop-runtime-totw">-</strong>
+          <span class="bronze-loop-runtime-label">TOTW SBCs</span><strong class="bronze-loop-runtime-value" id="bronze-loop-runtime-totw-sbc">0</strong>
         </div>
         <div class="bronze-loop-runtime-storage">
           <span class="bronze-loop-runtime-label">Storage</span><strong id="bronze-loop-runtime-storage-value">- / -</strong>

@@ -34,11 +34,7 @@ export function createInventoryCapabilityCalculator(options = {}) {
       return Object.freeze({
         inventoryVersion: summary.inventoryVersion,
         specialSlots,
-        directCycles: null,
-        directCyclesLimited: false,
         provisionsBatches: Math.floor(provisionsEligible / provisionsRequiredCount),
-        totwRecoveries: null,
-        totwRecoveriesLimited: false,
         storageUsed: Number.isFinite(Number(storage.used)) ? Number(storage.used) : null,
         storageCapacity: storage.max !== undefined && storage.max !== null && Number.isFinite(Number(storage.max))
           ? Number(storage.max)

@@ -38,6 +38,7 @@ import {
   PICK_OPTIONS_KEY,
   REWARD_ALERT_SETTINGS_KEY,
   ROLLING_DUPLICATE_TRANSACTION_KEY,
+  ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY,
   SBC_FODDER_OPTIONS_KEY,
   TRADE_CIRCUIT_KEY,
   TRADE_BUY_JOURNAL_KEY,
@@ -158,17 +159,23 @@ import {
   validateRollingPrimaryDuplicateIdentity,
 } from './inventory/rolling-policy.js';
 import {
+  createDuplicateCardValueFingerprint,
   createDuplicateMaterializationTransaction,
   createDuplicateSubmissionManifest,
   duplicateCardValueFingerprintMatches,
   duplicateTransactionConsumeRefs,
   duplicateTransactionProtectedRefs,
-  materializeDuplicateTransaction,
+  materializeDuplicateTransactionPair,
   planDuplicateMaterializationRecovery,
+  planDuplicateStartupCancellation,
   transitionDuplicateMaterializationTransaction,
-  validateDuplicateMaterializationState,
-  validateDuplicateProtectedRestoration,
+  updateDuplicateMaterializationInventoryVersion,
+  validateDuplicateMaterializationLedgerPair,
+  validateDuplicateMaterializationLedgerState,
+  validateDuplicateProtectedRestorationLedger,
+  validateDuplicateRollbackLedgerState,
   validateDuplicateSubmissionManifest,
+  validateDuplicateTransactionReplanSwapPlan,
 } from './inventory/duplicate-materialization-transaction.js';
 import { runtimeGoldConsumptionMode } from './domain/gold-consumption.js';
 import {
@@ -361,7 +368,13 @@ import {
 } from './sbc/background-submit-retry.js';
 import { decideRollingActiveSquadConflict } from './sbc/rolling-active-squad-conflict.js';
 import {
+  CONTROLLED_DUPLICATE_SWAP_MAX_PAIRS,
+  duplicateCardValueFingerprintIsComplete,
+  evaluateDuplicateSwapEligibility,
+  normalizeDuplicateSwapMode,
   planUntradeableDuplicateSwaps,
+  readDuplicateCardTradeability,
+  readDuplicateSpecialClassification,
   resolveUntradeableDuplicateSwapIds,
   validateUntradeableDuplicateSwapMaterialization,
 } from './sbc/untradeable-duplicate-swap.js';
@@ -500,6 +513,10 @@ const SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED = true;
   const fsuAdapter = () => adapters.fsu();
   const localizationAdapter = adapters.localization;
   const pageRuntime = adapters.page;
+  const nativeDuplicateSwapTrace = adapters.nativeDuplicateSwapTrace({
+    currentController: () => pageRuntime.currentController(),
+    log: (message) => log(message),
+  });
   const identifyRuntimeInventoryItem = createRuntimeObjectIdentityTracker();
   const identifyRuntimePack = createRuntimeObjectIdentityTracker('ea-pack');
   const tradePlayerCatalogProvider = createPlayerCatalogProvider({
@@ -770,6 +787,7 @@ const state = {
 
   function destroyRunner() {
     state.stopping = true;
+    try { nativeDuplicateSwapTrace.stop(); } catch { }
     if (state.bootTimer) clearInterval(state.bootTimer);
     if (state.tradeSchedulerTimer) clearInterval(state.tradeSchedulerTimer);
     state.tradeSchedulerWakeups?.stop?.();
@@ -843,6 +861,9 @@ const state = {
     loadTradePriceQuotes: (options = {}) => tradePriceQuoteProvider.load(options),
     clearTradePriceQuoteCache: () => tradePriceQuoteProvider.clear(),
     inspectTradeProviders,
+    startNativeDuplicateSwapTrace: () => nativeDuplicateSwapTrace.start(),
+    stopNativeDuplicateSwapTrace: () => nativeDuplicateSwapTrace.stop(),
+    getNativeDuplicateSwapTrace: () => nativeDuplicateSwapTrace.get(),
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -2583,6 +2604,36 @@ function updateLoopControls() {
         pile,
         allowStorage,
         items: items.map((item) => captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })),
+        result: captureMoveResult(result),
+      })}`);
+      fail(`Move failed: ${result?.error?.code || result?.status || 'unknown'}`);
+    }
+    await waitLoadingEnd();
+    return result;
+  }
+
+  async function moveSingleItem(item, pile) {
+    if (!item) return null;
+    let result;
+    try {
+      result = await observeOnce(
+        eaInventoryAdapter().moveSingleItem(item, pile),
+        ctrl(),
+        25000,
+        `moveSingleItem(${pile})`,
+      );
+    } catch (error) {
+      log(`Single-item move diagnostic exception: ${diagnosticJson({
+        pile,
+        item: captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem }),
+        error: captureMoveResult(error),
+      })}`);
+      throw error;
+    }
+    if (!result?.success) {
+      log(`Single-item move diagnostic failure: ${diagnosticJson({
+        pile,
+        item: captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem }),
         result: captureMoveResult(result),
       })}`);
       fail(`Move failed: ${result?.error?.code || result?.status || 'unknown'}`);
@@ -10242,17 +10293,34 @@ function updateLoopControls() {
     });
   }
 
+  async function loadBackgroundInventorySbcContext(loopDef, label, options = {}) {
+    const set = await findSbcSetForLoopDef(loopDef, label);
+    const challengeContext = await findAvailableRatingSbcChallengeContext(set, label, { force: true });
+    if (!challengeContext.challenge) return null;
+    const challenge = options.dryRun === true
+      ? challengeContext.challenge
+      : await loadRatingSbcChallengeForSet(set, challengeContext.challenge, label, { force: true });
+    if (!challenge) return null;
+    return { set, challenge, background: true };
+  }
+
   async function submitInventorySbcAttempt(loopDef, selection, options = {}) {
     let openedContext = null;
     const label = options.label || loopDef.name;
     const useBackgroundSubmission = options.submissionMode === 'background';
+    const dryRun = options.dryRun === true || loopDef.dryRun === true;
     const result = await submitSbcAttempt({
       label,
-      dryRun: options.dryRun === true || loopDef.dryRun === true,
+      dryRun,
       challengeProvider: async () => {
         if (options.opened) {
           openedContext = options.opened;
           return options.opened;
+        }
+        if (useBackgroundSubmission) {
+          const opened = await loadBackgroundInventorySbcContext(loopDef, label, { dryRun });
+          openedContext = opened;
+          return opened;
         }
         const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
         const opened = await openSbcSet(set, { returnNullIfComplete: true });
@@ -12054,9 +12122,9 @@ function updateLoopControls() {
     const telemetry = state.runtimeTelemetryController.getSnapshot();
     return {
       specialSlots: telemetry.specialSlots,
-      directCycles: telemetry.directCycles,
+      storagePressureSbcCount: telemetry.storagePressureSbcCount,
       provisionsBatches: telemetry.provisionsBatches,
-      totwRecoveries: telemetry.totwRecoveries,
+      totwSbcCount: telemetry.totwSbcCount,
       storage: telemetry.storageUsed === null || telemetry.storageCapacity === null
         ? null
         : `${telemetry.storageUsed}/${telemetry.storageCapacity}`,
@@ -12394,9 +12462,19 @@ function updateLoopControls() {
   }
 
   function duplicateSwapSnapshot(item, pile) {
+    const tradeable = readDuplicateCardTradeability(item);
+    const special = readDuplicateSpecialClassification(item, isSbcSpecialItem);
     return {
       ...ratingSelectionItemSnapshot(item, pile),
-      tradeable: typeof item?.tradeable === 'boolean' ? item.tradeable : isTradeable(item),
+      // Keep unknown identity state as null. The generic inventory snapshot
+      // historically collapsed unknown tradeability/classification to false,
+      // which is unsafe for a destructive exchange.
+      tradeable,
+      special: special === true,
+      duplicateSpecial: special === true,
+      duplicateSpecialKnown: special !== null,
+      duplicateValueFingerprint: createDuplicateCardValueFingerprint(item),
+      duplicateFingerprintComplete: duplicateCardValueFingerprintIsComplete(item),
       pile,
       ref: liveItemRef(item, pile),
     };
@@ -12420,20 +12498,199 @@ function updateLoopControls() {
     };
   }
 
+  function rollingDuplicateSwapEligibility(item, mode = 'off') {
+    const duplicateId = Number(item?.duplicateId || item?.duplicateSignalId || 0);
+    if (!duplicateId) return false;
+    const target = getClubItems().find((candidate) => (
+      Number(candidate?.id || 0) === duplicateId
+    ));
+    if (!target) return false;
+    return evaluateDuplicateSwapEligibility({
+      source: duplicateSwapSnapshot(item, 'unassigned'),
+      target: duplicateSwapSnapshot(target, 'club'),
+      mode,
+      isSpecial: isSbcSpecialItem,
+    }).eligible;
+  }
+
+  function rollingDuplicateSwapPairLimit(mode) {
+    return ['special-only', 'safe-only'].includes(String(mode || '').trim().toLowerCase())
+      ? CONTROLLED_DUPLICATE_SWAP_MAX_PAIRS
+      : null;
+  }
+
+  async function compensateUnsubmittedDuplicateTransaction(runtime, transaction, label) {
+    try {
+      await refreshInventoryCaches(`${label} partial duplicate compensation lookup`, {
+        includePacks: false,
+        quiet: true,
+      });
+      const pairs = transaction?.pairs || [];
+      const restoredConsumeIdBySource = new Map();
+      const protectedIds = new Set(pairs.map((pair) => Number(pair.protectedCounterpartRef.id)));
+      const claimedRestoredConsumeIds = new Set();
+      for (const pair of pairs) {
+        const protectedLocation = findCachedItemById(
+          pair.protectedCounterpartRef.id,
+          ['unassigned', 'storage', 'transfer', 'club'],
+        );
+        if (!protectedLocation) {
+          throw new Error(`partial duplicate compensation could not resolve protected #${pair.protectedCounterpartRef.id}`);
+        }
+        if (!rollingExactItemMatchesRef(protectedLocation.item, pair.protectedCounterpartRef)
+          || !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, protectedLocation.item)) {
+          throw new Error(`partial duplicate compensation found changed protected identity #${pair.protectedCounterpartRef.id}`);
+        }
+        if (protectedLocation.pileName === 'unassigned') {
+          await moveSingleItem(protectedLocation.item, inventoryPile('club'));
+        } else if (protectedLocation.pileName !== 'club') {
+          throw new Error(`partial duplicate compensation found protected #${pair.protectedCounterpartRef.id} in ${protectedLocation.pileName}`);
+        }
+        await refreshInventoryCaches(`${label} partial duplicate compensation #${pair.sourceSignalRef.id}`, {
+          includePacks: false,
+          quiet: true,
+        });
+        if (pair.materializedConsumeRef?.id) {
+          const consumeLocation = findCachedItemById(
+            pair.materializedConsumeRef.id,
+            ['club', 'unassigned', 'storage', 'transfer'],
+          );
+          if (!consumeLocation) {
+            throw new Error(`partial duplicate compensation could not resolve consume #${pair.materializedConsumeRef.id}`);
+          }
+          if (!rollingExactItemMatchesRef(consumeLocation.item, pair.materializedConsumeRef)
+            || !duplicateCardValueFingerprintMatches(pair.sourceFingerprint, consumeLocation.item)) {
+            throw new Error(`partial duplicate compensation found changed consume identity #${pair.materializedConsumeRef.id}`);
+          }
+          if (consumeLocation.pileName === 'club') {
+            await moveSingleItem(consumeLocation.item, inventoryPile('unassigned'));
+          } else if (consumeLocation.pileName !== 'unassigned') {
+            throw new Error(`partial duplicate compensation found consume #${pair.materializedConsumeRef.id} in ${consumeLocation.pileName}`);
+          }
+        } else {
+          const exactSourceLocation = findCachedItemById(
+            pair.sourceSignalRef.id,
+            ['unassigned', 'storage', 'transfer', 'club'],
+          );
+          if (exactSourceLocation
+            && (exactSourceLocation.pileName !== 'unassigned'
+              || !rollingExactItemMatchesRef(exactSourceLocation.item, pair.sourceSignalRef)
+              || !duplicateCardValueFingerprintMatches(pair.sourceFingerprint, exactSourceLocation.item))) {
+            throw new Error(`partial duplicate compensation found changed source identity #${pair.sourceSignalRef.id}`);
+          }
+          const sourceCandidates = exactSourceLocation
+            ? [exactSourceLocation.item]
+            : getUnassignedItems()
+                .filter((item) => !protectedIds.has(Number(item?.id || 0)))
+                .filter((item) => !claimedRestoredConsumeIds.has(Number(item?.id || 0)))
+                .filter((item) => duplicateCardValueFingerprintMatches(pair.sourceFingerprint, item));
+          if (sourceCandidates.length !== 1) {
+            throw new Error(`partial duplicate compensation could not uniquely identify the restored Unassigned entity for source #${pair.sourceSignalRef.id}`);
+          }
+          const restoredConsumeId = Number(sourceCandidates[0]?.id || 0);
+          restoredConsumeIdBySource.set(pair.sourceSignalRef.id, restoredConsumeId);
+          claimedRestoredConsumeIds.add(restoredConsumeId);
+        }
+      }
+      const reconciliation = runtime?.coordinator
+        ? await runtime.coordinator.reconcile(`${label} partial duplicate compensation`, { refreshUnassigned: true })
+        : { ok: true };
+      if (!reconciliation.ok) throw new Error(reconciliation.reason || 'inventory reconciliation failed');
+      for (const pair of pairs) {
+        const consume = findCachedItemById(
+          pair.materializedConsumeRef?.id
+            || restoredConsumeIdBySource.get(pair.sourceSignalRef.id)
+            || pair.sourceSignalRef.id,
+          ['unassigned'],
+        );
+        const protectedCard = findCachedItemById(pair.protectedCounterpartRef.id, ['club']);
+        if (!consume || !protectedCard
+          || !duplicateCardValueFingerprintMatches(pair.sourceFingerprint, consume.item)
+          || !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, protectedCard.item)) {
+          throw new Error(`partial duplicate compensation postcondition failed for #${pair.sourceSignalRef.id}`);
+        }
+      }
+      if (!persistRollingDuplicateTransaction(null)) {
+        throw new Error('partial duplicate compensation journal could not be cleared');
+      }
+      runtime.duplicateMaterializationTransaction = null;
+      return {
+        ok: true,
+        restoredConsumeRefs: pairs.map((pair) => ({
+          sourceSignalId: Number(pair.sourceSignalRef.id),
+          consumeId: Number(
+            pair.materializedConsumeRef?.id
+              || restoredConsumeIdBySource.get(pair.sourceSignalRef.id)
+              || pair.sourceSignalRef.id,
+          ),
+        })),
+      };
+    } catch (error) {
+      runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+        transaction,
+        'recovery-required',
+        { reason: error?.message || String(error) },
+      );
+      persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+      return {
+        ok: false,
+        reason: error?.message || String(error),
+        reasonCode: 'DUPLICATE_MATERIALIZATION_COMPENSATION_BLOCKED',
+      };
+    }
+  }
+
   async function prepareRollingUntradeableDuplicateSwaps(context, runtime) {
     const selection = context?.squadPlan?.selection;
     const players = Array.isArray(context?.players) ? context.players : [];
     if (!selection?.entries?.length || !players.length) return { ok: true };
+    const configuredSwapMode = normalizeDuplicateSwapMode(
+      runtime?.duplicateSwapMode,
+      runtime?.duplicateSwapEnabled === true,
+    );
+    // Discover an otherwise valid pair before applying the runtime gate so a
+    // disabled mode returns the dedicated fail-closed reason below.
+    const activeMaterialization = runtime?.duplicateMaterializationTransaction?.status === 'materialized';
+    // A materialized transaction is a bounded reverse-mapping check, not a new
+    // exchange decision. Use the legacy identity planner only for that check;
+    // the active journal remains the authority and no native move is issued.
+    const discoverySwapMode = activeMaterialization || configuredSwapMode === 'off'
+      ? 'all-eligible'
+      : configuredSwapMode;
 
     const originalPlan = planUntradeableDuplicateSwaps({
       selection: duplicateSwapSelectionSnapshot(selection, players),
       players: players.map((item) => duplicateSwapSnapshot(item, liveItemRef(item).pile)),
+      swapMode: discoverySwapMode,
+      isSpecial: isSbcSpecialItem,
+      maxPairs: rollingDuplicateSwapPairLimit(discoverySwapMode),
     });
     if (!originalPlan.ok || !originalPlan.swaps.length) return originalPlan;
-    if (runtime?.duplicateMaterializationTransaction?.status === 'materialized') {
+    if (runtime?.duplicateSwapEnabled !== true) {
       return {
         ok: false,
-        reason: 'replanned squad requested another duplicate swap while a materialization transaction is active',
+        reason: 'native duplicate swaps are disabled; route the Unassigned duplicate to Storage before submitting',
+        reasonCode: 'DUPLICATE_SWAP_DISABLED',
+        details: { swapCount: originalPlan.swaps.length },
+      };
+    }
+    if (activeMaterialization) {
+      const replanValidation = validateDuplicateTransactionReplanSwapPlan(
+        runtime.duplicateMaterializationTransaction,
+        originalPlan.swaps,
+      );
+      if (replanValidation.ok) {
+        return {
+          ok: true,
+          changed: false,
+          transactionReused: true,
+          details: { matchedSwapCount: replanValidation.matchedSwapCount },
+        };
+      }
+      return {
+        ok: false,
+        reason: `replanned squad changed the active duplicate transaction mapping: ${replanValidation.reason}`,
+        reasonCode: 'DUPLICATE_TRANSACTION_REPLAN_MAPPING_CHANGED',
       };
     }
 
@@ -12458,6 +12715,9 @@ function updateLoopControls() {
     const livePlan = planUntradeableDuplicateSwaps({
       selection: liveSelection,
       players: liveSelection.entries.map((entry) => entry.item),
+      swapMode: configuredSwapMode,
+      isSpecial: isSbcSpecialItem,
+      maxPairs: rollingDuplicateSwapPairLimit(configuredSwapMode),
     });
     if (!livePlan.ok || livePlan.swaps.length !== originalPlan.swaps.length) {
       return { ok: false, reason: livePlan.reason || 'duplicate swap eligibility changed before move' };
@@ -12488,24 +12748,65 @@ function updateLoopControls() {
     }
     log(`${context.label}: duplicate materialization ${transaction.transactionId} planned at inventory v${beforeInventoryVersion}; consume:${transaction.pairs.map((pair) => pair.sourceSignalRef.id).join(',')}; protect:${transaction.pairs.map((pair) => pair.protectedCounterpartRef.id).join(',')}`);
     log(`${context.label}: swapping ${signalItems.length} Unassigned untradeable duplicate(s) into Club before SBC submit`);
-    const moveResult = await moveItems(signalItems, inventoryPile('club'), true);
-    const resolution = resolveUntradeableDuplicateSwapIds(livePlan, moveResult);
-    if (!resolution.ok) {
-      log(`${context.label}: duplicate swap response diagnostic ${diagnosticJson(captureMoveResult(moveResult))}`);
-      return resolution;
-    }
-
-    await refreshInventoryCaches(`${context.label} post-untradeable-swap`, {
-      includePacks: false,
-      quiet: true,
-    });
-    for (const replacement of resolution.replacements) {
+    for (let index = 0; index < livePlan.swaps.length; index++) {
+      const swap = livePlan.swaps[index];
+      const signalItem = findCachedItemById(swap.signalId, ['unassigned'])?.item || null;
+      if (!signalItem
+        || !duplicateCardValueFingerprintMatches(
+          transaction.pairs[index].sourceFingerprint,
+          signalItem,
+        )) {
+        const compensation = await compensateUnsubmittedDuplicateTransaction(
+          runtime,
+          runtime.duplicateMaterializationTransaction,
+          context.label,
+        );
+        return compensation.ok
+          ? { ok: false, reason: `Unassigned duplicate #${swap.signalId} changed before its native swap` }
+          : compensation;
+      }
+      let moveResult;
+      try {
+        // The native EA exchange is deliberately one entity plus destination.
+        moveResult = await moveSingleItem(signalItem, inventoryPile('club'));
+      } catch (error) {
+        log(`${context.label}: duplicate swap failed for #${swap.signalId}: ${diagnosticJson(captureMoveResult(error))}`);
+        const compensation = await compensateUnsubmittedDuplicateTransaction(
+          runtime,
+          runtime.duplicateMaterializationTransaction,
+          context.label,
+        );
+        return {
+          ok: false,
+          reason: compensation.ok ? `duplicate swap failed for #${swap.signalId}` : compensation.reason,
+          reasonCode: compensation.ok ? 'DUPLICATE_SWAP_MOVE_FAILED' : compensation.reasonCode,
+        };
+      }
+      const resolution = resolveUntradeableDuplicateSwapIds({ swaps: [swap] }, moveResult);
+      if (!resolution.ok || resolution.replacements.length !== 1) {
+        log(`${context.label}: duplicate swap response diagnostic ${diagnosticJson(captureMoveResult(moveResult))}`);
+        const compensation = await compensateUnsubmittedDuplicateTransaction(
+          runtime,
+          runtime.duplicateMaterializationTransaction,
+          context.label,
+        );
+        return {
+          ok: false,
+          reason: compensation.ok ? resolution.reason : compensation.reason,
+          reasonCode: compensation.ok ? 'DUPLICATE_SWAP_RESPONSE_INVALID' : compensation.reasonCode,
+        };
+      }
+      const replacement = resolution.replacements[0];
+      await refreshInventoryCaches(`${context.label} post-untradeable-swap #${swap.signalId}`, {
+        includePacks: false,
+        quiet: true,
+      });
       const originalSignal = signalItems.find((item) => Number(item?.id || 0) === replacement.signalId);
       const originalTarget = players.find((item) => Number(item?.id || 0) === replacement.targetId);
       const newItemLocation = findCachedItemById(replacement.newItemId, ['club', 'unassigned', 'storage', 'transfer']);
       let displacedTargetLocation = findCachedItemById(replacement.targetId, ['unassigned', 'storage', 'transfer', 'club']);
       for (let attempt = 1; attempt <= 2 && displacedTargetLocation?.pileName !== 'unassigned'; attempt++) {
-        log(`${context.label}: waiting for displaced tradeable Club item #${replacement.targetId} to settle in Unassigned (${attempt}/2)`);
+        log(`${context.label}: waiting for protected Club counterpart #${replacement.targetId} to settle in Unassigned (${attempt}/2)`);
         await sleep(400 * attempt);
         await refreshUnassigned({ quiet: true }).catch(() => null);
         displacedTargetLocation = findCachedItemById(replacement.targetId, ['unassigned', 'storage', 'transfer', 'club']);
@@ -12541,42 +12842,132 @@ function updateLoopControls() {
             identify: identifyRuntimeInventoryItem,
           }),
         })}`);
-        return materialization;
+        const compensation = await compensateUnsubmittedDuplicateTransaction(
+          runtime,
+          runtime.duplicateMaterializationTransaction,
+          context.label,
+        );
+        return compensation.ok ? materialization : compensation;
       }
-      log(`${context.label}: duplicate swap verified: untradeable #${replacement.signalId} -> Club #${replacement.newItemId}; tradeable Club #${replacement.targetId} -> Unassigned #${replacement.targetId}`);
+
+      // The native response and the strict two-sided postcondition above are
+      // the authoritative identity evidence. Persist this pair immediately,
+      // before refreshing/reconciling caches that can temporarily omit the
+      // newly-created Club entity.
+      const progressed = materializeDuplicateTransactionPair(
+        runtime.duplicateMaterializationTransaction,
+        {
+          replacement,
+          afterInventoryVersion: Number(runtime?.coordinator?.getLedger?.()?.summary?.().inventoryVersion || 0),
+          resolveItem: (id, pile) => id === replacement.newItemId && pile === 'club'
+            ? { item: newItem, pileName: 'club' }
+            : id === replacement.targetId && pile === 'unassigned'
+              ? { item: displacedTargetLocation?.item, pileName: 'unassigned' }
+              : null,
+        },
+      );
+      if (!progressed.ok) {
+        const compensation = await compensateUnsubmittedDuplicateTransaction(
+          runtime,
+          runtime.duplicateMaterializationTransaction,
+          context.label,
+        );
+        return compensation.ok ? progressed : compensation;
+      }
+      runtime.duplicateMaterializationTransaction = progressed.transaction;
+      if (!persistRollingDuplicateTransaction(progressed.transaction)) {
+        const compensation = await compensateUnsubmittedDuplicateTransaction(
+          runtime,
+          runtime.duplicateMaterializationTransaction,
+          context.label,
+        );
+        return compensation.ok
+          ? { ok: false, reason: 'duplicate materialization journal could not be persisted after swap' }
+          : compensation;
+      }
+      if (runtime?.coordinator) {
+        const pairReconciliation = await runtime.coordinator.reconcile(
+          `${context.label} post-untradeable-duplicate-swap #${swap.signalId}`,
+          { refreshUnassigned: true },
+        );
+        if (!pairReconciliation.ok) {
+          const compensation = await compensateUnsubmittedDuplicateTransaction(
+            runtime,
+            runtime.duplicateMaterializationTransaction,
+            context.label,
+          );
+          return compensation.ok
+            ? { ok: false, reason: pairReconciliation.reason || 'inventory reconciliation failed after duplicate swap' }
+            : compensation;
+        }
+      }
+      const reconciledLedger = runtime?.coordinator?.getLedger?.();
+      const reconciledPair = validateDuplicateMaterializationLedgerPair(
+        runtime.duplicateMaterializationTransaction,
+        replacement.signalId,
+        {
+          resolveItem: (id) => reconciledLedger?.resolveItem?.({ id }) || null,
+        },
+      );
+      if (!reconciledPair.ok) {
+        const compensation = await compensateUnsubmittedDuplicateTransaction(
+          runtime,
+          runtime.duplicateMaterializationTransaction,
+          context.label,
+        );
+        return compensation.ok
+          ? reconciledPair
+          : compensation;
+      }
+      const reconciledVersion = Number(runtime?.coordinator?.getLedger?.()?.summary?.().inventoryVersion || 0);
+      const beforeVersionUpdate = runtime.duplicateMaterializationTransaction;
+      const versioned = updateDuplicateMaterializationInventoryVersion(
+        runtime.duplicateMaterializationTransaction,
+        reconciledVersion,
+      );
+      if (!versioned.ok) {
+        const compensation = await compensateUnsubmittedDuplicateTransaction(
+          runtime,
+          runtime.duplicateMaterializationTransaction,
+          context.label,
+        );
+        return compensation.ok
+          ? versioned
+          : compensation;
+      }
+      runtime.duplicateMaterializationTransaction = versioned.transaction;
+      if (versioned.transaction !== beforeVersionUpdate
+        && !persistRollingDuplicateTransaction(versioned.transaction)) {
+        const compensation = await compensateUnsubmittedDuplicateTransaction(
+          runtime,
+          runtime.duplicateMaterializationTransaction,
+          context.label,
+        );
+        return compensation.ok
+          ? { ok: false, reason: 'duplicate materialization journal could not be persisted after reconciliation' }
+          : compensation;
+      }
+      log(`${context.label}: duplicate swap verified: untradeable #${replacement.signalId} -> Club #${replacement.newItemId}; protected Club counterpart #${replacement.targetId} -> Unassigned #${replacement.targetId}`);
     }
 
-    if (runtime?.coordinator) {
-      const reconciliation = await runtime.coordinator.reconcile(
-        `${context.label} post-untradeable-duplicate-swap`,
-        { refreshUnassigned: true },
-      );
-      if (!reconciliation.ok) {
-        return { ok: false, reason: reconciliation.reason || 'inventory reconciliation failed after duplicate swap' };
-      }
-    }
     const afterInventoryVersion = Number(runtime?.coordinator?.getLedger?.()?.summary?.().inventoryVersion || 0);
-    const materialized = materializeDuplicateTransaction(transaction, {
-      replacements: resolution.replacements,
-      afterInventoryVersion,
-      resolveItem: (id, pile) => findCachedItemById(id, [pile])?.item || null,
-    });
-    if (!materialized.ok) {
-      runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
-        transaction,
-        'recovery-required',
-        { reason: materialized.reason },
+    const materializedTransaction = runtime.duplicateMaterializationTransaction;
+    if (!materializedTransaction || materializedTransaction.status !== 'materialized') {
+      const compensation = await compensateUnsubmittedDuplicateTransaction(
+        runtime,
+        materializedTransaction || transaction,
+        context.label,
       );
-      persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
-      return materialized;
+      return compensation.ok
+        ? { ok: false, reason: 'duplicate materialization did not complete every planned pair' }
+        : compensation;
     }
-    runtime.duplicateMaterializationTransaction = materialized.transaction;
     const persisted = await persistMaterializedRollingDuplicateTransaction(
       runtime,
       context.label,
     );
     if (!persisted.ok) return persisted;
-    const sourceRefs = materialized.transaction.pairs.map((pair) => pair.sourceSignalRef);
+    const sourceRefs = materializedTransaction.pairs.map((pair) => pair.sourceSignalRef);
     const isMaterializedSourceRef = (ref) => sourceRefs.some((sourceRef) => (
       rollingExactItemMatchesRef(ref, sourceRef)
     ));
@@ -12598,11 +12989,11 @@ function updateLoopControls() {
       reason: 'duplicate materialized into Club; old squad plan invalidated',
       reasonCode: 'DUPLICATE_MATERIALIZED_REPLAN',
       details: {
-        transactionId: materialized.transaction.transactionId,
-        consumeItemIds: duplicateTransactionConsumeRefs(materialized.transaction).map((ref) => ref.id),
-        protectedItemIds: duplicateTransactionProtectedRefs(materialized.transaction).map((ref) => ref.id),
+        transactionId: materializedTransaction.transactionId,
+        consumeItemIds: duplicateTransactionConsumeRefs(materializedTransaction).map((ref) => ref.id),
+        protectedItemIds: duplicateTransactionProtectedRefs(materializedTransaction).map((ref) => ref.id),
       },
-      transaction: materialized.transaction,
+      transaction: materializedTransaction,
     };
   }
 
@@ -12765,6 +13156,12 @@ function updateLoopControls() {
       const unresolvedPairs = duplicatePairs.filter(({ live }) => !live);
       const liveDuplicates = duplicatePairs.filter(({ live }) => live).map(({ live }) => live);
       let routePlan = planRollingOpenedItemRouting(liveDuplicates, {
+        duplicateSwapEnabled: loopDef.rollingDuplicateSwapEnabled === true,
+        duplicateSwapMode: loopDef.rollingDuplicateSwapMode,
+        duplicateSwapEligible: (item) => rollingDuplicateSwapEligibility(
+          item,
+          loopDef.rollingDuplicateSwapMode,
+        ),
         protectionRating: rollingProtectionRating(loopDef),
         provisionsMinRating: ROLLING_PROVISIONS_RATING_RANGE.min,
         provisionsMaxRating: rollingProvisionsMaxRating(loopDef),
@@ -13119,6 +13516,17 @@ function updateLoopControls() {
     if (sourceErrors.length) {
       fail(`${loopDef.name}: recovery squad violated strict Club special protection: ${sourceErrors.join(', ')}`);
     }
+    if (options.rejectPendingStorageSignals === true && runtime?.duplicateSwapEnabled !== true) {
+      const pendingStorageRefs = (runtime.openRouting?.storageItems || [])
+        .map((item) => liveItemRef(item, 'unassigned'));
+      const consumedPendingSignals = rollingSelectionConsumedSignalRefs(
+        options.selection,
+        pendingStorageRefs,
+      );
+      if (consumedPendingSignals.length) {
+        fail(`${loopDef.name}: recovery squad attempted to consume a pending Storage-routed duplicate signal while native swaps are disabled`);
+      }
+    }
     for (const item of players || []) {
       const allowedPrimaryDuplicate = allowedPrimaryDuplicateRefs.some((ref) => (
         rollingExactItemMatchesRef(item, ref)
@@ -13307,6 +13715,7 @@ function updateLoopControls() {
         minRating: options.minRating,
         maxRating: options.maxRating,
         selection: squadPlan?.selection || selection,
+        rejectPendingStorageSignals: options.rejectPendingStorageSignals === true,
       },
     )];
     runtime.lastMutation = null;
@@ -13781,6 +14190,9 @@ function updateLoopControls() {
     if (submission.submitted && !runtime.lastMutation) {
       runtime.lastMutation = await runtime.coordinator.recordSubmission(submission, { primary: false });
     }
+    if (recoveryDef.dynamicSbcFamily === 'totw-upgrade') {
+      recordRollingSbcSubmissionResult(runtime, loopDef, 'totw', submission);
+    }
     if (submission.postSubmitBlocked === true) {
       return {
         ...submission,
@@ -13935,12 +14347,9 @@ function updateLoopControls() {
     }
     const ledger = runtime?.coordinator?.getLedger?.();
     const inventoryVersion = Number(ledger?.summary?.().inventoryVersion || 0);
-    const validation = validateDuplicateMaterializationState(transaction, {
+    const validation = validateDuplicateMaterializationLedgerState(transaction, {
       inventoryVersion,
-      resolveItem: (id, pile) => {
-        const item = ledger?.resolveItem?.({ id }) || null;
-        return String(item?.pile || item?.ref?.pile || '') === pile ? item : null;
-      },
+      resolveItem: (id) => ledger?.resolveItem?.({ id }) || null,
     });
     if (!validation.ok) {
       runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
@@ -13996,7 +14405,8 @@ function updateLoopControls() {
         const stored = adapters.userscriptStorage.get(ROLLING_DUPLICATE_TRANSACTION_KEY, null);
         if (stored?.transactionId !== transaction.transactionId
           || stored?.status !== transaction.status
-          || stored?.updatedAt !== transaction.updatedAt) return false;
+          || stored?.updatedAt !== transaction.updatedAt
+          || JSON.stringify(stored?.pairs || []) !== JSON.stringify(transaction.pairs || [])) return false;
       } else {
         const removed = adapters.userscriptStorage.remove(ROLLING_DUPLICATE_TRANSACTION_KEY);
         if (removed === false) return false;
@@ -14009,6 +14419,86 @@ function updateLoopControls() {
     } catch (error) {
       log(`Rolling duplicate transaction persistence unavailable: ${error?.message || error}`);
       return false;
+    }
+  }
+
+  function persistRollingPendingRequiredSpecialReward(pending) {
+    try {
+      if (!pending) {
+        const removed = adapters.userscriptStorage.remove(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY);
+        if (removed === false) return false;
+        const sentinel = `missing-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        return adapters.userscriptStorage.get(
+          ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY,
+          sentinel,
+        ) === sentinel;
+      }
+      const journal = {
+        version: 1,
+        loopId: pending.loopId || null,
+        rewardPackId: pending.rewardPackId || null,
+        queuedAt: Number(pending.queuedAt || Date.now()),
+      };
+      adapters.userscriptStorage.set(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY, journal);
+      const stored = adapters.userscriptStorage.get(
+        ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY,
+        null,
+      );
+      return stored?.version === journal.version
+        && stored?.loopId === journal.loopId
+        && stored?.rewardPackId === journal.rewardPackId
+        && stored?.queuedAt === journal.queuedAt;
+    } catch (error) {
+      log(`Rolling Required Special reward journal unavailable: ${error?.message || error}`);
+      return false;
+    }
+  }
+
+  function readPersistedRollingPendingRequiredSpecialReward() {
+    try {
+      const stored = adapters.userscriptStorage.get(
+        ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY,
+        null,
+      );
+      if (!stored || typeof stored !== 'object'
+        || Number(stored.version) !== 1
+        || !Number.isFinite(Number(stored.queuedAt))) return null;
+      return {
+        version: 1,
+        loopId: stored.loopId || null,
+        rewardPackId: stored.rewardPackId || null,
+        queuedAt: Number(stored.queuedAt),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function queueRollingPendingRequiredSpecialReward(runtime, loopDef, definition, result) {
+    if (!result?.submitted || result.postSubmitBlocked === true
+      || definition?.dynamicSbcFamily !== 'totw-upgrade') return result;
+    const pending = {
+      definition,
+      rewardPackId: result.rewardPackId || null,
+      loopId: loopDef?.id || null,
+      queuedAt: Date.now(),
+      persisted: true,
+    };
+    runtime.pendingRecoveryReward = pending;
+    if (!persistRollingPendingRequiredSpecialReward(pending)) {
+      // The in-memory queue still preserves the current run. A journal failure
+      // must not rewrite an already confirmed EA submission as failed.
+      pending.persisted = false;
+      log(`${loopDef?.name || 'Rolling'}: Required Special reward queued in memory; restart recovery journal could not be written`);
+    }
+    return result;
+  }
+
+  function clearRollingPendingRequiredSpecialReward(runtime) {
+    const pending = runtime?.pendingRecoveryReward;
+    runtime.pendingRecoveryReward = null;
+    if (pending && !persistRollingPendingRequiredSpecialReward(null)) {
+      log('Rolling Required Special reward journal could not be cleared after opening the reward');
     }
   }
 
@@ -14075,13 +14565,35 @@ function updateLoopControls() {
   function readPersistedRollingDuplicateTransaction() {
     try {
       const stored = adapters.userscriptStorage.get(ROLLING_DUPLICATE_TRANSACTION_KEY, null);
-      if (!stored?.transactionId || !stored?.status) return null;
+      if (stored === null || stored === undefined) return null;
+      const validStatuses = new Set([
+        'planned',
+        'materialized',
+        'submission-confirmed',
+        'recovery-required',
+        'ambiguous',
+        'completed',
+      ]);
+      if (!stored || typeof stored !== 'object' || !stored.transactionId
+        || !validStatuses.has(String(stored.status))) {
+        return Object.freeze({
+          transactionId: 'invalid-persisted-journal',
+          status: 'invalid',
+          pairs: Object.freeze([]),
+          reason: 'persisted duplicate materialization journal is malformed',
+        });
+      }
       return transitionDuplicateMaterializationTransaction(stored, stored.status, {
         reason: stored.reason,
         updatedAt: stored.updatedAt,
       });
-    } catch {
-      return null;
+    } catch (error) {
+      return Object.freeze({
+        transactionId: 'invalid-persisted-journal',
+        status: 'invalid',
+        pairs: Object.freeze([]),
+        reason: `persisted duplicate materialization journal could not be decoded: ${error?.message || error}`,
+      });
     }
   }
 
@@ -14101,19 +14613,19 @@ function updateLoopControls() {
       runtime.duplicateMaterializationTransaction = transaction;
       journalWriteFailed = !persistRollingDuplicateTransaction(transaction);
     }
-    const protectedItems = transaction.pairs.map((pair) => (
-      findCachedItemById(pair.protectedCounterpartRef.id, ['unassigned'])?.item || null
+    const protectedLocations = transaction.pairs.map((pair) => (
+      findCachedItemById(pair.protectedCounterpartRef.id, ['unassigned']) || null
     ));
-    if (protectedItems.some((item) => !item)) {
+    if (protectedLocations.some((location) => !location)) {
       await refreshInventoryCaches(`${label} duplicate counterpart lookup`, {
         includePacks: false,
         quiet: true,
       });
     }
-    const liveProtectedItems = transaction.pairs.map((pair) => (
-      findCachedItemById(pair.protectedCounterpartRef.id, ['unassigned'])?.item || null
+    const liveProtectedLocations = transaction.pairs.map((pair) => (
+      findCachedItemById(pair.protectedCounterpartRef.id, ['unassigned']) || null
     ));
-    if (liveProtectedItems.some((item) => !item)) {
+    if (liveProtectedLocations.some((location) => !location)) {
       transaction = transitionDuplicateMaterializationTransaction(transaction, 'recovery-required', {
         reason: 'a protected duplicate counterpart is missing from Unassigned',
       });
@@ -14125,9 +14637,31 @@ function updateLoopControls() {
         reasonCode: 'DUPLICATE_COUNTERPART_MISSING',
       };
     }
+    const changedProtectedPair = transaction.pairs.find((pair, index) => {
+      const location = liveProtectedLocations[index];
+      const item = location?.item;
+      return !rollingExactItemMatchesRef(item, pair.protectedCounterpartRef)
+        || location?.pileName !== 'unassigned'
+        || !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, item);
+    });
+    if (changedProtectedPair) {
+      transaction = transitionDuplicateMaterializationTransaction(transaction, 'recovery-required', {
+        reason: `protected counterpart #${changedProtectedPair.protectedCounterpartRef.id} changed before restoration`,
+      });
+      runtime.duplicateMaterializationTransaction = transaction;
+      persistRollingDuplicateTransaction(transaction);
+      return {
+        ok: false,
+        reason: transaction.reason,
+        reasonCode: 'DUPLICATE_COUNTERPART_IDENTITY_CHANGED',
+      };
+    }
+    const liveProtectedItems = liveProtectedLocations.map((location) => location.item);
     log(`${label}: returning ${liveProtectedItems.length} protected duplicate counterpart(s) to Club for transaction ${transaction.transactionId}`);
     try {
-      await moveItems(liveProtectedItems, inventoryPile('club'), true);
+      for (const item of liveProtectedItems) {
+        await moveSingleItem(item, inventoryPile('club'));
+      }
       await refreshInventoryCaches(`${label} duplicate counterpart restored`, {
         includePacks: false,
         quiet: true,
@@ -14149,14 +14683,13 @@ function updateLoopControls() {
         reasonCode: 'DUPLICATE_COUNTERPART_RESTORE_BLOCKED',
       };
     }
-    const protectedValidation = validateDuplicateProtectedRestoration(
-      ['submission-confirmed', 'completed'].includes(transaction.status)
-        ? transaction
-        : transitionDuplicateMaterializationTransaction(transaction, 'submission-confirmed'),
-      {
-        resolveItem: (id, pile) => findCachedItemById(id, [pile])?.item || null,
-      },
-    );
+    const reconciledLedger = runtime.coordinator?.getLedger?.() || null;
+    const ledgerResolver = typeof reconciledLedger?.resolveItem === 'function'
+      ? (id) => reconciledLedger.resolveItem({ id }) || null
+      : (id) => findCachedItemById(id, ['unassigned', 'storage', 'transfer', 'club'])?.item || null;
+    const protectedValidation = validateDuplicateProtectedRestorationLedger(transaction, {
+      resolveItem: ledgerResolver,
+    });
     if (!protectedValidation.ok) {
       transaction = transitionDuplicateMaterializationTransaction(transaction, 'recovery-required', {
         reason: protectedValidation.reason,
@@ -14170,19 +14703,18 @@ function updateLoopControls() {
       };
     }
     if (options.submissionConfirmed !== true) {
-      const consumeLocations = transaction.pairs.map((pair) => (
-        findCachedItemById(pair.materializedConsumeRef.id, ['unassigned', 'storage', 'transfer', 'club'])
-      ));
-      const rolledBack = consumeLocations.every((location) => location?.pileName === 'unassigned');
-      if (!rolledBack) {
+      const rollbackValidation = validateDuplicateRollbackLedgerState(transaction, {
+        resolveItem: ledgerResolver,
+      });
+      if (!rollbackValidation.ok) {
         transaction = transitionDuplicateMaterializationTransaction(transaction, 'ambiguous', {
-          reason: 'consume item presence is ambiguous after protected counterpart restoration',
+          reason: rollbackValidation.reason,
         });
         runtime.duplicateMaterializationTransaction = transaction;
         persistRollingDuplicateTransaction(transaction);
         return {
           ok: false,
-          reason: 'duplicate submission outcome is ambiguous after protected counterpart restoration',
+          reason: `duplicate submission outcome is ambiguous after protected counterpart restoration: ${rollbackValidation.reason}`,
           reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
         };
       }
@@ -14254,6 +14786,12 @@ function updateLoopControls() {
 
   async function stopRollingDuplicateTransactionReplan(runtime, label, result = {}, options = {}) {
     const finalize = options.finalize || finalizeRollingDuplicateMaterialization;
+    const originalFailure = {
+      status: result.status || null,
+      reason: result.reason || null,
+      reasonCode: result.reasonCode || null,
+    };
+    log(`${label}: transaction-local replan stopped (${originalFailure.reasonCode || 'unknown'}): ${originalFailure.reason || 'no reason supplied'}; compensating the active duplicate transaction`);
     const compensation = await finalize(runtime, `${label} transaction replan compensation`, {
       submissionConfirmed: false,
     });
@@ -14263,13 +14801,18 @@ function updateLoopControls() {
       status: 'blocked',
       submitted: false,
       reason: compensationFailed
-        ? compensation.reason || 'duplicate materialization compensation failed'
+        ? `transaction-local replan failed (${originalFailure.reasonCode || 'unknown'}: ${originalFailure.reason || 'no reason supplied'}); compensation also failed (${compensation.reasonCode || 'unknown'}: ${compensation.reason || 'duplicate materialization compensation failed'})`
         : result.reason || 'duplicate transaction replanning stopped before a confirmed submission',
       reasonCode: compensationFailed
         ? compensation.reasonCode || 'DUPLICATE_MATERIALIZATION_COMPENSATION_BLOCKED'
         : result.reasonCode || options.reasonCode || 'DUPLICATE_TRANSACTION_REPLAN_BLOCKED',
       details: {
         ...(result.details || {}),
+        originalFailure,
+        compensationFailure: compensationFailed ? {
+          reason: compensation.reason || null,
+          reasonCode: compensation.reasonCode || null,
+        } : null,
         transactionReplanStopped: true,
         compensationSucceeded: !compensationFailed,
       },
@@ -14330,58 +14873,187 @@ function updateLoopControls() {
   }
 
   async function restoreAmbiguousPlannedDuplicateCounterparts(runtime, transaction, label) {
-    const protectedItems = transaction.pairs.map((pair) => (
-      findCachedItemById(pair.protectedCounterpartRef.id, ['unassigned'])?.item || null
-    ));
-    if (protectedItems.some((item) => !item)) {
+    const compensated = await compensateUnsubmittedDuplicateTransaction(runtime, transaction, label);
+    if (!compensated.ok) {
       return {
         status: 'blocked',
-        reason: 'a protected duplicate counterpart is missing from Unassigned after an interrupted swap',
-        reasonCode: 'DUPLICATE_COUNTERPART_MISSING',
+        reason: compensated.reason,
+        reasonCode: compensated.reasonCode,
       };
     }
+    log(`${label}: recovered interrupted duplicate swap by exact fingerprint; ${compensated.restoredConsumeRefs.map((ref) => `source #${ref.sourceSignalId} -> Unassigned #${ref.consumeId}`).join(', ')}`);
+    return { status: 'ready' };
+  }
+
+  function clearPriorRunRollingDuplicateTransaction(runtime, transaction, label, summary) {
+    if (!persistRollingDuplicateTransaction(null)) {
+      return {
+        status: 'blocked',
+        reason: 'prior-run duplicate transaction was cancelled, but its journal could not be cleared',
+        reasonCode: 'DUPLICATE_JOURNAL_CLEAR_FAILED',
+      };
+    }
+    runtime.duplicateMaterializationTransaction = null;
+    log(`${label}: cancelled prior-run duplicate materialization ${transaction.transactionId || 'invalid'}; ${summary}`);
+    return { status: 'ready' };
+  }
+
+  async function cancelPriorRunRollingDuplicateTransaction(runtime, label) {
+    const transaction = runtime?.duplicateMaterializationTransaction || null;
+    if (!transaction) return { status: 'ready' };
+    const journalOnlyCancellation = planDuplicateStartupCancellation(transaction);
+    if (!journalOnlyCancellation.ok && journalOnlyCancellation.action === 'clear-invalid') {
+      log(`${label}: discarding invalid prior-run duplicate journal: ${journalOnlyCancellation.reason || transaction.reason || 'invalid journal'}`);
+      return clearPriorRunRollingDuplicateTransaction(
+        runtime,
+        transaction,
+        label,
+        'invalid journal discarded; current inventory will be replanned',
+      );
+    }
+    if (transaction.status === 'completed') {
+      return clearPriorRunRollingDuplicateTransaction(
+        runtime,
+        transaction,
+        label,
+        'completed journal discarded; current inventory will be replanned',
+      );
+    }
+    let reconciliation;
     try {
-      await moveItems(protectedItems, inventoryPile('club'), true);
-      await refreshInventoryCaches(`${label} interrupted duplicate restore`, {
+      await refreshInventoryCaches(`${label} duplicate transaction recovery`, {
         includePacks: false,
         quiet: true,
       });
-      const reconciliation = await runtime.coordinator.reconcile(
-        `${label} interrupted duplicate restore`,
+      if (typeof runtime.coordinator?.reconcile !== 'function') {
+        throw new Error('inventory coordinator is unavailable');
+      }
+      reconciliation = await runtime.coordinator.reconcile(
+        `${label} duplicate transaction recovery`,
         { refreshUnassigned: true },
       );
-      if (!reconciliation.ok) throw new Error(reconciliation.reason || 'inventory reconciliation failed');
     } catch (error) {
       return {
         status: 'blocked',
-        reason: `protected duplicate counterpart restore failed: ${error?.message || error}`,
-        reasonCode: 'DUPLICATE_COUNTERPART_RESTORE_BLOCKED',
+        reason: `inventory reconciliation failed before prior-run duplicate cancellation: ${error?.message || error}`,
+        reasonCode: 'INVENTORY_RECONCILIATION_FAILED',
       };
     }
-    const restored = transaction.pairs.every((pair) => {
-      const location = findCachedItemById(pair.protectedCounterpartRef.id, ['club']);
-      return location?.pileName === 'club'
-        && rollingExactItemMatchesRef(location.item, pair.protectedCounterpartRef)
-        && duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, location.item);
-    });
-    if (!restored) {
+    if (!reconciliation.ok) {
       return {
         status: 'blocked',
-        reason: 'a protected duplicate counterpart could not be verified in Club after interrupted recovery',
-        reasonCode: 'DUPLICATE_COUNTERPART_IDENTITY_CHANGED',
+        reason: reconciliation.reason || 'inventory reconciliation failed before duplicate recovery',
+        reasonCode: 'INVENTORY_RECONCILIATION_FAILED',
       };
     }
-    runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+    const ledger = runtime.coordinator?.getLedger?.() || null;
+    if (typeof ledger?.resolveItem !== 'function') {
+      return {
+        status: 'blocked',
+        reason: 'reconciled Inventory Ledger is unavailable for prior-run protected identity classification',
+        reasonCode: 'DUPLICATE_STARTUP_INVENTORY_UNTRUSTWORTHY',
+      };
+    }
+    const resolveStartupItem = (id) => ledger.resolveItem({ id }) || null;
+    const cancellation = planDuplicateStartupCancellation(transaction, {
+      resolveItem: resolveStartupItem,
+    });
+    if (!cancellation.ok) {
+      if (cancellation.action === 'block-untrusted') {
+        return {
+          status: 'blocked',
+          reason: cancellation.reason,
+          reasonCode: 'DUPLICATE_STARTUP_INVENTORY_UNTRUSTWORTHY',
+        };
+      }
+      log(`${label}: discarding invalid prior-run duplicate journal: ${cancellation.reason || transaction.reason || 'invalid journal'}`);
+      return clearPriorRunRollingDuplicateTransaction(
+        runtime,
+        transaction,
+        label,
+        'invalid journal discarded; current inventory will be replanned',
+      );
+    }
+    const stateSummary = cancellation.states
+      .map((entry) => `#${entry.ref.id}:${entry.state}`)
+      .join(', ');
+    const nonRestorable = cancellation.states.filter((entry) => (
+      !['club', 'unassigned'].includes(entry.state)
+    ));
+    if (nonRestorable.length) {
+      log(`${label}: prior-run protected identity warning ${nonRestorable.map((entry) => `#${entry.ref.id}:${entry.state}`).join(', ')}; no substitute card will be used`);
+    }
+    const changedDefinitions = cancellation.states.filter((entry) => entry.definitionChanged);
+    if (changedDefinitions.length) {
+      log(`${label}: prior-run protected definition changed ${changedDefinitions.map((entry) => `#${entry.ref.id}:${entry.ref.definitionId}->${entry.actualDefinitionId || '?'}`).join(', ')}; exact item IDs remain authoritative`);
+    }
+    if (!cancellation.restoreRefs.length) {
+      return clearPriorRunRollingDuplicateTransaction(
+        runtime,
+        transaction,
+        label,
+        `protected identity states ${stateSummary}; current inventory will be replanned`,
+      );
+    }
+
+    const restoreItems = [];
+    for (const ref of cancellation.restoreRefs) {
+      const live = findCachedItemById(ref.id, ['unassigned']);
+      if (!live || Number(live.item?.id || 0) !== Number(ref.id)) {
+        return {
+          status: 'blocked',
+          reason: `prior-run protected item #${ref.id} reconciled in Unassigned but its exact live EA entity is unavailable`,
+          reasonCode: 'DUPLICATE_STARTUP_PROTECTED_ENTITY_UNAVAILABLE',
+        };
+      }
+      restoreItems.push(live.item);
+    }
+    try {
+      for (const item of restoreItems) await moveSingleItem(item, inventoryPile('club'));
+      await refreshInventoryCaches(`${label} prior-run protected identities restored`, {
+        includePacks: false,
+        quiet: true,
+      });
+      const restoredReconciliation = await runtime.coordinator.reconcile(
+        `${label} prior-run protected identities restored`,
+        { refreshUnassigned: true },
+      );
+      if (!restoredReconciliation.ok) throw new Error(
+        restoredReconciliation.reason || 'inventory reconciliation failed after startup restoration',
+      );
+    } catch (error) {
+      return {
+        status: 'blocked',
+        reason: `prior-run protected item restoration failed: ${error?.message || error}`,
+        reasonCode: 'DUPLICATE_STARTUP_PROTECTED_RESTORE_FAILED',
+      };
+    }
+    const restoredLedger = runtime.coordinator?.getLedger?.() || null;
+    if (typeof restoredLedger?.resolveItem !== 'function') {
+      return {
+        status: 'blocked',
+        reason: 'reconciled Inventory Ledger is unavailable after prior-run protected item restoration',
+        reasonCode: 'DUPLICATE_STARTUP_PROTECTED_RESTORE_UNVERIFIED',
+      };
+    }
+    const restoreFailures = cancellation.restoreRefs.filter((ref) => {
+      const item = restoredLedger.resolveItem({ id: ref.id }) || null;
+      return Number(item?.id || item?.ref?.id || 0) !== Number(ref.id)
+        || normalizedRuntimePileName(item?.pile || item?.ref?.pile) !== 'club';
+    });
+    if (restoreFailures.length) {
+      return {
+        status: 'blocked',
+        reason: `prior-run protected item restoration did not reconcile in Club: ${restoreFailures.map((ref) => `#${ref.id}`).join(', ')}`,
+        reasonCode: 'DUPLICATE_STARTUP_PROTECTED_RESTORE_UNVERIFIED',
+      };
+    }
+    return clearPriorRunRollingDuplicateTransaction(
+      runtime,
       transaction,
-      'ambiguous',
-      { reason: 'interrupted swap was restored without a confirmed materialized consume item identity' },
+      label,
+      `restored ${cancellation.restoreRefs.length} exact protected ID(s); prior states ${stateSummary}; current inventory will be replanned`,
     );
-    persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
-    return {
-      status: 'blocked',
-      reason: 'interrupted duplicate swap restored the protected Club card, but the consume identity is unknown; manual inventory review is required',
-      reasonCode: 'DUPLICATE_SUBMISSION_OUTCOME_AMBIGUOUS',
-    };
   }
 
   async function recoverPersistedRollingDuplicateTransaction(runtime, label) {
@@ -14406,9 +15078,40 @@ function updateLoopControls() {
       resolveItem: (id) => findCachedItemById(
         id,
         ['unassigned', 'storage', 'transfer', 'club'],
-      )?.item || null,
+      ),
     });
+    const canRecoverUnrecordedPhysicalSwap = transaction.pairs.every((pair) => {
+      if (pair.materializedConsumeRef?.id || pair.displacedProtectedRef?.id) return false;
+      const protectedLocation = findCachedItemById(
+        pair.protectedCounterpartRef.id,
+        ['unassigned', 'storage', 'transfer', 'club'],
+      );
+      if (!protectedLocation
+        || !['unassigned', 'club'].includes(protectedLocation.pileName)
+        || !rollingExactItemMatchesRef(protectedLocation.item, pair.protectedCounterpartRef)
+        || !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, protectedLocation.item)) {
+        return false;
+      }
+      const isRecoverableSwapState = protectedLocation.pileName === 'unassigned'
+        || (transaction.status === 'ambiguous' && protectedLocation.pileName === 'club');
+      if (!isRecoverableSwapState) return false;
+      const sourceLocation = findCachedItemById(
+        pair.sourceSignalRef.id,
+        ['unassigned', 'storage', 'transfer', 'club'],
+      );
+      if (!sourceLocation) return true;
+      return protectedLocation.pileName === 'club'
+        && sourceLocation.pileName === 'unassigned'
+        && rollingExactItemMatchesRef(sourceLocation.item, pair.sourceSignalRef)
+        && duplicateCardValueFingerprintMatches(pair.sourceFingerprint, sourceLocation.item);
+    });
+    if ((!recovery.ok || recovery.action === 'block') && canRecoverUnrecordedPhysicalSwap) {
+      return restoreAmbiguousPlannedDuplicateCounterparts(runtime, transaction, label);
+    }
     if (!recovery.ok || recovery.action === 'block') {
+      if (recovery.details) {
+        log(`${label}: duplicate recovery identity diagnostic ${JSON.stringify(recovery.details)}`);
+      }
       runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
         transaction,
         'ambiguous',
@@ -14433,8 +15136,16 @@ function updateLoopControls() {
       log(`${label}: cleared completed or untouched duplicate materialization ${transaction.transactionId}`);
       return { status: 'ready' };
     }
+    if (recovery.action === 'rollback-partial') {
+      const compensated = await compensateUnsubmittedDuplicateTransaction(runtime, transaction, label);
+      return compensated.ok
+        ? { status: 'ready' }
+        : { status: 'blocked', reason: compensated.reason, reasonCode: compensated.reasonCode };
+    }
     if (recovery.action === 'restore-ambiguous'
-      && !transaction.pairs.every((pair) => pair.materializedConsumeRef?.id)) {
+      && transaction.pairs.every((pair) => (
+        !pair.materializedConsumeRef?.id && !pair.displacedProtectedRef?.id
+      ))) {
       return restoreAmbiguousPlannedDuplicateCounterparts(runtime, transaction, label);
     }
     if (recovery.action === 'rollback') {
@@ -14575,7 +15286,11 @@ function updateLoopControls() {
   async function retryRollingProtectedStorage(loopDef, runtime) {
     const routing = runtime.openRouting;
     if (!routing || routing.status !== 'blocked') return { status: 'ready' };
-    if (routing.reasonCode !== 'PROTECTED_STORAGE_BLOCKED') {
+    const recoverableStorageCodes = new Set([
+      'PROTECTED_STORAGE_BLOCKED',
+      'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED',
+    ]);
+    if (!recoverableStorageCodes.has(routing.reasonCode)) {
       return { status: 'blocked', reason: routing.reason, reasonCode: routing.reasonCode };
     }
     const primaryRefs = preserveRollingPrimaryDuplicateRefs(runtime, routing);
@@ -14650,7 +15365,7 @@ function updateLoopControls() {
       return {
         status: 'blocked',
         reason: `SBC storage has ${storageFree === null ? 'an unknown number of' : storageFree} free slot(s), but ${pending.length} protected/reserved item(s) still require storage`,
-        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+        reasonCode: routing.reasonCode,
         details: { storageFree, storageRequired: pending.length },
       };
     }
@@ -15520,6 +16235,33 @@ function updateLoopControls() {
     return requirement.ok ? { ...requirement, pendingRefs: routing.pendingRefs } : requirement;
   }
 
+  function rollingStorageSinkConsumablePendingRefs(runtime, pendingRefs = []) {
+    if (runtime?.duplicateSwapEnabled !== true) return [];
+    const refs = rollingUniqueRefs(pendingRefs);
+    const mode = normalizeDuplicateSwapMode(
+      runtime?.duplicateSwapMode,
+      runtime?.duplicateSwapEnabled === true,
+    );
+    if (mode === 'all-eligible') return refs;
+    return refs.filter((ref) => {
+      const live = findCachedItemById(Number(ref?.id || 0), ['unassigned'])?.item
+        || (runtime.openRouting?.storageItems || []).find((item) => (
+          Number(item?.id || 0) === Number(ref?.id || 0)
+        ));
+      return live && rollingDuplicateSwapEligibility(live, mode);
+    });
+  }
+
+  function rollingEmergencyProvisionsProtectedRefs(runtime, consumableReserveIds = new Set()) {
+    const mayConsumePendingReserve = runtime?.duplicateSwapEnabled === true;
+    return (runtime.openRouting?.storageItems || [])
+      .filter((item) => (
+        !mayConsumePendingReserve
+          || !consumableReserveIds.has(Number(item?.id || 0))
+      ))
+      .map((item) => liveItemRef(item, 'unassigned'));
+  }
+
   function validateRollingStorageSinkHeadroom(runtime, squadPlan, options = {}) {
     const storage = runtime.coordinator.getLedger().summary().capacities?.storage || {};
     const currentFree = storage.free;
@@ -15776,6 +16518,7 @@ function updateLoopControls() {
     if (submission.submitted && !runtime.lastMutation) {
       runtime.lastMutation = await runtime.coordinator.recordSubmission(submission, { primary: false });
     }
+    recordRollingSbcSubmissionResult(runtime, loopDef, 'storage-pressure', submission);
     return {
       ...submission,
       status: submission.submitted ? 'submitted' : submission.status,
@@ -15825,6 +16568,46 @@ function updateLoopControls() {
     if (reconciled.status !== 'ready') return reconciled;
     refreshRollingPendingUnassignedRefs(runtime);
     return { status: 'selected', pickedCards };
+  }
+
+  function rollingStorageSinkMissingPlayerPickResult(pickDef, selected, context, headroom) {
+    return {
+      status: 'submitted',
+      submitted: true,
+      reason: `${pickDef?.name || 'Storage pressure Player Pick'} challenge submitted; Player Pick reward was not observed, continuing Rolling`,
+      reasonCode: 'STORAGE_SINK_REWARD_NOT_FOUND_SKIPPED',
+      details: {
+        ...(selected?.details || {}),
+        rewardMissing: true,
+        submittedRating: context?.targetRating,
+        headroom,
+      },
+    };
+  }
+
+  async function confirmRollingStorageSinkSetCompletion(set, label, expectedChallengeCount) {
+    try {
+      const challenges = await requestSbcChallenges(set, label, {
+        attempts: 1,
+        allowEmpty: true,
+      });
+      const expected = Math.max(1, Number(expectedChallengeCount || 0) || 1);
+      const incomplete = challenges.filter((challenge) => !isCompletedChallenge(challenge));
+      return {
+        confirmed: challenges.length >= expected && incomplete.length === 0,
+        challengeCount: challenges.length,
+        expectedChallengeCount: expected,
+        incompleteChallengeIds: incomplete.map((challenge) => Number(challenge?.id || 0)).filter(Boolean),
+      };
+    } catch (error) {
+      return {
+        confirmed: false,
+        challengeCount: 0,
+        expectedChallengeCount: Math.max(1, Number(expectedChallengeCount || 0) || 1),
+        incompleteChallengeIds: [],
+        error: error?.message || String(error),
+      };
+    }
   }
 
   async function runRollingLegacyStorageSinkRecovery(loopDef, runtime, capability, options = {}) {
@@ -16593,9 +17376,13 @@ function updateLoopControls() {
     const pressure = rollingStorageSinkPressureRequirement(runtime, { reservePickResult });
     if (!pressure.ok) return { status: 'unavailable', ...pressure };
     log(`${loopDef.name}: ${loaded.sinkDef.name} Storage pressure requires at least ${pressure.minimumConsumption} consuming card(s) before planning; pending:${pressure.pendingStorageItems}, free:${pressure.currentFree}, reward reserve:${pressure.reserveSlots}`);
+    const consumablePendingStorageRefs = rollingStorageSinkConsumablePendingRefs(
+      runtime,
+      pressure.pendingRefs,
+    );
     let squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context, {
       minimumPressureConsumption: pressure.minimumConsumption,
-      pendingStorageRefs: pressure.pendingRefs,
+      pendingStorageRefs: consumablePendingStorageRefs,
     });
     if (!squadPlan.ok) return { status: 'unavailable', ...squadPlan };
     let headroom = validateRollingStorageSinkHeadroom(runtime, squadPlan, {
@@ -16615,7 +17402,7 @@ function updateLoopControls() {
         if (replan > 0) {
           squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context, {
             minimumPressureConsumption: pressure.minimumConsumption,
-            pendingStorageRefs: pressure.pendingRefs,
+            pendingStorageRefs: consumablePendingStorageRefs,
           });
           if (!squadPlan.ok) {
             return {
@@ -16669,6 +17456,26 @@ function updateLoopControls() {
       };
     }
 
+    const completion = await confirmRollingStorageSinkSetCompletion(
+      context.set,
+      `${loaded.sinkDef.name} completion confirmation`,
+      loaded.totalChallengeCount,
+    );
+    if (!completion.confirmed) {
+      log(`${loaded.sinkDef.name}: final challenge submitted, but the Set is not confirmed complete; continuing without assuming a Player Pick reward (${completion.error || `${completion.incompleteChallengeIds.length} incomplete challenge(s)`})`);
+      return {
+        status: 'submitted',
+        submitted: true,
+        reason: `${loaded.sinkDef.name} final challenge submitted; Set completion was not confirmed, continuing Rolling`,
+        reasonCode: 'STORAGE_SINK_SET_COMPLETION_UNCONFIRMED',
+        details: {
+          completion,
+          submittedRating: context.targetRating,
+          headroom,
+        },
+      };
+    }
+
     if (capability.rewardKind === 'player-pick') {
       const selected = await selectPendingRollingStorageSinkPick(
         loopDef,
@@ -16683,6 +17490,16 @@ function updateLoopControls() {
             + Number(plan.signalRefs?.length || 0),
         },
       );
+      if (selected.status === 'missing') {
+        // A Player Pick is only an optional Storage-pressure reward. EA can
+        // confirm the last challenge while delaying, misrouting, or omitting
+        // the Pick entity from Unassigned. The submitted squads already freed
+        // Storage, so do not turn that reward-observation gap into a fatal
+        // Rolling stop. A later pass may discover the Pick or the completed
+        // Set and can resume from the live state.
+        log(`${loaded.sinkDef.name}: submitted Storage pressure challenge, but no Player Pick reward was observed; continuing without redeeming it`);
+        return rollingStorageSinkMissingPlayerPickResult(loaded.sinkDef, selected, context, headroom);
+      }
       if (selected.status !== 'selected') return { ...selected, status: 'blocked' };
     } else {
       const routed = await resumeRollingPendingUnassigned(loopDef, runtime);
@@ -16774,6 +17591,26 @@ function updateLoopControls() {
       updatedAt: new Date().toISOString(),
       ...update,
     });
+  }
+
+  function recordRollingSbcSubmissionResult(runtime, loopDef, kind, submission) {
+    const field = kind === 'storage-pressure'
+      ? 'storagePressureSbcCount'
+      : kind === 'totw' ? 'totwSbcCount' : null;
+    if (!field) return 0;
+    const current = Number(runtime?.[field]);
+    const normalizedCurrent = Math.max(
+      0,
+      Math.min(1000000, Math.floor(Number.isFinite(current) ? current : 0)),
+    );
+    if (submission?.submitted !== true) return normalizedCurrent;
+    const next = Math.max(
+      0,
+      Math.min(1000000, normalizedCurrent + 1),
+    );
+    runtime[field] = next;
+    publishRollingTelemetry(loopDef, runtime, { [field]: next });
+    return next;
   }
 
   function requestRollingTelemetryCapabilities(loopDef, runtime) {
@@ -16974,6 +17811,12 @@ function updateLoopControls() {
     }
 
     const routePlan = planRollingOpenedItemRouting(duplicates, {
+      duplicateSwapEnabled: loopDef.rollingDuplicateSwapEnabled === true,
+      duplicateSwapMode: loopDef.rollingDuplicateSwapMode,
+      duplicateSwapEligible: (item) => rollingDuplicateSwapEligibility(
+        item,
+        loopDef.rollingDuplicateSwapMode,
+      ),
       protectionRating: rollingProtectionRating(loopDef),
       provisionsMinRating: ROLLING_PROVISIONS_RATING_RANGE.min,
       provisionsMaxRating: rollingProvisionsMaxRating(loopDef),
@@ -17043,6 +17886,19 @@ function updateLoopControls() {
       runtime.pendingUnassignedRefs,
     );
     log(`${loopDef.name}: resumed ${duplicates.length} Unassigned duplicate(s); primary:${runtime.primaryDuplicateRefs.length}, pending Storage:${runtime.openRouting.pendingItems.length}, route:${runtime.openRouting.status}`);
+    if (finalRoute.status === 'blocked'
+      && finalRoute.reasonCode === 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED') {
+      return {
+        status: 'blocked',
+        reason: finalRoute.reason,
+        reasonCode: finalRoute.reasonCode,
+        details: {
+          resumedDuplicates: duplicates.length,
+          primaryDuplicates: 0,
+          pendingStorage: runtime.openRouting.pendingItems.length,
+        },
+      };
+    }
     return {
       status: 'ready',
       primaryPending: runtime.primaryDuplicateRefs.length > 0 || finalRoute.status === 'blocked',
@@ -17054,17 +17910,61 @@ function updateLoopControls() {
     };
   }
 
+  function restoreRollingPendingRequiredSpecialReward(loopDef) {
+    const journal = readPersistedRollingPendingRequiredSpecialReward();
+    if (!journal || journal.loopId !== (loopDef?.id || null)) return null;
+    const definition = rollingRecoveryDef(loopDef?.rollingTotwUpgrade, loopDef);
+    if (!rollingCapabilityAvailable(definition)
+      || definition.dynamicSbcFamily !== 'totw-upgrade') return null;
+    return {
+      definition,
+      rewardPackId: journal.rewardPackId || null,
+      loopId: journal.loopId,
+      queuedAt: journal.queuedAt,
+      persisted: true,
+    };
+  }
+
+  async function detectRollingPendingRequiredSpecialReward(loopDef, runtime) {
+    if (runtime?.pendingRecoveryReward?.definition) return true;
+    const definition = rollingRecoveryDef(loopDef?.rollingTotwUpgrade, loopDef);
+    if (!rollingCapabilityAvailable(definition)
+      || definition.dynamicSbcFamily !== 'totw-upgrade') return false;
+    const pack = await findRewardPack(definition, null, {
+      attempts: 2,
+      delayMs: 1000,
+      fallbackPackMatcher: isLikelyTotwRewardPack,
+      repositoryOnly: true,
+    });
+    if (!pack) return false;
+    runtime.pendingRecoveryReward = {
+      definition,
+      rewardPackId: null,
+      loopId: loopDef?.id || null,
+      queuedAt: Date.now(),
+      persisted: false,
+      detectedExisting: true,
+    };
+    log(`${loopDef.name}: detected one existing ${definition.name} reward; processing it before primary work`);
+    return true;
+  }
+
   async function runRollingUpgradeLoop(loopDef) {
     await waitAppReady();
     const runtime = {
       primaryContext: null,
       coordinator: null,
       duplicateMaterializationTransaction: readPersistedRollingDuplicateTransaction(),
+      duplicateSwapEnabled: loopDef.rollingDuplicateSwapEnabled === true,
+      duplicateSwapMode: normalizeDuplicateSwapMode(
+        loopDef.rollingDuplicateSwapMode,
+        loopDef.rollingDuplicateSwapEnabled === true,
+      ),
       openRouting: null,
       primaryDuplicateRefs: [],
       pendingUnassignedRefs: [],
       pendingRewardPackId: null,
-      pendingRecoveryReward: null,
+      pendingRecoveryReward: restoreRollingPendingRequiredSpecialReward(loopDef),
       recoveryDuplicateRefs: [],
       storageSinkExhaustedSetIds: new Set(),
       storageSinkRefreshAttempted: false,
@@ -17074,6 +17974,8 @@ function updateLoopControls() {
       lastMutation: null,
       capabilityCalculator: createInventoryCapabilityCalculator(),
       telemetryActive: true,
+      storagePressureSbcCount: 0,
+      totwSbcCount: 0,
       telemetryCalculationRequested: false,
       telemetryCalculationRunning: false,
       telemetryPublishedVersion: null,
@@ -17084,9 +17986,9 @@ function updateLoopControls() {
       phase: ROLLING_UPGRADE_PHASES.PREFLIGHT,
       completedCycles: 0,
       specialSlots: null,
-      directCycles: null,
+      storagePressureSbcCount: 0,
       provisionsBatches: null,
-      totwRecoveries: null,
+      totwSbcCount: 0,
       storageUsed: null,
       storageCapacity: null,
       inventoryVersion: null,
@@ -17143,7 +18045,7 @@ function updateLoopControls() {
         }
         return { status: 'blocked', reason: initialized.reason, reasonCode: 'INVENTORY_INDEX_UNAVAILABLE' };
       },
-      recoverDuplicateTransaction: async () => recoverPersistedRollingDuplicateTransaction(
+      recoverDuplicateTransaction: async () => cancelPriorRunRollingDuplicateTransaction(
         runtime,
         loopDef.name,
       ),
@@ -17176,6 +18078,7 @@ function updateLoopControls() {
         );
       },
       resumePendingUnassigned: async () => resumeRollingPendingUnassigned(loopDef, runtime),
+      hasPendingRecoveryReward: () => detectRollingPendingRequiredSpecialReward(loopDef, runtime),
       findPrimaryPack: async () => {
         const pack = await findRewardPack(loopDef, runtime.pendingRewardPackId, {
           attempts: runtime.pendingRewardPackId ? 6 : 1,
@@ -17250,6 +18153,9 @@ function updateLoopControls() {
           attempts: 6,
           delayMs: 1200,
           logWait: true,
+          fallbackPackMatcher: pending.definition.dynamicSbcFamily === 'totw-upgrade'
+            ? isLikelyTotwRewardPack
+            : undefined,
           repositoryOnly: true,
         });
         if (!pack) {
@@ -17261,8 +18167,12 @@ function updateLoopControls() {
         }
         const opened = await openRollingRecoveryReward(loopDef, runtime, pending.definition, pack, {
           captureRecoveryDuplicates: pending.definition.dynamicSbcFamily === 'provisions-upgrade',
+          assumeTotwReward: pending.definition.dynamicSbcFamily === 'totw-upgrade',
+          fallbackPackMatcher: pending.definition.dynamicSbcFamily === 'totw-upgrade'
+            ? isLikelyTotwRewardPack
+            : undefined,
         });
-        if (opened.status === 'opened') runtime.pendingRecoveryReward = null;
+        if (opened.status === 'opened') clearRollingPendingRequiredSpecialReward(runtime);
         return opened;
       },
       processLeftoverRecoveryReward: async () => {
@@ -17387,9 +18297,7 @@ function updateLoopControls() {
           .map(({ item }) => Number(item?.id || 0))
           .filter(Boolean));
         const additionalProtected = storagePressure
-          ? (runtime.openRouting?.storageItems || [])
-              .filter((item) => !consumableReserveIds.has(Number(item?.id || 0)))
-              .map((item) => liveItemRef(item, 'unassigned'))
+          ? rollingEmergencyProvisionsProtectedRefs(runtime, consumableReserveIds)
           : [];
         log(`${loopDef.name}: ${storagePressure ? 'emergency' : duplicateReserve ? 'duplicate-reserve' : 'normal'} Provisions recovery (${context.trigger})`);
         const provisionsMaxRating = rollingProvisionsMaxRating(loopDef);
@@ -17418,6 +18326,7 @@ function updateLoopControls() {
                   storageItemsConsumed,
                 )
               : null,
+            rejectPendingStorageSignals: storagePressure,
             minRating: ROLLING_PROVISIONS_RATING_RANGE.min,
             maxRating: provisionsMaxRating,
           },
@@ -17486,7 +18395,7 @@ function updateLoopControls() {
           } else {
             log(`${loopDef.name}: consuming exact pending Unassigned primary duplicates in ${definition.name} before creating or opening its reward`);
           }
-          return submitRollingRatingRecovery(loopDef, runtime, definition, {
+          const recovery = await submitRollingRatingRecovery(loopDef, runtime, definition, {
             priorityPiles: action === 'craft-with-pending-duplicates'
               ? ['unassigned', 'storage', 'transfer', 'club']
               : resolveRollingRecoveryPriorityPiles(loopDef, { recoveryMode: 'storage-pressure' }),
@@ -17498,11 +18407,13 @@ function updateLoopControls() {
               })
             ),
           });
+          return queueRollingPendingRequiredSpecialReward(runtime, loopDef, definition, recovery);
         }
         log(`${loopDef.name}: no eligible Required Special or existing TOTW reward; planning one ${definition.name}`);
-        return submitRollingRatingRecovery(loopDef, runtime, definition, {
+        const recovery = await submitRollingRatingRecovery(loopDef, runtime, definition, {
           priorityPiles: resolveRollingRecoveryPriorityPiles(loopDef, { recoveryMode: 'normal' }),
         });
+        return queueRollingPendingRequiredSpecialReward(runtime, loopDef, definition, recovery);
       },
       maintainStorage: async () => {
         const ledger = runtime.coordinator?.getLedger?.();
@@ -18135,9 +19046,9 @@ function updateLoopControls() {
       const storage = ledgerSummary.capacities?.storage || {};
       result.finalResources = {
         specialSlots: telemetry.specialSlots,
-        directCycles: telemetry.directCycles,
+        storagePressureSbcCount: telemetry.storagePressureSbcCount,
         provisionsBatches: telemetry.provisionsBatches,
-        totwRecoveries: telemetry.totwRecoveries,
+        totwSbcCount: telemetry.totwSbcCount,
         storage: storage.used === null || storage.used === undefined || storage.max === null || storage.max === undefined
           ? null
           : `${storage.used}/${storage.max}`,
@@ -18267,7 +19178,7 @@ function updateLoopControls() {
         const storageSinkSummary = loopDef.rollingStorageSinkEnabled
           ? `${loopDef.rollingStorageSink?.mode || 'automatic'}/${loopDef.rollingStorageSink?.capability?.setName || 'unavailable'}`
           : 'off';
-        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Storage pressure SBC ${storageSinkSummary}`);
+        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || 'special-only'})` : 'off; Storage route only'}; Storage pressure SBC ${storageSinkSummary}`);
       } else {
         log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
       }
@@ -18293,9 +19204,9 @@ function updateLoopControls() {
       completedCycles: 0,
       cycleLimit: 0,
       specialSlots: null,
-      directCycles: null,
+      storagePressureSbcCount: null,
       provisionsBatches: null,
-      totwRecoveries: null,
+      totwSbcCount: null,
       storageUsed: null,
       storageCapacity: null,
       inventoryVersion: null,

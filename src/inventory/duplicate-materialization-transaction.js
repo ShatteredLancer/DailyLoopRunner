@@ -13,15 +13,15 @@ function positiveId(value) {
 }
 
 function itemId(value = {}) {
-  return positiveId(value.id || value.ref?.id);
+  return positiveId(value?.id || value?.ref?.id);
 }
 
 function definitionId(value = {}) {
-  return positiveId(value.definitionId || value.ref?.definitionId);
+  return positiveId(value?.definitionId || value?.ref?.definitionId);
 }
 
 function itemPile(value = {}, fallback = 'unknown') {
-  return String(value.pile || value.ref?.pile || fallback || 'unknown');
+  return String(value?.pile || value?.ref?.pile || fallback || 'unknown');
 }
 
 function itemRef(value = {}, pile = null) {
@@ -73,6 +73,9 @@ function readRaw(item, fields, fallback = null) {
 }
 
 export function createDuplicateCardValueFingerprint(item = {}) {
+  if (item?.duplicateValueFingerprint && typeof item.duplicateValueFingerprint === 'object') {
+    return Object.freeze(stableValue(item.duplicateValueFingerprint));
+  }
   const upgrades = readRaw(item, ['upgrades'], null);
   const cosmetics = readRaw(item, ['cosmetics'], null);
   const groups = firstDefined([item.groups, item._data?.groups], []);
@@ -88,7 +91,6 @@ export function createDuplicateCardValueFingerprint(item = {}) {
     upgrades: stableValue(upgrades),
     cosmetics: stableValue(cosmetics),
     chemistryStyle: Number(readRaw(item, ['playStyle', 'chemistryStyle', 'chemStyle', 'styleId'], 0)) || 0,
-    loyaltyBonus: Number(readRaw(item, ['loyaltyBonus'], 0)) || 0,
     preferredPosition: Number(readRaw(item, ['preferredPosition', '_preferredPosition'], 0)) || 0,
     attributes: stableValue(readRaw(item, ['attributes'], [])),
     skillMoves: Number(readRaw(item, ['skillMoves', '_skillMoves'], 0)) || 0,
@@ -100,6 +102,19 @@ export function createDuplicateCardValueFingerprint(item = {}) {
 export function duplicateCardValueFingerprintMatches(left = {}, right = {}) {
   return JSON.stringify(createDuplicateCardValueFingerprint(left))
     === JSON.stringify(createDuplicateCardValueFingerprint(right));
+}
+
+export function diffDuplicateCardValueFingerprint(expected = {}, actualItem = {}) {
+  const expectedFingerprint = createDuplicateCardValueFingerprint(expected);
+  const actualFingerprint = createDuplicateCardValueFingerprint(actualItem);
+  const changedFields = Object.keys(expectedFingerprint).filter((field) => (
+    JSON.stringify(expectedFingerprint[field]) !== JSON.stringify(actualFingerprint[field])
+  ));
+  return Object.freeze({
+    changedFields: Object.freeze(changedFields),
+    expected: expectedFingerprint,
+    actual: actualFingerprint,
+  });
 }
 
 function transactionPair(input = {}) {
@@ -167,6 +182,54 @@ export function createDuplicateMaterializationTransaction(input = {}) {
   return transaction;
 }
 
+export function validateDuplicateTransactionReplanSwapPlan(transaction = {}, swaps = []) {
+  if (transaction.status !== 'materialized') {
+    return {
+      ok: false,
+      reason: `duplicate materialization transaction is ${transaction.status || 'invalid'}`,
+    };
+  }
+  const expected = (transaction.pairs || []).map((pair) => ({
+    signalId: positiveId(pair.displacedProtectedRef?.id),
+    targetId: positiveId(pair.materializedConsumeRef?.id),
+    definitionId: positiveId(pair.materializedConsumeRef?.definitionId),
+  }));
+  if (!expected.length || expected.some((swap) => (
+    !swap.signalId || !swap.targetId || !swap.definitionId
+  ))) {
+    return { ok: false, reason: 'materialized transaction has an incomplete reverse mapping' };
+  }
+  if (!Array.isArray(swaps) || swaps.length !== expected.length) {
+    return {
+      ok: false,
+      reason: `replanned duplicate mapping count changed (${Array.isArray(swaps) ? swaps.length : 0}/${expected.length})`,
+    };
+  }
+
+  const remaining = new Map(expected.map((swap) => [
+    `${swap.signalId}:${swap.targetId}:${swap.definitionId}`,
+    swap,
+  ]));
+  for (const swap of swaps) {
+    const normalized = {
+      signalId: positiveId(swap?.signalId),
+      targetId: positiveId(swap?.targetId),
+      definitionId: positiveId(swap?.definitionId),
+    };
+    const key = `${normalized.signalId}:${normalized.targetId}:${normalized.definitionId}`;
+    if (!remaining.delete(key)) {
+      return {
+        ok: false,
+        reason: `replanned duplicate mapping ${normalized.signalId || '?'} -> ${normalized.targetId || '?'} is not authorized by the active transaction`,
+      };
+    }
+  }
+  if (remaining.size) {
+    return { ok: false, reason: 'replanned duplicate mapping omitted an active transaction pair' };
+  }
+  return { ok: true, matchedSwapCount: expected.length };
+}
+
 export function materializeDuplicateTransaction(transaction = {}, input = {}) {
   if (transaction.status !== 'planned') {
     return { ok: false, reason: `duplicate materialization transaction is ${transaction.status || 'invalid'}` };
@@ -221,6 +284,156 @@ export function materializeDuplicateTransaction(transaction = {}, input = {}) {
   };
 }
 
+// Record one successful native exchange while keeping the journal usable if a
+// later pair fails or the page is restarted between exchanges.
+export function materializeDuplicateTransactionPair(transaction = {}, input = {}) {
+  if (!['planned', 'materialized'].includes(transaction.status)) {
+    return { ok: false, reason: `duplicate materialization transaction is ${transaction.status || 'invalid'}` };
+  }
+  const replacement = input.replacement || null;
+  const sourceId = positiveId(replacement?.signalId);
+  const targetId = positiveId(replacement?.targetId);
+  const newItemId = positiveId(replacement?.newItemId);
+  if (!sourceId || !targetId || !newItemId) {
+    return { ok: false, reason: 'duplicate materialization pair mapping is incomplete' };
+  }
+  const pairIndex = (transaction.pairs || []).findIndex((pair) => (
+    pair.sourceSignalRef.id === sourceId
+  ));
+  if (pairIndex < 0) {
+    return { ok: false, reason: `duplicate materialization source #${sourceId} is not in the journal` };
+  }
+  const pair = transaction.pairs[pairIndex];
+  if (pair.protectedCounterpartRef.id !== targetId) {
+    return { ok: false, reason: `duplicate materialization mapping changed for source #${sourceId}` };
+  }
+  if (pair.materializedConsumeRef?.id || pair.displacedProtectedRef?.id) {
+    return { ok: false, reason: `duplicate materialization pair for source #${sourceId} was already recorded` };
+  }
+  const materializedResolution = input.resolveItem?.(newItemId, 'club') || null;
+  const displacedResolution = input.resolveItem?.(targetId, 'unassigned') || null;
+  const materializedConsume = materializedResolution?.item || materializedResolution;
+  const displacedProtected = displacedResolution?.item || displacedResolution;
+  const materializedPile = materializedResolution?.pileName || itemPile(materializedConsume);
+  const displacedPile = displacedResolution?.pileName || itemPile(displacedProtected);
+  if (itemId(materializedConsume) !== newItemId || materializedPile !== 'club') {
+    return { ok: false, reason: `materialized consume item #${newItemId} is not in Club` };
+  }
+  if (definitionId(materializedConsume) !== pair.sourceSignalRef.definitionId
+    || !duplicateCardValueFingerprintMatches(pair.sourceFingerprint, materializedConsume)) {
+    return { ok: false, reason: `materialized consume item #${newItemId} changed value identity` };
+  }
+  if (itemId(displacedProtected) !== targetId || displacedPile !== 'unassigned') {
+    return { ok: false, reason: `protected counterpart #${targetId} is not displaced to Unassigned` };
+  }
+  if (!duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, displacedProtected)) {
+    return { ok: false, reason: `protected counterpart #${targetId} changed value identity` };
+  }
+  const pairs = transaction.pairs.map((entry, index) => index === pairIndex
+    ? {
+        ...entry,
+        materializedConsumeRef: itemRef({
+          id: itemId(materializedConsume),
+          definitionId: definitionId(materializedConsume),
+          pile: 'club',
+        }),
+        displacedProtectedRef: itemRef({
+          id: itemId(displacedProtected),
+          definitionId: definitionId(displacedProtected),
+          pile: 'unassigned',
+        }),
+      }
+    : entry);
+  const complete = pairs.every((entry) => (
+    entry.materializedConsumeRef?.id && entry.displacedProtectedRef?.id
+  ));
+  const afterInventoryVersion = Math.max(
+    Number(transaction.afterInventoryVersion) || 0,
+    Number(input.afterInventoryVersion) || 0,
+  );
+  return {
+    ok: true,
+    transaction: freezeTransaction({
+      ...transaction,
+      status: complete ? 'materialized' : 'planned',
+      pairs,
+      afterInventoryVersion,
+      updatedAt: input.updatedAt || transaction.updatedAt,
+    }),
+  };
+}
+
+// Reconciliation may advance the inventory version after a pair has already
+// been journaled. Record that observed version without re-reading EA entities
+// or changing any protected identities.
+export function updateDuplicateMaterializationInventoryVersion(transaction = {}, inventoryVersion = 0, options = {}) {
+  if (!transaction?.transactionId || !Array.isArray(transaction.pairs) || !transaction.pairs.length) {
+    return { ok: false, reason: 'duplicate materialization transaction is invalid' };
+  }
+  const nextVersion = Math.max(
+    Number(transaction.afterInventoryVersion) || 0,
+    Number(inventoryVersion) || 0,
+  );
+  if (nextVersion <= (Number(transaction.afterInventoryVersion) || 0)) {
+    return { ok: true, transaction };
+  }
+  return {
+    ok: true,
+    transaction: freezeTransaction({
+      ...transaction,
+      afterInventoryVersion: nextVersion,
+      updatedAt: options.updatedAt || transaction.updatedAt,
+    }),
+  };
+}
+
+// The Ledger contains normalized snapshots, so full value fingerprints have
+// already been checked against the live EA entities before this verification.
+// Here it is authoritative only for exact identity and pile reconciliation.
+export function validateDuplicateMaterializationLedgerPair(transaction = {}, sourceSignalId = 0, input = {}) {
+  const sourceId = positiveId(sourceSignalId);
+  const pair = (transaction.pairs || []).find((entry) => entry.sourceSignalRef.id === sourceId);
+  if (!pair?.materializedConsumeRef?.id || !pair?.displacedProtectedRef?.id) {
+    return { ok: false, reason: `duplicate materialization pair for source #${sourceId || '?'} is not journaled` };
+  }
+  const consume = input.resolveItem?.(pair.materializedConsumeRef.id) || null;
+  const protectedCard = input.resolveItem?.(pair.displacedProtectedRef.id) || null;
+  if (itemId(consume) !== pair.materializedConsumeRef.id
+    || definitionId(consume) !== pair.materializedConsumeRef.definitionId
+    || itemPile(consume) !== 'club') {
+    return { ok: false, reason: `materialized consume item #${pair.materializedConsumeRef.id} did not reconcile in Club` };
+  }
+  if (itemId(protectedCard) !== pair.displacedProtectedRef.id
+    || definitionId(protectedCard) !== pair.displacedProtectedRef.definitionId
+    || itemPile(protectedCard) !== 'unassigned') {
+    return { ok: false, reason: `protected counterpart #${pair.displacedProtectedRef.id} did not reconcile in Unassigned` };
+  }
+  return { ok: true };
+}
+
+// A reconciled Ledger contains normalized snapshots rather than complete EA
+// entities. It is authoritative for exact identity and pile, while full value
+// fingerprints remain guarded at the live move boundaries.
+export function validateDuplicateMaterializationLedgerState(transaction = {}, input = {}) {
+  if (transaction.status !== 'materialized') {
+    return { ok: false, reason: `duplicate materialization transaction is ${transaction.status || 'invalid'}` };
+  }
+  const inventoryVersion = Math.max(0, Number(input.inventoryVersion) || 0);
+  if (transaction.afterInventoryVersion && inventoryVersion
+    && inventoryVersion < transaction.afterInventoryVersion) {
+    return { ok: false, reason: 'duplicate materialization Ledger is older than the materialized inventory version' };
+  }
+  for (const pair of transaction.pairs || []) {
+    const validation = validateDuplicateMaterializationLedgerPair(
+      transaction,
+      pair.sourceSignalRef?.id,
+      input,
+    );
+    if (!validation.ok) return validation;
+  }
+  return { ok: true };
+}
+
 export function duplicateTransactionConsumeRefs(transaction = {}) {
   if (transaction.status !== 'materialized') return [];
   return transaction.pairs.map((pair) => pair.materializedConsumeRef).filter(Boolean);
@@ -239,6 +452,8 @@ export function duplicateTransactionAuthorizesItem(transaction = {}, item = {}) 
     && transaction.pairs.some((pair) => (
       pair.materializedConsumeRef?.id === id
         && pair.materializedConsumeRef?.definitionId === defId
+        && itemPile(item) === 'club'
+        && duplicateCardValueFingerprintMatches(pair.sourceFingerprint, item)
     ));
 }
 
@@ -286,21 +501,147 @@ export function validateDuplicateProtectedRestoration(transaction = {}, input = 
   return { ok: true };
 }
 
+export function validateDuplicateProtectedRestorationLedger(transaction = {}, input = {}) {
+  if (!['planned', 'materialized', 'submission-confirmed', 'recovery-required', 'ambiguous', 'completed'].includes(transaction.status)) {
+    return { ok: false, reason: `duplicate materialization transaction is ${transaction.status || 'invalid'}` };
+  }
+  for (const pair of transaction.pairs || []) {
+    const protectedCard = input.resolveItem?.(pair.protectedCounterpartRef.id) || null;
+    if (itemId(protectedCard) !== pair.protectedCounterpartRef.id
+      || definitionId(protectedCard) !== pair.protectedCounterpartRef.definitionId
+      || itemPile(protectedCard) !== 'club') {
+      return { ok: false, reason: `protected counterpart #${pair.protectedCounterpartRef.id} did not reconcile in Club` };
+    }
+  }
+  return { ok: true };
+}
+
+export function validateDuplicateRollbackLedgerState(transaction = {}, input = {}) {
+  const protectedValidation = validateDuplicateProtectedRestorationLedger(transaction, input);
+  if (!protectedValidation.ok) return protectedValidation;
+  for (const pair of transaction.pairs || []) {
+    const consume = input.resolveItem?.(pair.materializedConsumeRef?.id) || null;
+    if (itemId(consume) !== pair.materializedConsumeRef?.id
+      || definitionId(consume) !== pair.materializedConsumeRef?.definitionId
+      || itemPile(consume) !== 'unassigned') {
+      return { ok: false, reason: `materialized consume item #${pair.materializedConsumeRef?.id || '?'} did not reconcile in Unassigned` };
+    }
+  }
+  return { ok: true };
+}
+
+export function planDuplicateStartupCancellation(transaction = {}, input = {}) {
+  if (!transaction?.transactionId || !Array.isArray(transaction.pairs) || !transaction.pairs.length) {
+    return { ok: false, action: 'clear-invalid', reason: 'duplicate materialization journal is invalid' };
+  }
+  if (!TRANSACTION_STATUSES.has(String(transaction.status))) {
+    return { ok: false, action: 'clear-invalid', reason: 'duplicate materialization journal has an unknown status' };
+  }
+  const pairIdentities = transaction.pairs.flatMap((pair) => {
+    const sourceId = positiveId(pair.sourceSignalRef?.id);
+    const protectedId = positiveId(pair.protectedCounterpartRef?.id);
+    const sourceDefinitionId = positiveId(pair.sourceSignalRef?.definitionId);
+    const protectedDefinitionId = positiveId(pair.protectedCounterpartRef?.definitionId);
+    if (!sourceId || !protectedId || !sourceDefinitionId || !protectedDefinitionId
+      || sourceId === protectedId || sourceDefinitionId !== protectedDefinitionId) return [];
+    return [sourceId, protectedId];
+  });
+  if (pairIdentities.length !== transaction.pairs.length * 2
+    || new Set(pairIdentities).size !== pairIdentities.length) {
+    return { ok: false, action: 'clear-invalid', reason: 'duplicate materialization journal reused or omitted an item identity' };
+  }
+  const states = transaction.pairs.map((pair) => {
+    const ref = pair.protectedCounterpartRef;
+    let resolved = null;
+    let resolutionFailed = false;
+    try {
+      resolved = input.resolveItem?.(ref.id) || null;
+    } catch {
+      resolutionFailed = true;
+    }
+    const location = resolved?.item && typeof resolved.item === 'object'
+      ? resolved
+      : null;
+    const item = location?.item || resolved;
+    const pile = location?.pileName || itemPile(item);
+    let state = resolutionFailed ? 'resolution-error' : 'missing';
+    if (!resolutionFailed && item) {
+      if (itemId(item) !== ref.id) state = 'identity-mismatch';
+      else if (pile === 'club') state = 'club';
+      else if (pile === 'unassigned') state = 'unassigned';
+      else if (pile === 'storage') state = 'storage';
+      else if (pile === 'transfer') state = 'transfer';
+      else state = 'unknown-pile';
+    }
+    return Object.freeze({
+      ref: itemRef(ref, 'club'),
+      state,
+      pile: pile || 'unknown',
+      actualDefinitionId: definitionId(item),
+      definitionChanged: Boolean(item) && itemId(item) === ref.id
+        && definitionId(item) !== ref.definitionId,
+    });
+  });
+  if (states.some((entry) => ['identity-mismatch', 'resolution-error', 'unknown-pile'].includes(entry.state))) {
+    return {
+      ok: false,
+      action: 'block-untrusted',
+      reason: 'reconciled inventory could not resolve every protected item ID reliably',
+      states: Object.freeze(states),
+    };
+  }
+  return {
+    ok: true,
+    action: states.some((entry) => entry.state === 'unassigned')
+      ? 'restore-and-clear'
+      : 'clear',
+    restoreRefs: Object.freeze(states
+      .filter((entry) => entry.state === 'unassigned')
+      .map((entry) => entry.ref)),
+    states: Object.freeze(states),
+  };
+}
+
 function exactRecoveryItem(transactionPairValue, ref, fingerprint, input = {}) {
-  const item = input.resolveItem?.(positiveId(ref?.id)) || null;
+  const resolved = input.resolveItem?.(positiveId(ref?.id)) || null;
+  const location = resolved?.item && typeof resolved.item === 'object'
+    && typeof resolved.pileName === 'string'
+    ? resolved
+    : null;
+  const item = location?.item || resolved;
   if (!item) return { ok: false, missing: true, item: null, pile: null };
   const exact = itemId(item) === positiveId(ref?.id)
     && definitionId(item) === positiveId(ref?.definitionId);
-  const valueIdentity = exact && duplicateCardValueFingerprintMatches(fingerprint, item);
+  const fingerprintDiff = diffDuplicateCardValueFingerprint(fingerprint, item);
+  const valueIdentity = exact && fingerprintDiff.changedFields.length === 0;
   return {
     ok: exact && valueIdentity,
     missing: false,
     item,
-    pile: itemPile(item),
+    pile: location?.pileName || itemPile(item),
     pair: transactionPairValue,
     exact,
     valueIdentity,
+    fingerprintDiff,
   };
+}
+
+function changedRecoveryStateDetails(states = []) {
+  return states.flatMap(({ pair, source, consume, counterpart }) => ([
+    ['source', pair.sourceSignalRef, source],
+    ['consume', pair.materializedConsumeRef, consume],
+    ['counterpart', pair.displacedProtectedRef || pair.protectedCounterpartRef, counterpart],
+  ])).filter(([, , state]) => state && !state.missing && !state.ok)
+    .map(([role, ref, state]) => Object.freeze({
+      role,
+      expectedRef: itemRef(ref),
+      actualRef: itemRef(state.item, state.pile),
+      pile: state.pile,
+      exactIdentity: state.exact,
+      changedFields: state.fingerprintDiff.changedFields,
+      expected: state.fingerprintDiff.expected,
+      actual: state.fingerprintDiff.actual,
+    }));
 }
 
 export function planDuplicateMaterializationRecovery(transaction = {}, input = {}) {
@@ -326,10 +667,15 @@ export function planDuplicateMaterializationRecovery(transaction = {}, input = {
     [source, consume, counterpart].filter(Boolean).some((state) => !state.missing && !state.ok)
   ));
   if (changedValueIdentity) {
+    const changedItems = changedRecoveryStateDetails(states);
+    const changedSummary = changedItems.map((entry) => (
+      `${entry.role} #${entry.expectedRef.id || '?'} in ${entry.pile || 'unknown'} changed ${entry.changedFields.join(',') || 'exact identity'}`
+    )).join('; ');
     return {
       ok: false,
       action: 'block',
-      reason: 'a duplicate materialization journal item changed value identity',
+      reason: `a duplicate materialization journal item changed value identity: ${changedSummary}`,
+      details: Object.freeze({ changedItems: Object.freeze(changedItems) }),
     };
   }
 
@@ -339,6 +685,22 @@ export function planDuplicateMaterializationRecovery(transaction = {}, input = {
         && counterpart.ok && counterpart.pile === 'club'
     ));
     if (untouched) return { ok: true, action: 'clear' };
+    const partialStates = states.map(({ pair, source, consume, counterpart }) => {
+      const hasRecordedRefs = Boolean(
+        pair.materializedConsumeRef?.id || pair.displacedProtectedRef?.id,
+      );
+      const swapped = hasRecordedRefs
+        && consume?.ok && consume.pile === 'club'
+        && counterpart.ok && counterpart.pile === 'unassigned';
+      const untouchedPair = !hasRecordedRefs
+        && source.ok && source.pile === 'unassigned'
+        && counterpart.ok && counterpart.pile === 'club';
+      return swapped || untouchedPair;
+    });
+    if (partialStates.every(Boolean)
+      && states.some(({ pair }) => pair.materializedConsumeRef?.id || pair.displacedProtectedRef?.id)) {
+      return { ok: true, action: 'rollback-partial' };
+    }
     const displaced = states.every(({ counterpart }) => (
       counterpart.ok && counterpart.pile === 'unassigned'
     ));
@@ -361,6 +723,23 @@ export function planDuplicateMaterializationRecovery(transaction = {}, input = {
   }
 
   if (['materialized', 'recovery-required', 'ambiguous'].includes(transaction.status)) {
+    const neverMaterialized = states.every(({ pair }) => (
+      !pair.materializedConsumeRef && !pair.displacedProtectedRef
+    ));
+    const untouched = states.every(({ source, counterpart }) => (
+      source.ok && source.pile === 'unassigned'
+        && counterpart.ok && counterpart.pile === 'club'
+    ));
+    if (transaction.status === 'ambiguous' && neverMaterialized && untouched) {
+      return { ok: true, action: 'clear' };
+    }
+    const safelyStored = states.every(({ source, counterpart }) => (
+      source.ok && source.pile === 'storage'
+        && counterpart.ok && counterpart.pile === 'club'
+    ));
+    if (transaction.status === 'ambiguous' && neverMaterialized && safelyStored) {
+      return { ok: true, action: 'clear' };
+    }
     const swapped = states.every(({ consume, counterpart }) => (
       consume?.ok && consume.pile === 'club'
         && counterpart.ok && counterpart.pile === 'unassigned'
@@ -370,7 +749,9 @@ export function planDuplicateMaterializationRecovery(transaction = {}, input = {
       consume?.ok && consume.pile === 'unassigned'
         && counterpart.ok && counterpart.pile === 'club'
     ));
-    if (restored && transaction.status === 'materialized') return { ok: true, action: 'clear' };
+    if (restored && ['materialized', 'recovery-required'].includes(transaction.status)) {
+      return { ok: true, action: 'clear' };
+    }
     const protectedDisplaced = states.every(({ counterpart }) => (
       counterpart.ok && counterpart.pile === 'unassigned'
     ));

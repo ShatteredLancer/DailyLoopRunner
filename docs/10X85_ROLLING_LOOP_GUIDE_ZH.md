@@ -1,8 +1,8 @@
 # 10x85+ Rolling Loop 使用与流程指南
 
-> 适用版本：DailyLoopRunner `v0.8.22`
+> 适用版本：DailyLoopRunner `v0.8.40`
 >
-> 最后更新：2026-08-19
+> 最后更新：2026-08-22
 >
 > 本文说明实际运行行为。设计决策、测试和实施记录见 [10x85+ Rolling Loop 设计与实施追踪](10X85_ROLLING_LOOP_IMPLEMENTATION_ZH.md)。
 
@@ -40,6 +40,7 @@ Loop 不写死当前 Set、Challenge、奖励包 ID、目标评分或阵容人�
 | `Provisions packs per shortage` | `2` | 一次真实缺料处理中最多打开多少个已有 Provisions 奖励，范围 `1-30`；每批后重新规划。 |
 | `Craft surplus Provisions/TOTW` | 关闭 | 关闭时只在缺料或 Storage 压力下执行恢复 SBC；开启后才主动消耗余量。 |
 | `Protect all Club non-TOTW specials` | 关闭 | 开启后，Rolling 的主阵、Storage pressure SBC 和所有恢复阵都禁止使用 Club 非 TOTW 色卡，即使严重缺料也不放宽；Storage、Transfer 和 Unassigned 色卡仍按原有评分及角色限制可用。 |
+| `Enable experimental native duplicate swaps` | 关闭 | 受控实验开关。关闭时，Unassigned 重复卡先整体送入 Storage，不交换 Club 卡；Storage 不足时安全停止。开启后还必须选择交换范围：`special-only`（特殊卡）、`safe-only`（普通卡）或仅故障调查使用的 `all-eligible`。受控模式每次最多交换一个 pair，未知 fingerprint/交易性/卡种直接留在 Storage。 |
 | `Open duplicate Provisions rewards immediately` | 关闭 | 关闭时，由主包重复 Reserve 制作的 Provisions 奖励留在 My Packs，等真正缺料再开。 |
 | `Storage pressure recovery` | `Off` | `Automatic` 优先使用兼容的 95+ Pick；`Selected SBC` 只使用用户指定的高评分 Player Pick 或直接球员 SBC。 |
 | `Storage pressure SBC` | 扫描目录中的第一项 | 仅在 `Selected SBC` 模式生效；保存后只深度验证选中的 Set。 |
@@ -117,18 +118,38 @@ Required Special 是主 SBC 要求的 `TOTW/TOTS/FOF/FUTTIES` 角色，规则如
 EA 的 duplicate signal 只表示“存在冲突”，真正提交前还必须解析可提交的 Club 或 Storage 实体。Runner 会核对 item ID、definition、评分、rareflag 和 Evolution/version 特征：
 
 - 同 definition 但评分、rareflag 或 Evolution 版本不同，不会直接认作同版本重复。
-- 可以安全回填的主包重复卡优先进入下一套主 SBC。
+- 默认关闭原生交换时，刚开出的 Unassigned 重复卡必须先完整移入 Storage，之后才可作为 Storage 实体进入下一套 SBC。
 - 受保护或无法容纳的重复卡转入 Storage。
 - 实体身份无法确认时安全停止，不会用名称或 definitionId 猜测替代卡。
 
-如果主包中的不可交易重复卡对应 Club 中一张可交易的同版本卡，而该卡又被选入本次 Rolling 阵容，Runner 会在提交前执行一次可交易性交换：
+`Enable experimental native duplicate swaps` 默认和旧配置迁移值都是关闭。关闭时不会创建新的交换 journal，也不会调用 EA 原生 Club move；如果 Storage 不能一次接收全部重复卡，返回 `DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED`。若已在 Selection Policy 启用并选定 Storage pressure SBC，Runner 会先尝试紧急 Provisions，再用该 SBC 净消费足够的真实 Storage 卡，确认容量后重试整体 Storage 路由；这批待存 Unassigned 卡不会进入恢复阵，即使其中的 87/88/89 卡属于当前 Provisions Reserve 范围也不会解除保护。候选选择和提交前 validator 分别检查这些 signal；安全 Provisions 不可行时自动继续尝试 Storage pressure SBC。未启用或无法安全释放容量时保留现场且不提交主 SBC。提交前还有第二道 `DUPLICATE_SWAP_DISABLED` 防线，防止任何遗漏路由的 `from:unassigned | submitFrom:club` 阵容继续提交。
+
+关闭开关不跳过上一次已经发生的交换。启动仍先检查旧 journal，恢复或分类原 Club ID，清理完成后才从当前库存重规划。因此关闭后可以恢复普通流程和重复卡流程；Storage 压力恢复不可用、材料不足或无法证明净释放容量时才会继续安全停止。
+
+只有显式开启实验开关后，如果主包中的不可交易重复卡对应 Club 中一张已确认交易状态的同版本卡，而该卡又被选入本次 Rolling 阵容，Runner 才会在提交前执行一次身份交换。Club 副本可以是可交易或不可交易；未知交易状态保持拒绝：
 
 1. 再次核对 definition、评分、rareflag、Evolution 和 cosmetic/version 状态，并确认 duplicate ID 指向当前选中的 Club 实体。
-2. 通过 EA move 接口把不可交易版本移入 Club，并要求响应返回原 Club item ID 到新 Club item ID 的完整映射。
-3. 用新的不可交易 Club 实体替换阵容中的可交易实体，重新保存阵容并对账。
-4. 被换出的可交易版本作为新的 Unassigned 项，在提交成功后走正常清理流程。
+2. 通过 EA 原生的单实体双参数接口 `Item.move(item, CLUB)` 把不可交易版本移入 Club；多对重复卡严格逐对处理，并要求每次响应返回原 Club item ID 到新 Club item ID 的完整映射。
+3. 每对交换后立即按完整价值指纹对账并持久化精确新 Club ID，再处理下一对。只用交换后新生成的不可交易 Club 实体替换阵容中的原 Club 实体；原 Club ID 全程受保护，不经过 Storage。
+4. 交换后的同 Challenge 重规划可能再次显示 `from:unassigned | submitFrom:club`，但只接受 journal 中精确的原 Club ID B 指向新 Club ID A' 的反向映射。该映射只复用 A' 的提交权限，不会执行第二次 EA move；任何其它 signal、目标或数量都停止。
+5. SBC 确认提交后，把原 Club 卡按原交易状态和价值指纹恢复到 Club；提交失败则尝试补偿恢复。Repository 确认 B 位于 Unassigned 时，其位置优先于实体上可能滞后的 `pile` 标量；其它价值身份仍完整校验。
 
 任何身份、版本、响应映射或对账不一致都会停止本次提交。Runner 不会仅凭球员名称或相同 definition 强行交换，因此不会把 EVO、cosmetic 或其它异版本卡当成同一张卡。
+
+同一次运行内，交换、重规划、提交和补偿仍是一个严格事务：提交结果不确定、身份变化或补偿无法对账时立即停止，不会自动重试提交。
+
+页面刷新、脚本更新或重新启动后，不假设上一次阵容、缓存、待提交实体或 SBC 状态仍然存在。启动阶段会取消上一次提交意图，并按 journal 中每个原 Club item ID 的当前状态分别处理：
+
+- ID 已在 Club：保留原位并清除旧 journal。
+- ID 在 Unassigned：只移动这个精确 live EA 实体回 Club；对账成功后清除旧 journal。
+- ID 在 Storage 或 Transfer：视为停机期间的外部状态变化，保留当前位置并清除旧 journal。
+- ID 在全部 pile 都不存在：记录明确的 missing 告警，不用同 definition 卡替代，清除旧 journal。
+- 多个 ID 处于混合状态：逐个分类，只恢复仍在 Unassigned 的 ID，不要求整批处于相同状态。
+- journal 损坏：记录告警并删除；删除失败或 Ledger 返回不可信的错误 ID 时才阻断。
+
+旧 journal 清除后始终从当前真实库存重新规划，不会续交上次 squad，也不要求上次交换生成的消费实体仍然存在。原 Club ID 的硬保护只约束同一次活动事务；跨启动时，已不存在的实体无法恢复，也不会让过期 journal 永久阻断新运行。
+
+EA 原生交换要求单个 `UTItemEntity` 和 Club pile 两个参数。数组加第三个 `allowStorage` 参数会进入另一条 `untradeableSwap` 路径，可能返回 `status:0` 且库存零变化；Runner 已将重复卡专用路径改为原生双参数调用。维护者可在控制台依次调用 `window.__FCLoopRunner.startNativeDuplicateSwapTrace()`、手动完成一次原生交换、再调用 `stopNativeDuplicateSwapTrace()` 和 `getNativeDuplicateSwapTrace()`；追踪只记录有界脱敏参数/结果，不会替换当前生产交换实现。
 
 ## 5. 如何控制主阵评分
 
@@ -283,12 +304,12 @@ Rolling 运行时在主面板显示独立状态区：
 
 - 当前 Phase 和 Cycle。
 - `Special slots`：当前可用于主 SBC 特殊槽的数量。
-- `Direct cycles`：不依赖恢复即可完成的估计轮数。
+- `Storage Pressure SBCs`：本次运行已明确提交的 Storage Pressure SBC challenge 数量。
 - `Provisions batches`：当前估计可完成的 Provisions 批次。
-- `TOTW recoveries`：当前估计可完成的 TOTW 恢复次数。
+- `TOTW SBCs`：本次运行已明确提交的 TOTW SBC 数量。
 - `Storage`：已用容量和总容量。
 
-显示 `-` 表示该值当前故意不做昂贵的全量求解，不能理解为 0。库存每次开包、提交、移动和对账后都会增量更新。
+`Storage Pressure SBCs` 和 `TOTW SBCs` 只在 EA 明确确认提交后递增；规划、失败、取消、仅打开奖励或结果不明确都不会计数。库存每次开包、提交、移动和对账后都会增量更新。
 
 Rolling Recap 使用有界聚合，不会无限保存每一轮全部卡片：
 
@@ -311,7 +332,7 @@ Rolling Recap 使用有界聚合，不会无限保存每一轮全部卡片：
 - 开启 `Selection Policy -> Submission guards -> Protect Active Squad players` 后，普通卡不再阻塞整次运行：Runner 记录冲突的精确 item ID、在当前 Rolling 运行内排除它并重新规划；不会按 definition ID 排除同版本的其它实体。新一次 Rolling 会清空这份临时排除列表。
 - 特殊卡按来源和角色分流：Unassigned/Storage/Transfer 的 TOTS/FOF/FUTTIES 可以正常填入 Required Special 槽，但不属于 Active Squad 确认候选。若 EA 对其中任何一张返回 `409/itemViolations`，说明 EA 实体身份或规划状态矛盾，立即报错且不允许强制提交。`Protect all Club non-TOTW specials` 不改变这条硬规则；它只让其它 Club 非 TOTW 特殊卡成为最后 fallback，此类 Active Squad 冲突在开关关闭时显示 `Use this card` / `Replace card`，开启时按规划回归报错。
 - 对合法特殊卡选择 `Use this card` 时，只对当前保存阵容执行一次有界 `skipValidation:true` 确认；选择 `Replace card` 或点击弹窗外部时，按精确 item ID 排除并重规划。本次运行内已批准的实体不重复询问。
-- Rolling 的 Provisions、5x80、TOTW 等库存恢复 SBC 与主评分提交使用同一套后台 DAO 提交事务，不再点击 SBC 页面 Submit，因此不会触发 FSU 的 `Priceless player tips` 价格确认弹窗。后台提交仍会先刷新/交换实际球员、保存阵容并运行保存前后校验。
+- Rolling 的 Provisions、5x80、TOTW 等库存恢复 SBC 与主评分提交使用同一套后台 DAO 提交事务。Challenge 也通过 DAO 直接加载，不再打开 SBC Squad 页面或点击页面 Submit，因此不会触发 FSU 的 `Priceless player tips` 价格确认弹窗。后台提交仍会先刷新/交换实际球员、保存阵容并运行保存前后校验。
 - `Protect FSU locked players` 仍然有效：选材过滤和最终阵容校验都会检查 FSU Lock。`Protect Active Squad players` 也仍然有效；关闭时只允许对严格匹配当前已保存阵容的 EA `409/itemViolations` 做一次确认提交，开启时执行上述换卡、复核或保护回归分流。后台提交不是关闭这些保护。
 - 缺少 `itemViolations`、响应结构异常、包含阵容外 item ID、已经确认过一次或确认提交仍失败的 `409` 都保持失败；普通 Loop 不启用该确认路径。
 - 发生错误后不要先手工移动待处理卡；优先使用 `Save log` 保存完整日志。实体状态被手工改变后，Runner 可能因为无法证明原计划仍有效而安全停止。

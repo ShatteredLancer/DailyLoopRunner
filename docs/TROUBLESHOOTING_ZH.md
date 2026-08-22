@@ -88,11 +88,17 @@ Runner 会刷新 Unassigned、恢复迟到 duplicate metadata、确认新实体�
 
 ## 8. Storage 或 Transfer 已满
 
-不可交易重复卡需要 Storage；交换可交易 Club 版本会占用 Transfer。容量不足时当前 Pack 可以进入 recap，但后续 Pack 会停止。
+`Enable experimental native duplicate swaps` 默认关闭，因此新出现的 Unassigned 重复卡需要先整体进入 Storage。容量不足时返回 `DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED`；不会交换 Club 卡、写新 journal 或提交主 SBC。
 
-释放容量后重新运行。Runner 会先检查现存 Unassigned，不会直接跳过阻塞。
+若已启用 Storage pressure SBC，Runner 会先尝试紧急 Provisions，再让选定的 Storage pressure SBC 净消费足够的真实 Storage 卡；待存的 Unassigned 重复卡不会进入恢复阵，即使它是 87/88/89 Provisions Reserve 也继续受保护。安全 Provisions 无法成阵时会继续尝试 Storage pressure SBC。确认容量后自动重试路由。未启用、恢复阵不可行或无法证明净释放容量时，手动释放容量后重新运行；Runner 会先检查现存 Unassigned，不会直接跳过阻塞。
 
 ## 9. Rolling 同版本重复卡身份保护
+
+先在 `Selection Policy -> Rolling` 检查 `Enable experimental native duplicate swaps` 和 `Duplicate swap scope`。建议保持关闭；首次灰度只能选择 `special-only`，且每次最多一个 pair。关闭时正常日志应把重复卡路由到 Storage；出现 `DUPLICATE_SWAP_DISABLED` 表示提交前防线拦截了一条遗漏路由。Storage 有空间后重新运行即可。受控模式遇到未知 fingerprint、交易性或特殊分类时也会安全留在 Storage，不应手工改成 `all-eligible` 规避。
+
+开关关闭不会删除或忽略旧 journal。若上一版本已经交换过 A/B，新启动仍先恢复或分类精确的原 Club ID B，再清理旧 journal；这是恢复动作，不代表新交换仍被启用。
+
+只有显式开启实验开关时，以下交换事务日志才是预期行为。
 
 当日志出现 `from:unassigned | submitFrom:club` 时，Unassigned 卡 A 和原 Club 卡 B
 即使 `definitionId` 相同，也必须当作两个不同资产。Runner 会先持久化事务，再执行
@@ -113,13 +119,18 @@ Set/Challenge 内重新规划。只有精确的 `A' itemId + definitionId` 获�
 - `DUPLICATE_JOURNAL_WRITE_FAILED` / `DUPLICATE_JOURNAL_CLEAR_FAILED`：事务无法可靠写入或清除。
 - `DUPLICATE_REQUIREMENTS_REPLAN_UNSUPPORTED`：Requirements Recovery 无法证明仍绑定原 Challenge。
 
-发生上述错误时点击 Stop，不要手动移动 A/A'/B。保留页面状态并重新运行同一个
-Rolling Loop；启动恢复会先于 Pick、Unassigned 清理和开包执行。若仍是 ambiguous，
-导出完整日志并人工核对三个精确 item ID，不能仅按球员名称或 `definitionId` 判断。
+发生上述错误时点击 Stop，不要手动移动 A/A'/B。同一次运行内仍按严格事务执行：
+能确认未提交时补偿，提交结果不明时 fail closed。刷新页面或重新安装脚本后的新一次
+启动不会续交旧 squad，也不要求 A/A' 继续存在；它只逐项核对原 Club 卡 B 的精确
+item ID。B 在 Club 时保留，在 Unassigned 时移回 Club，在 Storage/Transfer 时保留
+当前位置，全部 pile 缺失时只告警，随后清除旧 journal 并按当前库存重新规划。库存
+无法可靠对账、Ledger 不可用或返回未知 pile、精确 B 实体无法取得、移动失败、恢复后未在 Club 对账或 journal 无法
+删除时才阻断并保留 journal。任何场景都不能仅按球员名称或 `definitionId` 替代 B。
 
 真实页面验收应使用两张低价值同版本卡：A 放 Unassigned，B 放 Club，可让 B 带不同
 化学样式或外观。确认提交的是交换后的 A'，B 未进入保存阵容且最终原样回 Club；再分别
-触发 Stop、Active Squad 换卡和网络超时，确认恢复完成或明确停在 ambiguous。自动测试
+触发 Stop、Active Squad 换卡和网络超时，确认同一次运行内完成补偿或明确停在 ambiguous；
+随后刷新页面，确认新启动只核对原 Club item ID、清理旧意图并重新规划。自动测试
 不能替代这一步。
 
 ## 10. FSU 加载较慢

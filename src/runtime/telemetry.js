@@ -35,15 +35,9 @@ export function createRuntimeTelemetrySnapshot(input = {}, previous = null) {
     completedCycles: number('completedCycles', 0),
     cycleLimit: number('cycleLimit', 0),
     specialSlots: number('specialSlots'),
-    directCycles: number('directCycles'),
-    directCyclesLimited: Object.hasOwn(input, 'directCyclesLimited')
-      ? input.directCyclesLimited === true
-      : prior.directCyclesLimited === true,
+    storagePressureSbcCount: number('storagePressureSbcCount'),
     provisionsBatches: number('provisionsBatches'),
-    totwRecoveries: number('totwRecoveries'),
-    totwRecoveriesLimited: Object.hasOwn(input, 'totwRecoveriesLimited')
-      ? input.totwRecoveriesLimited === true
-      : prior.totwRecoveriesLimited === true,
+    totwSbcCount: number('totwSbcCount'),
     storageUsed: number('storageUsed'),
     storageCapacity: number('storageCapacity'),
     inventoryVersion: number('inventoryVersion'),

@@ -335,9 +335,9 @@ export function createRollingRecapModel(input = {}) {
   if (snapshot.finalResources) {
     const labels = {
       specialSlots: 'Special slots',
-      directCycles: 'Direct cycles',
+      storagePressureSbcCount: 'Storage Pressure SBCs',
       provisionsBatches: 'Provisions batches',
-      totwRecoveries: 'TOTW recoveries',
+      totwSbcCount: 'TOTW SBCs',
       storage: 'Storage',
       inventoryVersion: 'Inventory version',
     };

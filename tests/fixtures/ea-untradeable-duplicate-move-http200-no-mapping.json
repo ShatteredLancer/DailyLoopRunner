@@ -1,0 +1,27 @@
+{
+  "source": {
+    "id": 926062785969,
+    "definitionId": 84113403,
+    "rating": 88,
+    "rareflag": 1,
+    "pile": 6,
+    "duplicateId": 925980798370,
+    "tradable": false
+  },
+  "response": {
+    "status": 200,
+    "success": true,
+    "data": {
+      "itemIds": [],
+      "clubDuplicates": [],
+      "sourcePile": 6,
+      "destinationPile": 7,
+      "untradeableSwap": false
+    }
+  },
+  "expected": {
+    "ok": false,
+    "reason": "duplicate swap response mapping is incomplete",
+    "replacements": []
+  }
+}

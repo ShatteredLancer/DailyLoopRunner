@@ -303,6 +303,16 @@ export function createEaInventoryAdapter(runtime, options = {}) {
     return service.move(items, pile, allowStorage);
   }
 
+  // EA's native untradeable-duplicate exchange accepts one entity and the
+  // destination pile. Passing an array or the legacy third argument selects a
+  // different server path, so keep this contract separate from generic moves.
+  function moveSingleItem(item, pile) {
+    if (!item || typeof service?.move !== 'function') {
+      throw new Error('EA single-item move is unavailable');
+    }
+    return service.move(item, pile);
+  }
+
   function snapshot() {
     const rawPiles = Object.fromEntries(INVENTORY_PILES.map((pile) => [pile, readPile(pile)]));
     const piles = Object.fromEntries(INVENTORY_PILES.map((pile) => [
@@ -354,6 +364,7 @@ export function createEaInventoryAdapter(runtime, options = {}) {
     invalidateUnassigned,
     refreshActions,
     move,
+    moveSingleItem,
     snapshotItem: toSnapshot,
   });
 }

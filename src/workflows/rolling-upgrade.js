@@ -418,6 +418,35 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     };
   }
 
+  async function processQueuedRecoveryReward(context = {}) {
+    const pendingReward = await runRecovery(
+      'reward',
+      ROLLING_UPGRADE_PHASES.PROCESS_RECOVERY_REWARD,
+      options.processPendingRecoveryReward,
+      { trigger: context.trigger || 'pending-recovery-reward' },
+    );
+    if (isProgressed(pendingReward)) return { progressed: true };
+    const pendingStorage = await recoverBlockedRewardStorage(pendingReward, {
+      source: context.source || 'pending-recovery-pre-open',
+      blockedReason: 'pending recovery reward needs more Storage headroom',
+      recoveryReason: 'Storage pressure SBC could not clear room for the pending recovery reward',
+    });
+    if (pendingStorage.matched) {
+      if (pendingStorage.progressed) return { progressed: true };
+      return { failure: pendingStorage.failure };
+    }
+    if (isStopped(pendingReward) || isBlocked(pendingReward) || pendingReward?.status === 'planned') {
+      return {
+        failure: finishRecoveryFailure(
+          pendingReward,
+          'pending recovery reward could not be processed',
+          'RECOVERY_REWARD_BLOCKED',
+        ),
+      };
+    }
+    return { progressed: false };
+  }
+
   function finishRecoveryFailure(value, fallbackReason, fallbackCode) {
     if (isStopped(value)) return finish('stopped', value, fallbackReason, 'USER_STOPPED');
     if (value?.status === 'planned') return finish('planned', value, fallbackReason, fallbackCode);
@@ -506,6 +535,21 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       );
     }
     resumedPrimaryPending = resumed?.primaryPending === true;
+  }
+
+  // A submitted recovery SBC owns the next pack decision. On restart, settle
+  // existing Unassigned first, then finish that reward before finding or
+  // opening another primary reward.
+  if (typeof options.hasPendingRecoveryReward === 'function'
+    && await options.hasPendingRecoveryReward({ result })) {
+    while (true) {
+      const startupPendingReward = await processQueuedRecoveryReward({
+        trigger: 'startup-pending-recovery-reward',
+        source: 'pending-recovery-pre-open',
+      });
+      if (startupPendingReward.failure) return startupPendingReward.failure;
+      if (!startupPendingReward.progressed) break;
+    }
   }
 
   while (maxCompletions === 0 || result.completions < maxCompletions) {
@@ -646,7 +690,11 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       if (isStopped(storage)) return finish('stopped', storage, 'stopped while routing protected cards');
       if (isBlocked(storage)) {
         const storageCode = reasonCode(storage) || 'PROTECTED_STORAGE_BLOCKED';
-        if (storageCode !== 'PROTECTED_STORAGE_BLOCKED') {
+        const recoverableStorageCodes = new Set([
+          'PROTECTED_STORAGE_BLOCKED',
+          'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED',
+        ]);
+        if (!recoverableStorageCodes.has(storageCode)) {
           return finish(
             storage?.status === 'unavailable' ? 'unavailable' : 'blocked',
             storage,
@@ -661,7 +709,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           return finishRecoveryFailure(
             provisions,
             'protected cards cannot be stored',
-            'PROTECTED_STORAGE_BLOCKED',
+            storageCode,
           );
         }
 
@@ -669,7 +717,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           return finishRecoveryFailure(
             storage,
             'protected cards cannot be stored',
-            'PROTECTED_STORAGE_BLOCKED',
+            storageCode,
           );
         }
 
@@ -685,7 +733,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
         return finishRecoveryFailure(
           storage,
           'protected cards cannot be stored',
-          'PROTECTED_STORAGE_BLOCKED',
+          storageCode,
         );
       }
 
@@ -709,29 +757,9 @@ export async function runRollingUpgradeWorkflow(options = {}) {
         primaryDuplicateReserveResolved = true;
       }
 
-      const pendingReward = await runRecovery(
-        'reward',
-        ROLLING_UPGRADE_PHASES.PROCESS_RECOVERY_REWARD,
-        options.processPendingRecoveryReward,
-        { trigger: 'pending-recovery-reward' },
-      );
-      if (isProgressed(pendingReward)) continue;
-      const pendingStorage = await recoverBlockedRewardStorage(pendingReward, {
-        source: 'pending-recovery-pre-open',
-        blockedReason: 'pending recovery reward needs more Storage headroom',
-        recoveryReason: 'Storage pressure SBC could not clear room for the pending recovery reward',
-      });
-      if (pendingStorage.matched) {
-        if (pendingStorage.progressed) continue;
-        return pendingStorage.failure;
-      }
-      if (isStopped(pendingReward) || isBlocked(pendingReward) || pendingReward?.status === 'planned') {
-        return finishRecoveryFailure(
-          pendingReward,
-          'pending recovery reward could not be processed',
-          'RECOVERY_REWARD_BLOCKED',
-        );
-      }
+      const pendingReward = await processQueuedRecoveryReward();
+      if (pendingReward.progressed) continue;
+      if (pendingReward.failure) return pendingReward.failure;
 
       const drain = await runRecovery(
         'goldDrain',

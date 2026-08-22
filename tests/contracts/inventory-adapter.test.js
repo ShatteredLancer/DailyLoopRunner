@@ -397,8 +397,9 @@ describe('Inventory Adapter contract', () => {
     runtime.services.Item.requestStorageItems = () => { calls.push(['storage']); return { success: true }; };
     runtime.services.Item.requestSBCStorageItems = () => { calls.push(['sbc-storage']); return { success: true }; };
     runtime.services.Item.requestItems = (pile) => { calls.push(['generic', pile]); return { success: true }; };
-    runtime.services.Item.move = (items, pile, allowStorage) => {
-      calls.push(['move', items.map((item) => item.id), pile, allowStorage]);
+    runtime.services.Item.move = (...args) => {
+      const [items, pile, allowStorage] = args;
+      calls.push(['move', Array.isArray(items) ? items.map((item) => item.id) : items.id, pile, allowStorage, args.length]);
       return { success: true };
     };
     const ea = createEaInventoryAdapter(runtime);
@@ -410,18 +411,23 @@ describe('Inventory Adapter contract', () => {
     actions[0].invoke();
     actions[2].invoke();
     ea.move([piles.storage[0]], 'club', true);
+    ea.moveSingleItem(piles.storage[0], 'club');
     expect(calls).toEqual([
       ['unassigned'],
       ['storage'],
       ['generic', 'storage'],
-      ['move', [2], 'club', true],
+      ['move', [2], 'club', true, 3],
+      ['move', 2, 'club', undefined, 2],
     ]);
 
     const fake = createFakeInventoryAdapter({ piles, capacities });
     fake.requestUnassigned();
     fake.refreshActions('storage')[0].invoke();
     fake.move([piles.storage[0]], 'club', true);
-    expect(fake.calls.map((call) => call.method)).toEqual(['requestUnassigned', 'refreshPile', 'move']);
+    fake.moveSingleItem(piles.storage[0], 'club');
+    expect(fake.calls.map((call) => call.method)).toEqual([
+      'requestUnassigned', 'refreshPile', 'move', 'moveSingleItem',
+    ]);
   });
 
   it('invalidates every distinct EA Unassigned cache before a forced refresh', async () => {

@@ -22,11 +22,10 @@ function query(panel, selector) {
   return panel?.querySelector?.(selector) || null;
 }
 
-function metricText(value, limited = false) {
+function metricText(value) {
   if (value === null || value === undefined || value === '') return '-';
   if (!Number.isFinite(Number(value))) return '-';
-  const text = String(Math.max(0, Math.floor(Number(value))));
-  return limited ? `${text}+` : text;
+  return String(Math.max(0, Math.floor(Number(value))));
 }
 
 export function runtimeTelemetryPhaseLabel(phase, stopping = false) {
@@ -62,13 +61,13 @@ export function renderRuntimeTelemetry(options = {}) {
 
   const metrics = {
     'bronze-loop-runtime-special': { value: snapshot.specialSlots, limited: false },
-    'bronze-loop-runtime-direct': { value: snapshot.directCycles, limited: snapshot.directCyclesLimited === true },
+    'bronze-loop-runtime-storage-pressure': { value: snapshot.storagePressureSbcCount },
     'bronze-loop-runtime-provisions': { value: snapshot.provisionsBatches, limited: false },
-    'bronze-loop-runtime-totw': { value: snapshot.totwRecoveries, limited: snapshot.totwRecoveriesLimited === true },
+    'bronze-loop-runtime-totw-sbc': { value: snapshot.totwSbcCount },
   };
   Object.entries(metrics).forEach(([id, metric]) => {
     const element = query(panel, `#${id}`);
-    if (element) element.textContent = metricText(metric.value, metric.limited);
+    if (element) element.textContent = metricText(metric.value);
   });
 
   const storageValue = query(panel, '#bronze-loop-runtime-storage-value');

@@ -370,7 +370,7 @@ TOTW Upgrade 自身的普通材料池必须排除全部 Required Special。新�
 - 严格 Club 色卡保护开启时，Club Other Special 不得进入候选或 fallback；Provisions 只能使用其它 pile 的合格色卡或普通材料。
 - 不消耗下一套主 SBC 唯一可用的 Required Special，因为它根本不进入候选池。
 
-默认关闭 `rollingSurplusCraftingEnabled` 时，不执行主包 `duplicate-reserve` Provisions，也不执行主阵后的 Storage 维护；85-89 的可用重复卡直接进入主阵候选。显式开启后，至少一套主 SBC 成功提交并完成账本对账，Storage 维护才允许逐套消耗 Storage 中完整的 `87/88 x4`，这些维护奖励默认留在 My Packs；当前主包完整四张 Reserve 也可即时制作 Provisions。无论开关状态，主 Solver 明确缺料时才处理已有 Provisions/5x80+ 奖励；已有 Provisions 按 `rollingShortageProvisionsPackLimit` 分批处理，默认每次缺料最多两包并在每批后重新规划，仍缺料才制作新的 Provisions。Required Special 缺失和真实 Storage 压力恢复同样保留。
+默认关闭 `rollingSurplusCraftingEnabled` 时，不执行主包 `duplicate-reserve` Provisions，也不执行主阵后的 Storage 维护。只有实验性的 `rollingDuplicateSwapEnabled=true` 时，85-89 的可用 Unassigned 重复卡才直接进入主阵候选；默认关闭交换时它们先整体进入 Storage。显式开启余量制作后，至少一套主 SBC 成功提交并完成账本对账，Storage 维护才允许逐套消耗 Storage 中完整的 `87/88 x4`，这些维护奖励默认留在 My Packs；同时开启交换时，当前主包完整四张 Reserve 也可即时制作 Provisions。无论开关状态，主 Solver 明确缺料时才处理已有 Provisions/5x80+ 奖励；已有 Provisions 按 `rollingShortageProvisionsPackLimit` 分批处理，默认每次缺料最多两包并在每批后重新规划，仍缺料才制作新的 Provisions。Required Special 缺失和真实 Storage 压力恢复同样保留。
 
 ### 9.2.1 主阵后的 Storage 维护
 
@@ -507,9 +507,9 @@ Runner 已确认的每次操作都产生 `InventoryDelta`：
 账本按 `inventoryVersion` 缓存以下派生值：
 
 - `specialSlots`：当前允许用于主特殊槽的 Required Special 数量。
-- `directCycles`：实时运行时保持未知；准确数量必须重复运行主 Solver，不能为了 UI 阻塞 Workflow。
+- `storagePressureSbcCount`：本次运行已明确提交的 Storage Pressure SBC challenge 数量。
 - `provisionsBatches`：当前材料可完成的 Provisions 数量。
-- `totwRecoveries`：实时运行时保持未知；真正缺 Required Special 时由 Workflow 只规划当前一次恢复。
+- `totwSbcCount`：本次运行已明确提交的 TOTW SBC 数量。
 - `storageUsed/storageCapacity`。
 
 已知资源值会竞争相同材料，不能相加。主阵和 TOTW 的准确可行性只在 Workflow 到达对应决策点时求解，不根据 Telemetry 预测随机奖励之后的总循环上限。
@@ -520,17 +520,25 @@ Runner 自己造成的变化应在对应 EA receipt 确认后实时反映；外�
 
 Rolling 的主 `10x85+`、评分恢复阵和 Storage pressure SBC 共用同一套提交事务门禁。普通 Loop 不接入以下放宽行为。
 
-当 Unassigned duplicate signal 是不可交易卡，而 Solver 解析到的可提交 Club 实体是可交易卡时，事务在最终校验前运行 `preparePlayers`：
+`pickOptions.rollingDuplicateSwapEnabled` 是默认关闭的实验开关，旧配置缺失该字段时也归一化为 `false`。关闭时，开包和启动恢复的路由规划把全部 Unassigned duplicate 归入 Storage，清空 `reservedItems` 和即时 duplicate-Provisions 提交；只有全部卡具有确定 Storage 容量时才执行批量移动。容量未知或不足返回 `DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED`，零交换、零新 journal、零主 SBC 提交。Workflow 将该状态接入既有 Storage-pressure recovery：先尝试紧急 Provisions，再尝试用户显式启用的 Storage pressure SBC。恢复规划把全部待存 Unassigned duplicate 保持为 protected，包括评分落在 Provisions Reserve 范围内的 signal；Reserve 消耗授权只能作用于真实库存材料，不能传递给待存 signal 或其 Club counterpart。候选阶段之后，提交前 validator 还会直接检查 selection signal，防止保护列表回归。安全 Provisions 不可行时返回 unavailable，让 Workflow 继续 Storage pressure SBC；两条路径都只允许通过净消费足够数量的真实 Storage 卡满足 headroom。对账后重新读取这些精确 ID，只有完整容量成立才批量移入 Storage。提交事务中的 `preparePlayers` 再次检查该开关；任何漏入阵容的 Unassigned -> Club duplicate signal 返回 `DUPLICATE_SWAP_DISABLED`，不得退化为提交原 Club B。
 
-1. 只处理 selection 中来源为 Unassigned、目标为 Club 且目标可交易的实体。
+开关只禁止新事务，不参与启动取消。`cancelPriorRunRollingDuplicateTransaction()` 始终先处理已有 journal，按精确 protected ID 恢复/分类并清理旧意图；否则关闭开关本身会把已经发生的交换留在中间状态。显式开启后才执行下述交换协议。
+
+当 Unassigned duplicate signal 是不可交易卡，而 Solver 解析到的可提交 Club 同版本实体具有已确认的交易状态时，事务在最终校验前运行 `preparePlayers`。Club 实体可以是可交易或不可交易；未知交易状态禁止交换：
+
+1. 只处理 selection 中来源为 Unassigned、目标为 Club 且目标交易状态已确认的实体。
 2. signal 与目标必须通过 definition、评分、rareflag、Evolution 和 cosmetic/version 同版本检查；signal 的 duplicate ID 必须指向该目标实体。
 3. 移动前持久化 `planned` journal，分别记录 A 和 B 的精确 item ID、definition ID、价值指纹、Set/Challenge 和 Inventory Ledger 版本；journal 无法写入时禁止交换。
 4. EA move 响应必须提供等长且无歧义的 `clubDuplicates -> itemIds` 映射。缺失、重复、非法或未覆盖预期目标的映射全部 fail closed。
 5. 交换后刷新 Repository，验证新 Club 实体 A' 与 A 的价值身份一致且不可交易，同时验证 B 已原样进入 Unassigned；随后持久化 `materialized` journal。写入失败时立即物理补偿并停止。
-6. 交换前阵容永久失效。事务必须在相同 Set/Challenge 内重新规划，要求 A' 成为 exact required item，并把 B 加入 protected；同 definition 的其它实体不继承授权。
+6. 交换前阵容永久失效。事务必须在相同 Set/Challenge 内重新规划，要求 A' 成为 exact required item，并把 B 加入 protected；同 definition 的其它实体不继承授权。重规划 resolver 产生的 B -> A' 反向 duplicate signal 只在 signal ID、target ID、definition 和 pair 数量与当前 journal 完全一致时作为 no-op 提交桥，不执行第二次原生 move；任何偏差 fail closed。
 7. 重规划后创建 exact-item manifest，在保存前、保存后和 transport 前按 item ID、definition ID 和库存版本校验；transport 只使用最后一次从 Challenge 回读的阵容。
-8. 提交确认后将 B 原样恢复到 Club 并校验其 Evolution、化学样式、外观和其它价值指纹；提交前失败、Stop 或有界重规划失败则补偿交换。transport 结果不明且 A' 已消失时进入 `ambiguous`，禁止自动重试。
-9. journal 在启动时先于 Pick、Unassigned 和开包恢复。journal 写入或清除失败必须返回 blocked，不能声称事务 completed。
+8. 提交确认后将 B 原样恢复到 Club并校验其交易状态、Evolution、化学样式、外观和其它价值指纹；提交前失败、Stop 或有界重规划失败则补偿交换。恢复时 Repository 返回的 pile 位置是位置权威，实体内部滞后的 pile scalar 不覆盖 Repository 证据；item ID、definition 和全部价值指纹仍严格。transport 结果不明且 A' 已消失时进入 `ambiguous`，禁止自动重试。
+9. 同一次运行内，journal 写入、交换、重规划、提交和补偿保持严格事务语义；提交结果不明且 A' 已消失时 fail closed。journal 写入或清除失败必须返回 blocked，不能声称事务 completed。
+10. journal 在新一次启动时先于 Pick、Unassigned 和开包处理，但启动不会续跑旧事务。每个 B 的精确 item ID 通过已对账 Ledger 独立分类：Club 直接保留；Unassigned 必须取得同 ID live EA 实体、移回 Club 并再次对账；Storage/Transfer 保留外部新位置；全部 pile 缺失则记录 missing；混合状态逐项处理。完成后清 journal，并从当前库存重新规划；不要求 A/A' 继续存在，不按 definition 替代 B，也不复用旧 squad 或 Challenge。
+11. malformed、未知状态、跨 pair 身份复用或重复 protected ID 的 journal 在任何库存刷新前删除；删除失败才 blocked。有效 journal 必须使用刚对账完成的 Ledger 分类；Ledger 不可用、解析抛错、对受保护 ID 返回另一 item ID 或未知 pile、Unassigned live 实体不可用、移动失败或恢复后未在 Club 对账时保留 journal 并 blocked。
+
+实机 trace 已确认 EA 页面手工交换直接调用 `Item.move(A, CLUB)`：第一个参数是单个 `UTItemEntity`，第二个参数是 Club pile，没有第三个 `allowStorage` 参数；成功响应为 `status:200`、`untradeableSwap:false`。旧的 `Item.move([A], CLUB, true)` 会进入另一条 `untradeableSwap:true` 路径并返回 `status:0`、空映射及库存零变化。生产重复卡交换因此使用独立的双参数单实体 Adapter，不改变其它通用批量 move 调用，也不经过 Storage。多对交换严格串行，每成功一对就刷新、校验 A/B 精确身份与价值指纹并持久化新 Club ID；后续失败或重启只回滚已经发生的交换。响应映射、部分进度或恢复候选存在歧义时保持 fail-closed。`window.__FCLoopRunner` 继续暴露可卸载的 `startNativeDuplicateSwapTrace()`、`stopNativeDuplicateSwapTrace()` 和 `getNativeDuplicateSwapTrace()`，并保留响应中的有界 `itemIds/clubDuplicates` 标量以供后续 EA 合同漂移诊断。恢复规划使用 Repository 查找返回的规范 pile 名，不再把 EA 数字 pile `6/7` 误判为未知。
 
 EA 对包含现有阵容球员的 SBC 可能返回 `409` 和 `data.itemViolations`。`Protect Active Squad players` 默认关闭；关闭时 Rolling 只在以下条件全部成立时执行一次官方确认语义的 `skipValidation:true` 重试：
 
@@ -556,11 +564,12 @@ EA 对包含现有阵容球员的 SBC 可能返回 `409` 和 `data.itemViolation
 
 Rolling 的库存型 requirement recovery（包括 Provisions、5x80 和 Required Special/TOTW 恢复）统一通过 `submitInventorySbcAttempt()` 的显式 `submissionMode: 'background'` 执行。该模式的顺序是：
 
-1. 通过 `prepareFsuRuntimeAccess()` 获取当前 Club 实体。
-2. 执行不可交易 Unassigned duplicate 与可交易 Club 同版本卡的交换，并刷新实际实体。
-3. 运行 pre-save validator，保存 Challenge 阵容，再读取保存后的阵容并运行 post-save validator。
-4. 用 `challenge.canSubmit()` 判断 EA Challenge 是否可提交。
-5. 调用 `submitRatingSbcInBackground()`，由 EA SBC Adapter 执行 DAO submit、奖励观察、409/429 诊断和有限确认重试。
+1. 通过 `sbcDAO.getChallengesForSet()` 和 `sbcDAO.loadChallenge()` 直接加载当前 Challenge，不调用 `openSbcSet()`，也不把页面导航到 SBC Squad。
+2. 通过 `prepareFsuRuntimeAccess()` 获取当前 Club 实体。
+3. 执行不可交易 Unassigned duplicate 与可交易 Club 同版本卡的交换，并刷新实际实体。
+4. 运行 pre-save validator，保存 Challenge 阵容，再读取保存后的阵容并运行 post-save validator。
+5. 用 `challenge.canSubmit()` 判断 EA Challenge 是否可提交。
+6. 调用 `submitRatingSbcInBackground()`，由 EA SBC Adapter 执行 DAO submit、奖励观察、409/429 诊断和有限确认重试。
 
 这项统一只改变 Rolling requirement recovery 的提交 transport；普通配置 SBC 和需要用户选择的 Player Pick 不被隐式迁移。后台 DAO 的目的只是绕开前台 SBC 页面中 FSU 的价格确认弹窗，不是绕过业务保护。`Protect FSU locked players` 仍由选材和最终保存阵容 validator 独立执行；`Protect Active Squad players` 决定是沿用严格受限的单次确认，还是执行精确换卡、特殊卡复核和保护回归检查。
 
@@ -617,9 +626,9 @@ UI 只渲染结构化 snapshot，不解析日志：
   completedCycles,
   cycleLimit,
   specialSlots,
-  directCycles,
+  storagePressureSbcCount,
   provisionsBatches,
-  totwRecoveries,
+  totwSbcCount,
   storageUsed,
   storageCapacity,
   inventoryVersion,
@@ -909,7 +918,7 @@ RL-0 锁定的当前行为和已确认缺口：
 - 容量同时支持 EA confirmed observation 和 pile 增量更新；未知容量保持 `null`。外部 added/removed/moved/changed/capacity drift 均可检测并重建索引。
 - 新增 coordinator readiness 门禁。原版/未检测到 FSU 直接使用 EA 本地 Repository；ready FSU 正常使用；loading/not-ready fail closed；provisional FSU 允许索引，但提交前按 item ID + definition ID 定向验证 Club 卡及关键属性。
 - confirmed Runner mutation 实时更新账本；歧义/不匹配 mutation 和显式 anomaly 立即执行本地对账；每十次主 SBC 自动对账。诊断事件最多保留 100 条且不包含完整卡对象。
-- 新增按 ledger 实例、`inventoryVersion` 和 policy key 缓存的 capability calculator。真实页面验证发现，即使限制为 4 套，克隆 4,000+ 卡库存并反复运行评分 Solver 仍可占用 5-49 秒，因此实时计算已收敛为 classified ledger 的 O(n) 计数；`directCycles` 与 `totwRecoveries` 保持未知。
+- 新增按 ledger 实例、`inventoryVersion` 和 policy key 缓存的 capability calculator。真实页面验证发现，即使限制为 4 套，克隆 4,000+ 卡库存并反复运行评分 Solver 仍可占用 5-49 秒，因此实时能力值继续保持 classified ledger 的 O(n) 计数；已执行的 Storage Pressure/TOTW 提交次数由成功提交边界直接记录。
 - `openPackTransaction()` 和 `submitSbcAttempt()` 新增 opt-in receipt/result observer；Player Pick 复用现有一次性 confirmation callback，Move/Capacity 通过统一 mutation observer adapter 接入。observer 未注入或失败时，旧 Loop 行为和已确认 EA 结果保持不变。
 - Rolling workflow 仍保持 `rollingWorkflowEnabled:false` 和 hidden/MVP；普通 Loop 不创建 coordinator，本阶段不增加运行时扫描或执行副作用。
 - 新增 30 项测试，完整 `npm run verify` 通过：176 个测试文件、1,177 项测试；Runner `v0.7.91`、FSU Local `v26.09.6`、root/dist userscript 和 release assets 均已重建并校验。
@@ -977,7 +986,7 @@ RL-0 锁定的当前行为和已确认缺口：
 
 - 新增 `src/runtime/telemetry.js`，统一归一化可序列化 snapshot，并把高频 publish 合并到一个 animation frame；字段和文本均有界，未知指标保持 `null`，刷新期间保留上一次可信值。
 - Rolling workflow 的 phase 事件接入结构化 Telemetry；恢复 callback 可以通过受控 `reportPhase()` 发布 `Redeeming Rare Gold Pick` 和 `Crafting 5x80+` 等细分阶段，不需要 UI 解析日志。
-- entry 按 Inventory Ledger `inventoryVersion` 串行请求能力计算并丢弃过期结果。Capability 只线性统计 Required Special、Provisions reserve 和 Storage；`directCycles` 与 `totwRecoveries` 不在实时 UI 中求解。相同版本复用 capability cache，不额外触发 EA Club 网络分页或评分 Solver。
+- entry 按 Inventory Ledger `inventoryVersion` 串行请求能力计算并丢弃过期结果。Capability 只线性统计 Required Special、Provisions reserve 和 Storage；Storage Pressure/TOTW 指标不再运行估算 Solver，而是显示本次运行已确认的提交计数。相同版本复用 capability cache，不额外触发 EA Club 网络分页或评分 Solver。
 - 主面板在 Running 与最新日志之间显示两列稳定资源网格和 Storage 进度条；未知值显示 `-`，80%-94% 使用 warning，95% 以上使用 danger。Desktop 预留稳定高度，Mobile Run 使用受限内容高度，icon-only 隐藏 Telemetry。
 - 普通 Loop、Batch Open 和 Trade 不发布 visible snapshot，原有日志、运行状态和业务行为不变；Rolling 仍保持 `hidden:true`、`mvp:true`。
 - 新增 6 项测试，覆盖 snapshot 有界/未知语义、10,000 次更新合并、phase adapter、指标/ARIA/Storage 压力渲染，以及 Desktop/Mobile/touch/resize/icon-only DOM/CSS 合同。完整 `npm run verify` 通过：376 个 JavaScript 文件语法检查、179 个测试文件、1,211 项测试，以及 ESLint、配置/Profile、架构、FSU patch、userscript 构建、root/dist 一致性和 FSU 发布资源检查全部成功；真实 EA 页面视觉和运行验收留在 RL-8。
@@ -1026,6 +1035,8 @@ RL-0 锁定的当前行为和已确认缺口：
 自动验证结果（2026-08-18）：`0.8.0` 的提交安全修复完成完整 `npm run verify`；404 个 JavaScript 文件、195 个测试文件和 1,423 项测试全部通过，配置/Profile、架构、FSU patch、root/dist userscript 和版本一致性检查均成功。新增测试锁定不可交易重复卡的同版本交换、EA move 身份映射、交换后强制保存与账本对账，以及仅三条 Rolling 路径可对完全匹配当前提交阵容的 `409/itemViolations` 执行一次确认重试。仍需在真实 EA 页面复现“球员属于现有阵容”场景，确认服务端接受 `skipValidation:true` 后正常完成提交和库存清理。
 
 自动验证结果（2026-08-18）：Rare Gold Pick capability 不再绑定固定 `85+/1 of 3/6 Rare` 模板。扫描结果新增 `unlimited/bounded/unknown` repeatability 事实；Rolling 只接受 live `repeats:0`、单 Challenge、单选、全 Gold 且至少要求一张 Rare 的 Pick，并按 minimum Rare cost、total Gold cost、reward minimum rating、candidate count 排序。运行时按序尝试备用候选，全部不可用才回退到 `5x80+`。完整 `npm run verify` 通过：404 个 JavaScript 文件、195 个测试文件、1,425 项测试，配置/Profile、架构、FSU patch、root/dist userscript 和版本一致性检查全部成功。
+
+自动验证结果（2026-08-22）：候选版本 `0.8.40` 修复实验交换关闭时的紧急 Provisions 授权泄漏。待存 Unassigned Reserve signal 在候选和提交前两层保持硬保护；安全 Provisions 不可行时继续 Storage pressure SBC，并要求真实 Storage 净消耗。完整 `npm run verify` 通过：413 个 JavaScript 文件、199 个测试文件、1,746 项测试，配置/Profile、架构、FSU patch、root/dist userscript 和版本一致性检查全部成功。仍需用当前被阻塞的真实 Unassigned 批次重新运行一次，确认页面实际走安全 Provisions 或 Storage pressure fallback 后完成整体 Storage 路由。
 
 当前工作区修正：Rolling requirement recovery 改为显式后台 DAO 提交；保留 FSU runtime access、不可交易重复卡交换、保存前后 validator、Active Squad 409 保护和后台提交诊断。新增架构测试锁定该入口不再调用前台 `submitSbcAndGetAwardPackId()`，事务单测锁定交换后的最终玩家必须经过保存、保存后校验和 transport。普通 Loop 提交路径保持不变。
 

@@ -95,6 +95,11 @@ export function createFakeInventoryAdapter(initial = {}) {
     return { success: true };
   }
 
+  function moveSingleItem(item, pile) {
+    calls.push({ method: 'moveSingleItem', itemIds: [Number(item?.id || 0)], pile });
+    return { success: true };
+  }
+
   return Object.freeze({
     calls,
     snapshot,
@@ -108,6 +113,7 @@ export function createFakeInventoryAdapter(initial = {}) {
     invalidateUnassigned,
     refreshActions,
     move,
+    moveSingleItem,
     replace,
   });
 }

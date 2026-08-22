@@ -234,6 +234,37 @@ export function showSelectionPolicySettings(options = {}) {
     pickOptions.rollingProtectAllClubNonTotwSpecials === true,
     'Never use a Club non-TOTW special in Rolling, including severe fodder shortage; Storage, Transfer, and Unassigned specials remain eligible under the existing limits',
   );
+  const rollingDuplicateSwap = checkbox(
+    dom,
+    'bronze-loop-policy-rolling-duplicate-swap',
+    'Enable experimental native duplicate swaps',
+    pickOptions.rollingDuplicateSwapEnabled === true,
+    'When disabled, Unassigned duplicates are routed to Storage and never exchanged with their Club counterpart; insufficient Storage stops safely',
+  );
+  const rollingDuplicateSwapMode = selectInput(
+    dom,
+    'bronze-loop-policy-rolling-duplicate-swap-mode',
+    pickOptions.rollingDuplicateSwapMode || (pickOptions.rollingDuplicateSwapEnabled === true
+      ? 'special-only'
+      : 'off'),
+    [
+      ['off', 'Off'],
+      ['special-only', 'Controlled: special only'],
+      ['safe-only', 'Controlled: ordinary only'],
+      ['all-eligible', 'Experimental: all eligible'],
+    ],
+    mode,
+  );
+  const updateDuplicateSwapModeAvailability = () => {
+    if (rollingDuplicateSwap.input.checked === true
+      && rollingDuplicateSwapMode.value === 'off') {
+      rollingDuplicateSwapMode.value = 'special-only';
+    }
+    rollingDuplicateSwapMode.disabled = rollingDuplicateSwap.input.checked !== true;
+    rollingDuplicateSwapMode.style.opacity = rollingDuplicateSwapMode.disabled ? '0.65' : '1';
+  };
+  rollingDuplicateSwap.input.addEventListener('change', updateDuplicateSwapModeAvailability);
+  updateDuplicateSwapModeAvailability();
   const rollingProvisionsMaxRating = selectInput(
     dom,
     'bronze-loop-policy-rolling-provisions-max-rating',
@@ -291,6 +322,8 @@ export function showSelectionPolicySettings(options = {}) {
     rollingProvisionsShortageRecovery.label,
     rollingRequiredSpecialRecovery.label,
     rollingProtectAllClubNonTotwSpecials.label,
+    rollingDuplicateSwap.label,
+    wideField(dom, 'Duplicate swap scope', rollingDuplicateSwapMode, mode, 'Controlled modes require both entities to be untradeable and have identical value fingerprints; all eligible is retained only for legacy experiments'),
     rollingOpenDuplicateProvisionsRewards.label,
     wideField(dom, 'Storage pressure recovery', rollingStorageSinkMode, mode, 'Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set'),
     wideField(dom, 'Storage pressure SBC', rollingStorageSinkSet, mode, 'Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility'),
@@ -354,6 +387,12 @@ export function showSelectionPolicySettings(options = {}) {
         rollingRequiredSpecialRecovery.input.checked,
       rollingProtectAllClubNonTotwSpecials:
         rollingProtectAllClubNonTotwSpecials.input.checked,
+      rollingDuplicateSwapEnabled: rollingDuplicateSwap.input.checked,
+      rollingDuplicateSwapMode: rollingDuplicateSwap.input.checked
+        ? rollingDuplicateSwapMode.value === 'off'
+          ? 'special-only'
+          : rollingDuplicateSwapMode.value
+        : 'off',
       rollingProvisionsMaxRating: readNumber(
         rollingProvisionsMaxRating,
         pickOptions.rollingProvisionsMaxRating,
@@ -401,6 +440,8 @@ export function showSelectionPolicySettings(options = {}) {
       rollingProvisionsShortageRecovery.input,
       rollingRequiredSpecialRecovery.input,
       rollingProtectAllClubNonTotwSpecials.input,
+      rollingDuplicateSwap.input,
+      rollingDuplicateSwapMode,
       rollingOpenDuplicateProvisionsRewards.input,
       rollingStorageSinkMode,
       rollingStorageSinkSet,

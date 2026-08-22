@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.8.22`
+- Userscript 版本：`0.8.40`
 - Git 基线：`main` Manual Pick price-visible layout
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
@@ -17,6 +17,34 @@ Storage-first 顺序。待处理 Unassigned 重复卡仍强制 Unassigned-first�
 pressure 与 maintenance 仍使用专用 Storage-first 及净释放校验。Provisions reserve
 上限可选 `88/89/90/91`，默认 `88`，已有较高保存值继续有效。该修正取代下方
 `0.8.20` 发布记录中的全局 Storage-first 和新安装默认 `91` 行为。
+
+`0.8.32` 开发记录：持久 duplicate materialization journal 只用于新启动时恢复
+原 Club item ID 的安全不变量，不再用于续跑上一次提交。启动按每个 protected ID
+独立分类 Club、Unassigned、Storage、Transfer、missing 和异常状态，只将精确位于
+Unassigned 的 live EA 实体恢复到 Club；其它可信位置保留，missing 记录告警，损坏
+journal 直接删除。清理完成后从当前库存重新规划。当前运行内的交换、提交和补偿
+仍保持严格 fail-closed，不因启动语义改变而放宽。
+
+`0.8.33` 开发记录：`rollingDuplicateSwapEnabled` 作为实验开关加入 Selection Policy，
+默认和旧配置迁移均关闭。关闭时所有新 Unassigned duplicate 先整体路由 Storage；
+容量不足以 `DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED` 停止，提交前遗漏则以
+`DUPLICATE_SWAP_DISABLED` 停止，均不执行 EA 原生交换、不写新 journal、不提交 SBC。
+已有 journal 的启动取消不受开关影响，仍先恢复或分类精确 protected Club ID。
+
+`0.8.34` 开发记录：关闭实验交换后，Storage 容量不足不再无条件立即停止。
+`DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED` 接入原有 Storage-pressure recovery：先尝试
+紧急 Provisions，再使用用户已启用并选定的 Storage pressure SBC；恢复阵必须净消费
+足够的真实 Storage 卡，待存 Unassigned duplicate 全程保护，容量确认后才重试整体
+Storage 路由。当前事务的同 Challenge 重规划只接受 journal 记录的精确 B -> A' 反向
+signal 映射并作为 no-op 提交桥，禁止第二次 EA move；补偿恢复以 Repository pile 位置
+为权威，EA 实体滞后的 pile scalar 不再覆盖精确位置证据。
+
+`0.8.35` 开发记录：修复紧急 Provisions 对待存 Reserve 重复卡的授权泄漏。实验交换
+关闭时，`openRouting.storageItems` 中全部 Unassigned signal 都保持硬保护，不再因为
+评分属于 Provisions Reserve 而被解除；提交前 validator 还会独立检查 selection signal，
+防止候选保护回归后解析并提交其 Club counterpart。安全 Provisions 不可行时仍返回
+unavailable，让 Workflow 继续尝试已配置的 Storage pressure SBC，并只以真实 Storage
+净消耗换取容量。
 
 `0.8.22` 发布记录：Manual Player Pick 的候选卡不再把姓名、评分、卡色、重复
 状态和价格拼为一段文本。名字与属性各占一行，价格为右侧独立列，长文本截断时

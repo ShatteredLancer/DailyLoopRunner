@@ -40,9 +40,9 @@ function telemetryHarness() {
     'bronze-loop-runtime-cycle',
     'bronze-loop-runtime-refreshing',
     'bronze-loop-runtime-special',
-    'bronze-loop-runtime-direct',
+    'bronze-loop-runtime-storage-pressure',
     'bronze-loop-runtime-provisions',
-    'bronze-loop-runtime-totw',
+    'bronze-loop-runtime-totw-sbc',
     'bronze-loop-runtime-storage-value',
     'bronze-loop-runtime-storage-track',
     'bronze-loop-runtime-storage-bar',
@@ -74,14 +74,12 @@ describe('runtime telemetry model', () => {
     }, createRuntimeTelemetrySnapshot({
       ...initial,
       specialSlots: 7,
-      directCycles: 4,
-      directCyclesLimited: true,
+      storagePressureSbcCount: 4,
     }));
     expect(refreshing).toMatchObject({
       phase: 'OPEN_X10',
       specialSlots: 7,
-      directCycles: 4,
-      directCyclesLimited: true,
+      storagePressureSbcCount: 4,
       calculating: true,
     });
   });
@@ -90,13 +88,13 @@ describe('runtime telemetry model', () => {
     const snapshot = createRuntimeTelemetrySnapshot({
       phase: 'x'.repeat(200),
       completedCycles: -4,
-      directCycles: Number.POSITIVE_INFINITY,
+      storagePressureSbcCount: Number.POSITIVE_INFINITY,
       storageCapacity: 5000000,
       updatedAt: 'y'.repeat(200),
     });
     expect(snapshot.phase).toHaveLength(80);
     expect(snapshot.completedCycles).toBe(0);
-    expect(snapshot.directCycles).toBeNull();
+    expect(snapshot.storagePressureSbcCount).toBeNull();
     expect(snapshot.storageCapacity).toBe(1000000);
     expect(snapshot.updatedAt).toHaveLength(80);
   });
@@ -136,11 +134,9 @@ describe('runtime telemetry renderer', () => {
         completedCycles: 3,
         cycleLimit: 0,
         specialSlots: 7,
-        directCycles: 4,
-        directCyclesLimited: true,
+        storagePressureSbcCount: 4,
         provisionsBatches: 3,
-        totwRecoveries: 2,
-        totwRecoveriesLimited: true,
+        totwSbcCount: 2,
         storageUsed: 83,
         storageCapacity: 100,
         calculating: true,
@@ -154,9 +150,9 @@ describe('runtime telemetry renderer', () => {
     expect(controls.get('bronze-loop-runtime-cycle').textContent).toBe('Cycle 4 / No limit');
     expect(controls.get('bronze-loop-runtime-refreshing').textContent).toBe('Refreshing');
     expect(controls.get('bronze-loop-runtime-special').textContent).toBe('7');
-    expect(controls.get('bronze-loop-runtime-direct').textContent).toBe('4+');
+    expect(controls.get('bronze-loop-runtime-storage-pressure').textContent).toBe('4');
     expect(controls.get('bronze-loop-runtime-provisions').textContent).toBe('3');
-    expect(controls.get('bronze-loop-runtime-totw').textContent).toBe('2+');
+    expect(controls.get('bronze-loop-runtime-totw-sbc').textContent).toBe('2');
     expect(controls.get('bronze-loop-runtime-storage-value').textContent).toBe('83 / 100');
     expect(controls.get('bronze-loop-runtime-storage-bar').style.width).toBe('83%');
     expect(controls.get('bronze-loop-runtime-telemetry').dataset.storagePressure).toBe('warning');
@@ -177,9 +173,9 @@ describe('runtime telemetry renderer', () => {
         visible: true,
         phase: 'PLAN_PRIMARY_SQUAD',
         specialSlots: null,
-        directCycles: null,
+        storagePressureSbcCount: null,
         provisionsBatches: null,
-        totwRecoveries: null,
+        totwSbcCount: null,
         storageUsed: 95,
         storageCapacity: 100,
       },

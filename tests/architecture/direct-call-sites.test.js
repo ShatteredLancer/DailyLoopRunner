@@ -362,10 +362,22 @@ describe('current direct side-effect call baseline', () => {
 
   it('submits Rolling requirement recovery through the guarded background transport', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const loaderStart = source.indexOf('async function loadBackgroundInventorySbcContext');
+    const loaderEnd = source.indexOf('async function submitInventorySbcAttempt', loaderStart);
+    const loaderBlock = source.slice(loaderStart, loaderEnd);
+    const inventoryStart = loaderEnd;
+    const inventoryEnd = source.indexOf('async function submitInventorySelection', inventoryStart);
+    const inventoryBlock = source.slice(inventoryStart, inventoryEnd);
     const start = source.indexOf('async function submitRollingRequirementRecovery');
     const end = source.indexOf('async function loadRollingRatingRecoveryContext', start);
     const block = source.slice(start, end);
 
+    expect(loaderStart).toBeGreaterThan(-1);
+    expect(loaderEnd).toBeGreaterThan(loaderStart);
+    expect(loaderBlock).toContain('findAvailableRatingSbcChallengeContext');
+    expect(loaderBlock).toContain('loadRatingSbcChallengeForSet');
+    expect(loaderBlock).not.toContain('openSbcSet');
+    expect(inventoryBlock).toMatch(/if \(useBackgroundSubmission\)[\s\S]*?loadBackgroundInventorySbcContext/);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     expect(block).toContain("submissionMode: 'background'");
@@ -375,6 +387,36 @@ describe('current direct side-effect call baseline', () => {
     expect(block).toContain('rollingBackgroundSubmitInventoryDiagnostic(runtime, players)');
     expect(block).not.toContain('submitSbcAndGetAwardPackId');
     expect(block).toMatch(/savedPlayers\?\.length \? savedPlayers : players/);
+  });
+
+  it('uses only the native single-entity contract for duplicate exchange and restoration', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const start = source.indexOf('async function compensateUnsubmittedDuplicateTransaction');
+    const end = source.indexOf('function rollingDuplicateMaterializationPair', start);
+    const duplicateBlock = source.slice(start, end);
+    const finalizeStart = source.indexOf('async function finalizeRollingDuplicateMaterialization');
+    const finalizeEnd = source.indexOf('async function runRollingDuplicateSubmissionAttempt', finalizeStart);
+    const finalizeBlock = source.slice(finalizeStart, finalizeEnd);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(duplicateBlock).toContain('moveSingleItem(signalItem, inventoryPile(\'club\'))');
+    expect(duplicateBlock).not.toMatch(/moveItems\(signalItems/);
+    expect(finalizeBlock).toContain('moveSingleItem(item, inventoryPile(\'club\'))');
+    expect(finalizeBlock).not.toMatch(/moveItems\(liveProtectedItems/);
+    expect(duplicateBlock).not.toContain("inventoryPile('storage')");
+  });
+
+  it('journals each duplicate pair before reconciling the refreshed Ledger', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const start = source.indexOf('async function prepareRollingUntradeableDuplicateSwaps');
+    const end = source.indexOf('function rollingDuplicateMaterializationPair', start);
+    const block = source.slice(start, end);
+    const journal = block.indexOf('persistRollingDuplicateTransaction(progressed.transaction)');
+    const reconcile = block.indexOf('post-untradeable-duplicate-swap');
+    expect(journal).toBeGreaterThan(-1);
+    expect(reconcile).toBeGreaterThan(journal);
+    expect(block).toContain('validateDuplicateMaterializationLedgerPair');
+    expect(block).toContain('updateDuplicateMaterializationInventoryVersion');
   });
 
   it('keeps bounded candidate diagnostics on generic Storage Sink planning failures', async () => {
