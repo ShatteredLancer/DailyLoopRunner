@@ -2160,6 +2160,127 @@ describe('Rolling runtime recovery helpers', () => {
     expect(runtime.openRouting).toMatchObject({ status: 'ready', reasonCode: null });
   });
 
+  it('keeps exact pending refs blocked when EA accepts only a partial Storage move', async () => {
+    const duplicates = Array.from({ length: 5 }, (_, index) => {
+      const item = makePlayer({
+        id: 800 + index,
+        definitionId: 9800 + index,
+        rating: 88,
+        duplicate: true,
+        duplicateId: 1800 + index,
+      });
+      item.pile = 'unassigned';
+      return item;
+    });
+    const counterparts = duplicates.map((item) => {
+      const counterpart = makePlayer({
+        id: item.duplicateId,
+        definitionId: item.definitionId,
+        rating: item.rating,
+      });
+      counterpart.pile = 'club';
+      return counterpart;
+    });
+    const { api, window, inventoryPiles } = await loadUserscript({
+      unassigned: duplicates,
+      club: counterparts,
+      pileSizes: { storage: 100 },
+      pileCounts: { storage: 95 },
+      pageReady: true,
+      fastTimers: true,
+    });
+    window.services.Item.requestUnassignedItems = () => successfulObservable();
+    window.services.Item.requestStorageItems = () => successfulObservable();
+    window.services.Item.requestClubItems = () => successfulObservable();
+    window.services.Item.move = (items, destination) => {
+      const accepted = destination === 'storage' ? items.slice(0, 4) : items;
+      for (const item of accepted) {
+        const index = inventoryPiles.unassigned.indexOf(item);
+        if (index >= 0) inventoryPiles.unassigned.splice(index, 1);
+        item.pile = destination;
+        inventoryPiles[destination].push(item);
+      }
+      return successfulObservable();
+    };
+    const runtime = {
+      duplicateSwapEnabled: false,
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: duplicates.map((item) => item),
+      openRouting: {
+        status: 'blocked',
+        reason: 'native duplicate swaps are disabled and SBC storage needs five slots',
+        reasonCode: 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED',
+        reservedItems: [],
+        storageItems: duplicates,
+        deferredPrimaryRefs: [],
+      },
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ classifiedEntries: () => [] }),
+      },
+    };
+
+    const result = await api.retryRollingProtectedStorage(
+      { name: 'Partial Storage retry' },
+      runtime,
+    );
+
+    expect(result).toMatchObject({ status: 'blocked', reasonCode: 'PROTECTED_STORAGE_BLOCKED' });
+    expect(result.details.unsettled).toEqual([
+      expect.objectContaining({ id: 804, definitionId: 9804, pile: 'unassigned' }),
+    ]);
+    expect(inventoryPiles.storage.map((item) => item.id)).toEqual([800, 801, 802, 803]);
+    expect(inventoryPiles.unassigned.map((item) => item.id)).toEqual([804]);
+    expect(runtime.openRouting).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED',
+    });
+  });
+
+  it('does not resurrect stale pack duplicate metadata after fresh EA evidence clears it', async () => {
+    const clubCounterpart = makePlayer({
+      id: 926618404280,
+      definitionId: 50565379,
+      rating: 88,
+    });
+    clubCounterpart.pile = 'club';
+    const live = makePlayer({
+      id: 928735985049,
+      definitionId: 50565379,
+      rating: 88,
+      duplicate: false,
+      duplicateId: 0,
+    });
+    live.pile = 'unassigned';
+    const response = makePlayer({
+      id: live.id,
+      definitionId: live.definitionId,
+      rating: live.rating,
+      duplicate: true,
+      duplicateId: clubCounterpart.id,
+    });
+    response.pile = 'unassigned';
+    const { api } = await loadUserscript({
+      unassigned: [live],
+      club: [clubCounterpart],
+    });
+
+    const restored = api.restoreOpenedUnassignedDuplicateMetadata(
+      [response],
+      'Fresh non-duplicate Isak',
+      {
+        authoritativeMaterialization: {
+          matches: [{ opened: response, live, via: 'id' }],
+        },
+      },
+    );
+
+    expect(restored).toBe(0);
+    expect(live.duplicateId).toBe(0);
+    expect(live.isDuplicate()).toBe(false);
+    expect(api.predictUnassignedDestination(live)).toBe('club');
+  });
+
   it('keeps disabled-swap startup duplicates pending so the main workflow can recover Storage', async () => {
     const duplicates = [makePlayer({
       id: 726,

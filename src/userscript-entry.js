@@ -3296,6 +3296,11 @@ function updateLoopControls() {
     }
   }
 
+  function isAcademyEnrolledItem(item) {
+    if (item?.academyEnrolled === true) return true;
+    try { return item?.isEnrolledInAcademy?.() === true; } catch { return false; }
+  }
+
   function isSbcUsablePlayer(item, options = {}, context = null) {
     if (!isPlayer(item)) return false;
     const id = Number(item?.id || 0);
@@ -3312,7 +3317,7 @@ function updateLoopControls() {
       && Number(item?.rating || 0) > Number(policy.ratingSbcMaxCardRating)) return false;
     if (isLimitedUseItem(item)) return false;
     if (isConceptItem(item)) return false;
-    try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
+    if (isAcademyEnrolledItem(item)) return false;
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
     const fsuContext = {
@@ -3656,8 +3661,38 @@ function updateLoopControls() {
       .filter(([id]) => id));
     let restored = 0;
     let remapped = 0;
+    const authoritativeMatches = options.authoritativeMaterialization?.matches || [];
+    const authoritativeById = new Map(authoritativeMatches
+      .map((match) => [
+        Number(match?.live?.id || match?.opened?.id || 0),
+        match,
+      ])
+      .filter(([id]) => id));
+    const authoritativeNonDuplicates = new Set(authoritativeMatches
+      .filter((match) => {
+        if (!match?.live || Number(match.live.duplicateId || 0) !== 0) return false;
+        if (match.live.isDuplicate === false) return true;
+        try { return match.live.isDuplicate?.() === false; } catch { return false; }
+      })
+      .flatMap((match) => [match?.live?.id, match?.opened?.id])
+      .map(Number)
+      .filter(Boolean));
     const restore = (item, responseItem) => {
       if (!responseItem) return;
+      const itemId = Number(item?.id || 0);
+      const authoritative = authoritativeById.get(itemId)
+        || authoritativeById.get(Number(responseItem?.id || 0));
+      const authoritativeLiveIsNonDuplicate = authoritative?.live
+        && Number(authoritative.live.duplicateId || 0) === 0
+        && (authoritative.live.isDuplicate === false
+          || (() => { try { return authoritative.live.isDuplicate?.() === false; } catch { return false; } })());
+      if (authoritativeNonDuplicates.has(itemId) || authoritativeLiveIsNonDuplicate) {
+        // A fresh Purchased response is stronger than the pack DTO or a cached
+        // Club counterpart. Do not resurrect a duplicate identity that EA has
+        // explicitly cleared; route this entity as an ordinary Club item.
+        if (Number(item?.duplicateId || 0)) clearUnassignedDuplicateMetadata(item);
+        return;
+      }
       const clubDuplicate = findClubDuplicate(item) || findClubDuplicate(responseItem);
       const before = captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem });
       const duplicateId = Number(item?.duplicateId || clubDuplicate?.id || 0);
@@ -5365,7 +5400,7 @@ function updateLoopControls() {
     if (isLoanItem(item)) reasons.push('loan');
     else if (isLimitedUseItem(item)) reasons.push('limited-use');
     if (isConceptItem(item)) reasons.push('concept');
-    try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
+    if (isAcademyEnrolledItem(item)) reasons.push('academy');
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) reasons.push('active-trade');
     getFsuRejectReasons(item, options, getFsuSettings(), {
@@ -5857,7 +5892,7 @@ function updateLoopControls() {
       evolution: isEvolutionItem(item),
       limitedUse: isLimitedUseItem(item),
       concept: isConceptItem(item),
-      academyEnrolled: (() => { try { return item?.isEnrolledInAcademy?.() === true; } catch { return false; } })(),
+      academyEnrolled: isAcademyEnrolledItem(item),
       activeTrade: !isInactiveTrade(item),
       endTime: item?.endTime,
       groups: itemGroupNumbers(item),
@@ -6567,7 +6602,7 @@ function updateLoopControls() {
     if (isSbcSpecialItem(item)) return false;
     if (isLimitedUseItem(item)) return false;
     if (isConceptItem(item)) return false;
-    try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
+    if (isAcademyEnrolledItem(item)) return false;
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
     if (loopDef.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) return false;
@@ -7446,7 +7481,7 @@ function updateLoopControls() {
     if (isLoanItem(item)) reasons.push('loan');
     else if (isLimitedUseItem(item)) reasons.push('limited-use');
     if (isConceptItem(item)) reasons.push('concept');
-    try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
+    if (isAcademyEnrolledItem(item)) reasons.push('academy');
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) {
       if (!reasons.includes('active-trade')) reasons.push('active-trade');
@@ -9875,12 +9910,14 @@ function updateLoopControls() {
   function createMaterializeAndResolvePolicy(label, cleanupReason, cleanupOptions = {}) {
     return createOpenedItemPolicy(async (openedItems, context = {}) => {
       const { directDuplicateFallback = false, ...unassignedCleanupOptions } = cleanupOptions;
+      let materializedForSettlement = null;
       const settlement = await settleOpenedItems({
         attempts: 3,
         materialize: async () => {
           const materialized = await materializeOpenedPlayerRewards(openedItems, label, {
             routingBaseline: context.routingBaseline || null,
           });
+          materializedForSettlement = materialized;
           await sleep(CFG.pauseMs);
           return materialized;
         },
@@ -9890,6 +9927,7 @@ function updateLoopControls() {
             ...unassignedCleanupOptions,
             beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label, {
               routingBaseline: context.routingBaseline || null,
+              authoritativeMaterialization: materializedForSettlement?.freshMaterialization,
             }),
           },
         ),
@@ -13299,6 +13337,7 @@ function updateLoopControls() {
       await refreshInventoryCaches(`${label} classification`, { includePacks: false, quiet: true });
       restoreOpenedUnassignedDuplicateMetadata(openedItems, label, {
         routingBaseline: packContext.routingBaseline || null,
+        authoritativeMaterialization: materialized.freshMaterialization,
       });
 
       const usedLiveIds = new Set();
@@ -13339,6 +13378,20 @@ function updateLoopControls() {
           rollingOpenedDuplicateTargetProtectionReasons(item, loopDef)
         ),
       });
+      let reroutedClubItems = [];
+      if (routePlan.directClubItems?.length) {
+        try {
+          await moveItems(routePlan.directClubItems, inventoryPile('club'), true);
+          reroutedClubItems = routePlan.directClubItems;
+        } catch (error) {
+          routePlan = {
+            ...routePlan,
+            status: 'blocked',
+            reason: `fresh non-duplicate Club move failed: ${error?.message || error}`,
+            reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
+          };
+        }
+      }
       if (unresolvedPairs.length) {
         routePlan = {
           ...routePlan,
@@ -13374,14 +13427,18 @@ function updateLoopControls() {
         ...(routePlan.provisionsItems || []),
       ]);
       const storageResponseItems = storageMoved ? responseItems(routePlan.storageItems) : [];
-      const directPlayerItems = Number(materialized.moved || 0) === materialized.directItems.length
-        ? materialized.directItems
+      const directPlayerMoveComplete = Number(materialized.moved || 0) === materialized.directItems.length;
+      const reroutedClubMoveComplete = reroutedClubItems.length === (routePlan.directClubItems || []).length;
+      const directPlayerItems = directPlayerMoveComplete && reroutedClubMoveComplete
+        ? [...materialized.directItems, ...reroutedClubItems]
         : [];
       const directOtherItems = nonPlayersMoved === nonPlayerItems.length ? nonPlayerItems : [];
       const pendingItems = [
         ...unresolvedPairs.map(({ response }) => response),
         ...(storageMoved ? [] : responseItems(routePlan.storageItems)),
-        ...(directPlayerItems.length === materialized.directItems.length ? [] : materialized.directItems),
+        ...(directPlayerMoveComplete && reroutedClubMoveComplete
+          ? []
+          : [...materialized.directItems, ...routePlan.directClubItems?.filter((item) => !reroutedClubItems.includes(item)) || []]),
         ...(directOtherItems.length === nonPlayerItems.length ? [] : nonPlayerItems),
       ];
       const finalRouteStatus = routePlan.status === 'blocked' || pendingItems.length
@@ -15466,11 +15523,30 @@ function updateLoopControls() {
     const afterInvalidation = readPurchasedState();
     const purchasedResult = await refreshPurchased();
     const afterRequest = readPurchasedState();
+    const responseArrays = [
+      purchasedResult?.items,
+      purchasedResult?.response?.items,
+      purchasedResult?.response?.data?.items,
+      purchasedResult?.response?._data?.items,
+      purchasedResult?.data?.items,
+      purchasedResult?._data?.items,
+    ];
+    const responseItems = responseArrays.find((items) => Array.isArray(items)) || [];
     const evidence = {
       beforeInvalidation,
       invalidation,
       afterInvalidation,
       response: captureUnassignedRefreshResult(purchasedResult),
+      responseItems: responseItems.map((item) => ({
+        id: Number(item?.id || item?.itemId || 0),
+        definitionId: Number(item?.definitionId || item?.defId || 0),
+        duplicateId: Number(item?.duplicateId || item?._data?.duplicateId || 0),
+        hasDuplicateId: item?.duplicateId !== undefined || item?._data?.duplicateId !== undefined,
+        isDuplicate: item?.isDuplicate === true || item?.isDuplicate === false
+          ? item.isDuplicate
+          : undefined,
+        hasIsDuplicate: item?.isDuplicate === true || item?.isDuplicate === false,
+      })),
       afterRequest,
     };
     await notifyStage('unassigned');
@@ -15543,8 +15619,23 @@ function updateLoopControls() {
         details,
       };
     }
+    // The fresh Purchased response is the authority for a duplicate signal.
+    // Do not infer this from a normalized cache snapshot: fixture/repository
+    // lag can make an item look ordinary even while its live duplicate signal
+    // is still valid. Only an explicit fresh `duplicateId:0`/`isDuplicate:false`
+    // response is allowed to change the route to Club.
+    const freshNonDuplicateIds = new Set((purchasedRefresh?.responseItems || [])
+      .filter((item) => (item?.hasIsDuplicate && item.isDuplicate === false && Number(item.duplicateId || 0) === 0)
+        || (item?.hasDuplicateId && !item?.hasIsDuplicate && Number(item.duplicateId || 0) === 0))
+      .map((item) => Number(item?.id || 0))
+      .filter(Boolean));
+    const directClub = resolved
+      .filter(({ live }) => live.pileName === 'unassigned')
+      .filter(({ live }) => freshNonDuplicateIds.has(Number(live.item?.id || 0)))
+      .map(({ live }) => live.item);
     const pending = resolved
       .filter(({ live }) => live.pileName === 'unassigned')
+      .filter(({ live }) => !freshNonDuplicateIds.has(Number(live.item?.id || 0)))
       .map(({ live }) => live.item);
     const unexpected = resolved.filter(({ live }) => !['unassigned', 'storage', 'club'].includes(live.pileName));
     if (unexpected.length) {
@@ -15563,7 +15654,38 @@ function updateLoopControls() {
         details: { storageFree, storageRequired: pending.length },
       };
     }
+    if (directClub.length) await moveItems(directClub, inventoryPile('club'), true);
     if (pending.length) await moveItems(pending, inventoryPile('storage'), true);
+
+    // Transport success is not settlement. EA can return HTTP 200 while
+    // accepting only a subset of item IDs. Refresh both piles and verify every
+    // exact ID before releasing the blocked routing state.
+    if (directClub.length || pending.length) {
+      await refreshPileCacheByCandidates('storage', { quiet: true });
+      await refreshUnassigned({ attempts: 1, allowCacheFallback: false, quiet: true });
+      await refreshPileCacheByCandidates('club', { quiet: true });
+    }
+    const postMove = (routing.storageItems || []).map((item) => ({
+      ref: liveItemRef(item, item?.pile || 'unassigned'),
+      live: findCachedItemById(Number(item?.id || 0), ['unassigned', 'storage', 'club', 'transfer']),
+    }));
+    const unsettled = postMove.filter(({ live }) => !live || live.pileName === 'unassigned');
+    if (unsettled.length) {
+      const unsettledRefs = unsettled.map(({ ref }) => ref);
+      const details = {
+        attempted: [...directClub, ...pending].map((item) => liveItemRef(item, 'unassigned')),
+        confirmed: postMove.filter(({ live }) => live && live.pileName !== 'unassigned')
+          .map(({ live }) => liveItemRef(live.item, live.pileName)),
+        unsettled: unsettledRefs,
+      };
+      log(`${loopDef.name}: protected Storage retry made partial/no progress; keeping ${unsettled.length} exact item(s) pending: ${diagnosticJson(details)}`);
+      return {
+        status: 'blocked',
+        reason: `protected Storage retry confirmed only ${postMove.length - unsettled.length}/${postMove.length} item(s); ${unsettled.length} remain in Unassigned`,
+        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+        details,
+      };
+    }
     recordRollingRecapDuplicateRoute('storage', pending.length);
     const primaryRelease = releaseRollingPrimaryDuplicateRefs(
       runtime.primaryDuplicateRefs,

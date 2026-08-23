@@ -173,6 +173,7 @@ export async function loadUserscript(options = {}) {
       getPackInventorySnapshot,
       findRewardPackInCache,
       predictUnassignedDestination,
+      restoreOpenedUnassignedDuplicateMetadata,
       getUnassignedStorageOverflow,
       getUnassignedCapacityOverflow,
       rememberConsumedDuplicateSignals,

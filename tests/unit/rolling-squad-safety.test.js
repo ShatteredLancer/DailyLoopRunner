@@ -1,7 +1,51 @@
 import { describe, expect, it } from 'vitest';
+import { createEaInventoryAdapter } from '../../src/adapters/ea/inventory.js';
 import { loadUserscript, makePlayer } from '../helpers/load-userscript.js';
 
 describe('Rolling squad safety inspection', () => {
+  it('rejects an Academy-enrolled EA inventory snapshot before rating planning', async () => {
+    const romero = makePlayer({
+      id: 927396922645,
+      definitionId: 220332,
+      rating: 90,
+      rareflag: 0,
+      name: 'Angel Romero',
+    });
+    romero.isEnrolledInAcademy = () => true;
+    const snapshot = createEaInventoryAdapter({
+      repositories: { Item: {} },
+      services: {},
+    }).snapshotItem(romero, 'club');
+    const inventorySnapshot = {
+      piles: { unassigned: [], storage: [], transfer: [], club: [snapshot] },
+    };
+    const { api } = await loadUserscript();
+    const loopDef = {
+      name: 'Storage pressure snapshot safety',
+      expectedPlayerCount: 1,
+      allowedSpecialCount: 0,
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 95 },
+      ratingSbcFill: { priorityPiles: ['club'] },
+    };
+    const model = { requiredPlayerCount: 1, maxSpecialCount: 0, constraints: [] };
+
+    expect(snapshot).toMatchObject({
+      id: romero.id,
+      definitionId: romero.definitionId,
+      rating: 90,
+      rareflag: 0,
+      academyEnrolled: true,
+    });
+    expect(snapshot.isEnrolledInAcademy).toBeUndefined();
+    expect(api.rollingBaseProtectionReasons(snapshot, loopDef, 'club')).toContain('academy');
+    expect(api.buildRatingSbcCandidateEntries(
+      loopDef,
+      model,
+      { exclusiveRoles: [] },
+      inventorySnapshot,
+    ).entries).toEqual([]);
+  });
+
   it('blocks FSU-locked, evolved, and Academy-enrolled cards at final squad inspection', async () => {
     const locked = makePlayer({ id: 1, definitionId: 1001, rating: 84, rareflag: 1 });
     const evolved = makePlayer({

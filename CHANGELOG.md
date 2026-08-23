@@ -3,6 +3,27 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.41] - 2026-08-23
+
+### Fixed
+
+- Prefer fresh EA Purchased/Unassigned evidence when resolving opened-card
+  duplicate identity, preventing stale pack or Club metadata from resurrecting
+  a cleared duplicate signal and trapping ordinary cards such as Isak.
+- Route fresh non-duplicate opened cards to Club and keep the route blocked until
+  the exact item IDs are reconciled in their destination piles.
+- Treat partial or no-op Storage moves as incomplete even when EA returns HTTP
+  200; retain the exact unsettled IDs instead of reporting the whole batch as
+  moved or replanning with stale Club counterparts.
+- Preserve Academy-enrolled protection when EA inventory snapshots are used for
+  candidate planning and final squad safety checks.
+
+### Verification
+
+- Full `npm run verify` passed: 199 test files, 1,763 tests, syntax/lint,
+  configuration, architecture, FSU patch, build, distribution, and release
+  asset checks.
+
 ## [0.8.40] - 2026-08-22
 
 ### Release
