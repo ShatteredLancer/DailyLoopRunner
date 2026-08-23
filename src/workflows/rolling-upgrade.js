@@ -125,6 +125,9 @@ export async function runRollingUpgradeWorkflow(options = {}) {
   const surplusCraftingEnabled = options.surplusCraftingEnabled === true;
   const provisionsShortageRecoveryEnabled = options.provisionsShortageRecoveryEnabled === true;
   const requiredSpecialRecoveryEnabled = options.requiredSpecialRecoveryEnabled === true;
+  const storageRecoveryPriority = options.storageRecoveryPriority === 'provisions'
+    ? 'provisions'
+    : 'storage-pressure';
   const shortageProvisionsPackLimit = boundedPositive(
     options.shortageProvisionsPackLimit,
     DEFAULT_SHORTAGE_PROVISIONS_PACK_LIMIT,
@@ -388,30 +391,79 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     };
   }
 
+  // Both recovery paths can release Storage pressure. The configured first
+  // choice is attempted first, while the other path remains a fallback when
+  // the preferred path is unavailable or cannot make progress.
+  async function recoverStorageBlocked(context = {}) {
+    const order = storageRecoveryPriority === 'provisions'
+      ? ['provisions', 'storageSink']
+      : ['storageSink', 'provisions'];
+    let last = null;
+    let lastKind = null;
+    let attempted = false;
+    let firstAttemptedValue = null;
+    let lastAttemptedValue = null;
+    let storageSinkAttempted = false;
+    for (const kind of order) {
+      const attemptContext = {
+        ...context,
+        ...(kind === 'storageSink' && lastKind === 'provisions' ? { provisions: last } : {}),
+        ...(kind === 'provisions' && lastKind === 'storageSink' ? { storageSink: last } : {}),
+      };
+      const actionAttempted = kind === 'provisions'
+        ? provisionsShortageRecoveryEnabled === true
+          && typeof options.recoverProvisions === 'function'
+        : options.storageSinkEnabled === true
+          && typeof options.recoverStorageSink === 'function';
+      attempted = attempted || actionAttempted;
+      if (kind === 'storageSink') storageSinkAttempted = storageSinkAttempted || actionAttempted;
+      const value = kind === 'provisions'
+        ? await recoverProvisions(attemptContext)
+        : options.storageSinkEnabled === true
+          ? await recoverStorageSink(attemptContext)
+          : { status: 'skipped', reason: 'Storage pressure recovery is disabled in Settings' };
+      if (actionAttempted) {
+        if (firstAttemptedValue === null) firstAttemptedValue = value;
+        lastAttemptedValue = value;
+      }
+      if (isProgressed(value)) return { progressed: true, value, kind };
+      if (isStopped(value) || value?.status === 'planned') {
+        return { terminal: value, value, kind, attempted, storageSinkAttempted };
+      }
+      last = value;
+      lastKind = kind;
+    }
+    return {
+      value: attempted
+        ? storageRecoveryPriority === 'storage-pressure'
+          ? (firstAttemptedValue || last)
+          : (lastAttemptedValue || firstAttemptedValue)
+        : null,
+      attempted,
+      storageSinkAttempted,
+    };
+  }
+
   async function recoverBlockedRewardStorage(reward, context = {}) {
     if (!isBlocked(reward) || reasonCode(reward) !== 'PROTECTED_STORAGE_BLOCKED') {
       return { matched: false };
     }
-    if (options.storageSinkEnabled !== true) {
-      return {
-        matched: true,
-        failure: finishRecoveryFailure(
-          reward,
-          context.blockedReason || 'recovery reward needs more Storage headroom',
-          'PROTECTED_STORAGE_BLOCKED',
-        ),
-      };
-    }
-    const storageSink = await recoverStorageSink({
+    const recovery = await recoverStorageBlocked({
       trigger: 'storage-pressure',
       storage: reward,
       source: context.source || 'recovery-reward-pre-open',
     });
-    if (isProgressed(storageSink)) return { matched: true, progressed: true };
+    if (recovery.progressed) return { matched: true, progressed: true };
+    const value = recovery.terminal || recovery.value || reward;
+    const failureValue = options.storageSinkEnabled !== true
+      && !recovery.storageSinkAttempted
+      && ['unavailable', 'skipped'].includes(String(value?.status || ''))
+      ? reward
+      : value;
     return {
       matched: true,
       failure: finishRecoveryFailure(
-        storageSink,
+        failureValue,
         context.recoveryReason || 'Storage pressure SBC could not clear room for the recovery reward',
         'STORAGE_SINK_RECOVERY_BLOCKED',
       ),
@@ -702,36 +754,22 @@ export async function runRollingUpgradeWorkflow(options = {}) {
             storageCode,
           );
         }
-        const provisions = await recoverProvisions({ trigger: 'storage-pressure', storage });
-        if (isProgressed(provisions)) continue;
-        if (isStopped(provisions) || provisions?.status === 'planned'
-          || ['blocked', 'failed'].includes(String(provisions?.status || ''))) {
+        const recovery = await recoverStorageBlocked({ trigger: 'storage-pressure', storage });
+        if (recovery.progressed) continue;
+        const failure = options.storageSinkEnabled !== true
+          && !recovery.storageSinkAttempted
+          && ['unavailable', 'skipped'].includes(String(recovery.value?.status || ''))
+          ? storage
+          : recovery.terminal || recovery.value || storage;
+        if (isStopped(failure) || isBlocked(failure) || failure?.status === 'planned') {
           return finishRecoveryFailure(
-            provisions,
-            'protected cards cannot be stored',
-            storageCode,
-          );
-        }
-
-        if (options.storageSinkEnabled !== true) {
-          return finishRecoveryFailure(
-            storage,
-            'protected cards cannot be stored',
-            storageCode,
-          );
-        }
-
-        const storageSink = await recoverStorageSink({ trigger: 'storage-pressure', storage, provisions });
-        if (isProgressed(storageSink)) continue;
-        if (isStopped(storageSink) || isBlocked(storageSink) || storageSink?.status === 'planned') {
-          return finishRecoveryFailure(
-            storageSink,
+            failure,
             'Storage pressure SBC recovery failed',
             'STORAGE_SINK_RECOVERY_BLOCKED',
           );
         }
         return finishRecoveryFailure(
-          storage,
+          failure,
           'protected cards cannot be stored',
           storageCode,
         );
@@ -882,34 +920,18 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       }
 
       if (planCode === 'PROTECTED_STORAGE_BLOCKED') {
-        const provisions = await recoverProvisions({
+        const recovery = await recoverStorageBlocked({
           trigger: 'storage-pressure',
           storage: planned,
         });
-        if (isProgressed(provisions)) continue;
-        if (isStopped(provisions) || provisions?.status === 'planned'
-          || ['blocked', 'failed'].includes(String(provisions?.status || ''))) {
-          return finishRecoveryFailure(
-            provisions,
-            'primary-pack duplicates cannot be stored safely',
-            'PROTECTED_STORAGE_BLOCKED',
-          );
-        }
-        if (options.storageSinkEnabled !== true) {
-          return finishRecoveryFailure(
-            planned,
-            'primary-pack duplicates cannot be stored safely',
-            'PROTECTED_STORAGE_BLOCKED',
-          );
-        }
-        const storageSink = await recoverStorageSink({
-          trigger: 'storage-pressure',
-          storage: planned,
-          provisions,
-        });
-        if (isProgressed(storageSink)) continue;
+        if (recovery.progressed) continue;
+        const failure = options.storageSinkEnabled !== true
+          && !recovery.storageSinkAttempted
+          && ['unavailable', 'skipped'].includes(String(recovery.value?.status || ''))
+          ? planned
+          : recovery.terminal || recovery.value || planned;
         return finishRecoveryFailure(
-          storageSink?.status ? storageSink : planned,
+          failure?.status ? failure : planned,
           'primary-pack duplicate Storage recovery failed',
           'PROTECTED_STORAGE_BLOCKED',
         );

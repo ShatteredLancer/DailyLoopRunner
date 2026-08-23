@@ -316,6 +316,7 @@ import {
   captureDefinitionPileState,
   captureMoveResult,
   captureRuntimeInventoryItem,
+  captureRuntimeInventoryFieldDiagnostics,
   captureRuntimePack,
   captureUnassignedRefreshResult,
   createRuntimeObjectIdentityTracker,
@@ -362,6 +363,7 @@ import { createStalePackTracker } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import {
   planBackgroundSubmitRetry,
+  planChallengeReloadRetry,
   inspectItemViolationConflict,
   planItemViolationOverride,
   shouldStopForProtectedItemViolation,
@@ -8230,7 +8232,12 @@ function updateLoopControls() {
           reloadOutcome = 'current-challenge-loaded';
         }
         else {
-          const next = await findAvailableRatingSbcChallenge(set, `${label} submit-retry`);
+          const nextContext = await findAvailableRatingSbcChallengeContext(
+            set,
+            `${label} submit-retry`,
+            { force: true },
+          );
+          const next = nextContext.challenge;
           if (next) {
             currentChallenge = await loadRatingSbcChallenge(next, `${label} submit-retry`, {
               force: true,
@@ -8243,6 +8250,36 @@ function updateLoopControls() {
         reloadOutcome = 'failed';
         reloadError = sanitizeBackgroundSubmitResult({ success: false, error });
         log(`${label}: challenge reload after submit conflict failed: ${error?.message || error}`);
+        // A failed DAO reload means the current challenge object is stale or
+        // unavailable. Try one fresh challenge-list read, but never submit the
+        // old squad again when that read also fails.
+        try {
+          const nextContext = await findAvailableRatingSbcChallengeContext(
+            set,
+            `${label} submit-retry fresh challenge`,
+            { force: true },
+          );
+          const next = nextContext.challenge;
+          if (next) {
+            currentChallenge = await loadRatingSbcChallenge(
+              next,
+              `${label} submit-retry fresh challenge`,
+              {
+                force: true,
+                onDiagnostic: (diagnostic) => reloadAttempts.push({ source: 'fresh-challenge', ...diagnostic }),
+              },
+            ) || next;
+            reloadOutcome = 'next-challenge-loaded';
+            reloadError = null;
+          }
+        } catch (fallbackError) {
+          reloadAttempts.push({
+            source: 'fresh-challenge-list',
+            result: sanitizeBackgroundSubmitResult({ success: false, error: fallbackError }),
+          });
+          reloadError = sanitizeBackgroundSubmitResult({ success: false, error: fallbackError });
+          log(`${label}: fresh challenge reload after submit conflict failed: ${fallbackError?.message || fallbackError}`);
+        }
       }
       emitDiagnostic(log, () => `${label}: background submit retry reconciliation diagnostic ${diagnosticJson({
         trigger: {
@@ -8269,6 +8306,13 @@ function updateLoopControls() {
           getPackCountsById(),
         ),
       })}`);
+      const reloadPlan = planChallengeReloadRetry({ reloadOutcome });
+      if (!reloadPlan.retry) {
+        const reloadDetail = reloadError?.error?.message
+          || reloadError?.message
+          || lastDetail;
+        fail(`${label}: background submit aborted after ${reloadPlan.reason}: ${reloadDetail}`);
+      }
       if (!canSubmit && attempt < maxAttempts) {
         await sleep(Math.min(3000, (Number(CFG.pauseMs) || 800) + attempt * 500));
       }
@@ -9059,7 +9103,7 @@ function updateLoopControls() {
     const storageSink = options.rollingStorageSinkMode === 'selected'
       ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ''}`.trim()
       : options.rollingStorageSinkMode;
-    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
+    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Storage recovery priority ${options.rollingStorageRecoveryPriority === 'provisions' ? 'Provisions-first' : 'Storage-Pressure-first'}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
     renderCurrentSelectionPolicySummary();
     return options;
   }
@@ -12464,6 +12508,7 @@ function updateLoopControls() {
   function duplicateSwapSnapshot(item, pile) {
     const tradeable = readDuplicateCardTradeability(item);
     const special = readDuplicateSpecialClassification(item, isSbcSpecialItem);
+    const fingerprintComplete = duplicateCardValueFingerprintIsComplete(item);
     return {
       ...ratingSelectionItemSnapshot(item, pile),
       // Keep unknown identity state as null. The generic inventory snapshot
@@ -12474,25 +12519,45 @@ function updateLoopControls() {
       duplicateSpecial: special === true,
       duplicateSpecialKnown: special !== null,
       duplicateValueFingerprint: createDuplicateCardValueFingerprint(item),
-      duplicateFingerprintComplete: duplicateCardValueFingerprintIsComplete(item),
+      duplicateFingerprintComplete: fingerprintComplete,
+      duplicateFingerprintSource: fingerprintComplete ? 'live-ea' : 'untrusted',
       pile,
       ref: liveItemRef(item, pile),
     };
   }
 
-  function duplicateSwapSelectionSnapshot(selection, players) {
+  function duplicateSwapSelectionSnapshot(selection, players, resolveLive = null) {
     const playerById = new Map((players || [])
       .map((item) => [Number(item?.id || 0), item])
       .filter(([id]) => id));
+    const liveFor = (id, pile, fallback = null) => {
+      if (typeof resolveLive !== 'function') return fallback;
+      try {
+        const resolved = resolveLive(Number(id || 0), pile);
+        return resolved?.item || resolved || null;
+      } catch {
+        return null;
+      }
+    };
     return {
       entries: (selection?.entries || []).map((entry) => {
-        const signal = entry?.signal || entry?.signalRef || null;
+        const signalRef = entry?.signal || entry?.signalRef || null;
+        const signalId = Number(signalRef?.id || signalRef?.ref?.id || 0);
         const plannedItem = entry?.item || entry?.itemRef || null;
-        const selectedItem = playerById.get(Number(plannedItem?.id || plannedItem?.ref?.id || 0)) || plannedItem;
+        const targetId = Number(plannedItem?.id || plannedItem?.ref?.id || 0);
+        // Controlled swaps must be planned from the exact live EA entities.
+        // Selection entries are normalized summaries and are valid only as ID
+        // references; an unresolved ID deliberately remains incomplete.
+        const signal = liveFor(signalId, 'unassigned', resolveLive ? null : signalRef);
+        const selectedItem = liveFor(
+          targetId,
+          'club',
+          resolveLive ? null : (playerById.get(targetId) || plannedItem),
+        );
         return {
           ...entry,
           signal: signal ? duplicateSwapSnapshot(signal, 'unassigned') : null,
-          item: selectedItem ? duplicateSwapSnapshot(selectedItem, liveItemRef(selectedItem).pile) : null,
+          item: selectedItem ? duplicateSwapSnapshot(selectedItem, 'club') : null,
         };
       }),
     };
@@ -12644,6 +12709,29 @@ function updateLoopControls() {
     const selection = context?.squadPlan?.selection;
     const players = Array.isArray(context?.players) ? context.players : [];
     if (!selection?.entries?.length || !players.length) return { ok: true };
+    const selectionFieldDiagnostics = (entries = []) => entries.map((entry) => {
+      const signalId = Number(entry?.signal?.id || entry?.signal?.ref?.id || 0);
+      const targetId = Number(entry?.item?.id || entry?.item?.ref?.id || 0);
+      const signal = findCachedItemById(signalId, ['unassigned'])?.item || entry?.signal || null;
+      const target = players.find((item) => Number(item?.id || 0) === targetId)
+        || findCachedItemById(targetId, ['club'])?.item
+        || entry?.item
+        || null;
+      return {
+        signal: {
+          id: signalId || null,
+          definitionId: signal?.definitionId || signal?.ref?.definitionId || null,
+          source: signal === entry?.signal ? 'selection' : 'live-unassigned',
+          fields: captureRuntimeInventoryFieldDiagnostics(signal),
+        },
+        target: {
+          id: targetId || null,
+          definitionId: target?.definitionId || target?.ref?.definitionId || null,
+          source: target === entry?.item ? 'selection' : 'live-club',
+          fields: captureRuntimeInventoryFieldDiagnostics(target),
+        },
+      };
+    });
     const configuredSwapMode = normalizeDuplicateSwapMode(
       runtime?.duplicateSwapMode,
       runtime?.duplicateSwapEnabled === true,
@@ -12658,14 +12746,26 @@ function updateLoopControls() {
       ? 'all-eligible'
       : configuredSwapMode;
 
+    const resolveLiveDuplicateItem = (id, pile) => findCachedItemById(id, [pile])?.item || null;
+    const livePlayers = players.map((item) => (
+      resolveLiveDuplicateItem(Number(item?.id || 0), 'club') || item
+    ));
     const originalPlan = planUntradeableDuplicateSwaps({
-      selection: duplicateSwapSelectionSnapshot(selection, players),
-      players: players.map((item) => duplicateSwapSnapshot(item, liveItemRef(item).pile)),
+      selection: duplicateSwapSelectionSnapshot(selection, livePlayers, resolveLiveDuplicateItem),
+      players: livePlayers.map((item) => duplicateSwapSnapshot(item, 'club')),
       swapMode: discoverySwapMode,
       isSpecial: isSbcSpecialItem,
       maxPairs: rollingDuplicateSwapPairLimit(discoverySwapMode),
     });
-    if (!originalPlan.ok || !originalPlan.swaps.length) return originalPlan;
+    if (!originalPlan.ok) {
+      const details = {
+        ...(originalPlan.details || {}),
+        swapDiagnostics: selectionFieldDiagnostics(selection.entries),
+      };
+      log(`${context.label}: duplicate swap planning blocked: ${originalPlan.reason || 'unknown reason'}; field diagnostics:${diagnosticJson(details.swapDiagnostics)}`);
+      return { ...originalPlan, details };
+    }
+    if (!originalPlan.swaps.length) return originalPlan;
     if (runtime?.duplicateSwapEnabled !== true) {
       return {
         ok: false,
@@ -12675,6 +12775,32 @@ function updateLoopControls() {
       };
     }
     if (activeMaterialization) {
+      // A normalized Ledger proves only ID and pile. Whenever the live EA
+      // entities are available, re-check both value fingerprints before
+      // reusing a materialized transaction; otherwise a mutable Club card
+      // could silently enter the next SBC after reconciliation.
+      for (const pair of runtime.duplicateMaterializationTransaction.pairs || []) {
+        const consume = pair.materializedConsumeRef?.id
+          ? findCachedItemById(pair.materializedConsumeRef.id, ['club'])?.item
+          : null;
+        const protectedCard = pair.displacedProtectedRef?.id
+          ? findCachedItemById(pair.displacedProtectedRef.id, ['unassigned'])?.item
+          : null;
+        if (consume && !duplicateCardValueFingerprintMatches(pair.sourceFingerprint, consume)) {
+          return {
+            ok: false,
+            reason: `materialized consume item #${pair.materializedConsumeRef.id} changed value identity before replan`,
+            reasonCode: 'DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED',
+          };
+        }
+        if (protectedCard && !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, protectedCard)) {
+          return {
+            ok: false,
+            reason: `protected counterpart #${pair.displacedProtectedRef.id} changed value identity before replan`,
+            reasonCode: 'DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED',
+          };
+        }
+      }
       const replanValidation = validateDuplicateTransactionReplanSwapPlan(
         runtime.duplicateMaterializationTransaction,
         originalPlan.swaps,
@@ -12704,7 +12830,7 @@ function updateLoopControls() {
     }
     const liveSelection = {
       entries: originalPlan.swaps.map((swap, index) => {
-        const target = players.find((item) => Number(item?.id || 0) === swap.targetId);
+        const target = livePlayers.find((item) => Number(item?.id || 0) === swap.targetId);
         return {
           pileName: 'unassigned',
           signal: duplicateSwapSnapshot(signalItems[index], 'unassigned'),
@@ -12720,7 +12846,31 @@ function updateLoopControls() {
       maxPairs: rollingDuplicateSwapPairLimit(configuredSwapMode),
     });
     if (!livePlan.ok || livePlan.swaps.length !== originalPlan.swaps.length) {
-      return { ok: false, reason: livePlan.reason || 'duplicate swap eligibility changed before move' };
+      const details = {
+        originalPlan,
+        livePlan,
+        liveSelection,
+        swapDiagnostics: liveSelection.entries.map((entry, index) => ({
+          signal: {
+            id: entry.signal?.id || null,
+            definitionId: entry.signal?.definitionId || null,
+            fields: captureRuntimeInventoryFieldDiagnostics(signalItems[index]),
+          },
+          target: {
+            id: entry.item?.id || null,
+            definitionId: entry.item?.definitionId || null,
+            fields: captureRuntimeInventoryFieldDiagnostics(
+              players.find((item) => Number(item?.id || 0) === Number(entry.item?.id || 0)),
+            ),
+          },
+        })),
+      };
+      log(`${context.label}: duplicate swap eligibility changed before move: ${livePlan.reason || 'unknown reason'}; field diagnostics:${diagnosticJson(details.swapDiagnostics)}`);
+      return {
+        ok: false,
+        reason: livePlan.reason || 'duplicate swap eligibility changed before move',
+        details,
+      };
     }
 
     const beforeInventoryVersion = Number(runtime?.coordinator?.getLedger?.()?.summary?.().inventoryVersion || 0);
@@ -12735,7 +12885,7 @@ function updateLoopControls() {
         beforeInventoryVersion,
         pairs: livePlan.swaps.map((swap, index) => rollingDuplicateMaterializationPair(
           signalItems[index],
-          players.find((item) => Number(item?.id || 0) === swap.targetId),
+          livePlayers.find((item) => Number(item?.id || 0) === swap.targetId),
         )),
       });
     } catch (error) {
@@ -12751,10 +12901,16 @@ function updateLoopControls() {
     for (let index = 0; index < livePlan.swaps.length; index++) {
       const swap = livePlan.swaps[index];
       const signalItem = findCachedItemById(swap.signalId, ['unassigned'])?.item || null;
+      const protectedClubLocation = findCachedItemById(swap.targetId, ['club']);
       if (!signalItem
         || !duplicateCardValueFingerprintMatches(
           transaction.pairs[index].sourceFingerprint,
           signalItem,
+        )
+        || !protectedClubLocation
+        || !duplicateCardValueFingerprintMatches(
+          transaction.pairs[index].counterpartFingerprint,
+          protectedClubLocation.item,
         )) {
         const compensation = await compensateUnsubmittedDuplicateTransaction(
           runtime,
@@ -14363,6 +14519,44 @@ function updateLoopControls() {
         reason: validation.reason,
         reasonCode: 'DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED',
       };
+    }
+    // Ledger snapshots intentionally omit mutable EA fields. When the live
+    // pile cache has both entities, verify the persisted value identities as
+    // well so a recovery/storage path cannot bypass the same guard used by
+    // the primary replan.
+    for (const pair of transaction.pairs || []) {
+      const consume = pair.materializedConsumeRef?.id
+        ? findCachedItemById(pair.materializedConsumeRef.id, ['club'])?.item
+        : null;
+      const protectedCard = pair.displacedProtectedRef?.id
+        ? findCachedItemById(pair.displacedProtectedRef.id, ['unassigned'])?.item
+        : null;
+      if (consume && !duplicateCardValueFingerprintMatches(pair.sourceFingerprint, consume)) {
+        runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+          transaction,
+          'recovery-required',
+          { reason: `materialized consume item #${pair.materializedConsumeRef.id} changed value identity` },
+        );
+        persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+        return {
+          ok: false,
+          reason: runtime.duplicateMaterializationTransaction.reason,
+          reasonCode: 'DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED',
+        };
+      }
+      if (protectedCard && !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, protectedCard)) {
+        runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+          transaction,
+          'recovery-required',
+          { reason: `protected counterpart #${pair.displacedProtectedRef.id} changed value identity` },
+        );
+        persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+        return {
+          ok: false,
+          reason: runtime.duplicateMaterializationTransaction.reason,
+          reasonCode: 'DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED',
+        };
+      }
     }
     return {
       ok: true,
@@ -17886,18 +18080,13 @@ function updateLoopControls() {
       runtime.pendingUnassignedRefs,
     );
     log(`${loopDef.name}: resumed ${duplicates.length} Unassigned duplicate(s); primary:${runtime.primaryDuplicateRefs.length}, pending Storage:${runtime.openRouting.pendingItems.length}, route:${runtime.openRouting.status}`);
+    // A disabled native swap with insufficient Storage is recoverable. Keep
+    // the blocked routing state and let the main workflow enter its existing
+    // Storage Pressure -> Provisions recovery path. Returning `blocked` here
+    // would terminate startup before that recovery phase can run.
     if (finalRoute.status === 'blocked'
       && finalRoute.reasonCode === 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED') {
-      return {
-        status: 'blocked',
-        reason: finalRoute.reason,
-        reasonCode: finalRoute.reasonCode,
-        details: {
-          resumedDuplicates: duplicates.length,
-          primaryDuplicates: 0,
-          pendingStorage: runtime.openRouting.pendingItems.length,
-        },
-      };
+      log(`${loopDef.name}: native duplicate swaps are disabled; retaining ${runtime.openRouting.pendingItems.length} pending Storage item(s) for recovery`);
     }
     return {
       status: 'ready',
@@ -18000,6 +18189,7 @@ function updateLoopControls() {
       result = await runRollingUpgradeWorkflow({
       maxCompletions: Number(loopDef.maxCompletions || 0),
       storageSinkEnabled: loopDef.rollingStorageSinkEnabled === true,
+      storageRecoveryPriority: loopDef.rollingStorageRecoveryPriority,
       surplusCraftingEnabled: loopDef.rollingSurplusCraftingEnabled === true,
       provisionsShortageRecoveryEnabled:
         loopDef.rollingProvisionsShortageRecoveryEnabled === true,
@@ -18209,6 +18399,24 @@ function updateLoopControls() {
           goldDuplicates.some((item) => rollingItemMatchesRef(item, ref))
         ));
         const rareDuplicates = goldDuplicates.filter(isRare);
+        // A Storage-pressure SBC reward can be materialized after EA reports
+        // its final challenge as incomplete. Give the Storage Sink owner one
+        // chance to claim its known Pick before the generic Rare Gold Pick
+        // scanner treats that same entity as an unrelated reward.
+        if (loopDef.rollingStorageSinkEnabled === true && loopDef.rollingStorageSink) {
+          const pendingStoragePick = await resumePendingRollingStorageSinkReward(
+            loopDef,
+            runtime,
+            loopDef.rollingStorageSink,
+          );
+          if (pendingStoragePick?.status === 'selected'
+            || pendingStoragePick?.status === 'planned'
+            || pendingStoragePick?.status === 'blocked'
+            || pendingStoragePick?.status === 'stopped') {
+            await reportPhase?.(ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK);
+            return pendingStoragePick;
+          }
+        }
         const pickCapability = loopDef.rollingPlayerPick;
         const pendingPickLoop = pickCapability?.status === 'resolved'
           ? await findPendingRollingPlayerPickLoop(pickCapability)
@@ -19178,7 +19386,7 @@ function updateLoopControls() {
         const storageSinkSummary = loopDef.rollingStorageSinkEnabled
           ? `${loopDef.rollingStorageSink?.mode || 'automatic'}/${loopDef.rollingStorageSink?.capability?.setName || 'unavailable'}`
           : 'off';
-        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || 'special-only'})` : 'off; Storage route only'}; Storage pressure SBC ${storageSinkSummary}`);
+        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Storage recovery priority ${loopDef.rollingStorageRecoveryPriority === 'provisions' ? 'Provisions-first' : 'Storage-Pressure-first'}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || 'special-only'})` : 'off; Storage route only'}; Storage pressure SBC ${storageSinkSummary}`);
       } else {
         log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
       }

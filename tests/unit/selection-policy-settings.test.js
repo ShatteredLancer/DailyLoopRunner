@@ -90,6 +90,7 @@ describe('selection policy settings modal', () => {
         ['91', '87-91'],
       ]);
     expect(ui.byId.get('#bronze-loop-policy-rolling-recovery-storage-first').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-storage-recovery-priority').value).toBe('storage-pressure');
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');
     expect(ui.byId.get('#bronze-loop-policy-rolling-open-duplicate-provisions-rewards').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-protect-fsu-locked-players').checked).toBe(false);
@@ -109,6 +110,7 @@ describe('selection policy settings modal', () => {
     ui.byId.get('#bronze-loop-policy-pick-open-at-end').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value = '91';
     ui.byId.get('#bronze-loop-policy-rolling-recovery-storage-first').checked = true;
+    ui.byId.get('#bronze-loop-policy-rolling-storage-recovery-priority').value = 'provisions';
     ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value = '4';
     ui.byId.get('#bronze-loop-policy-rolling-open-duplicate-provisions-rewards').checked = true;
     ui.byId.get('#bronze-loop-policy-protect-fsu-locked-players').checked = true;
@@ -134,6 +136,7 @@ describe('selection policy settings modal', () => {
         rollingDuplicateSwapMode: 'special-only',
         rollingProvisionsMaxRating: 91,
         rollingRecoveryStorageFirst: true,
+        rollingStorageRecoveryPriority: 'provisions',
         rollingOpenDuplicateProvisionsRewards: true,
         rollingShortageProvisionsPackLimit: 4,
         protectFsuLockedPlayers: true,
@@ -165,6 +168,7 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap-mode').value).toBe('off');
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
     expect(ui.byId.get('#bronze-loop-policy-rolling-recovery-storage-first').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-storage-recovery-priority').value).toBe('storage-pressure');
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');
     expect(ui.byId.get('#bronze-loop-policy-protect-fsu-locked-players').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-protect-active-squad-players').checked).toBe(false);

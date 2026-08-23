@@ -24,6 +24,116 @@ function callBoolean(item, methodName) {
   return null;
 }
 
+const RUNTIME_ITEM_FIELD_GROUPS = Object.freeze([
+  ['upgrades', ['upgrades']],
+  ['evolution', ['evolution', 'isEvolution', 'isEvo', 'evolutionId', 'evoId', 'evolutionStatus']],
+  ['cosmetics', ['cosmetics', 'cosmetic']],
+  ['definitionId', ['definitionId', 'definitionID', 'defId']],
+  ['rating', ['rating', '_rating']],
+  ['rareflag', ['rareflag', 'rareFlag', '_rareflag']],
+  ['chemistryStyle', ['chemistryStyle', 'chemStyle', 'styleId', 'playStyle']],
+  ['preferredPosition', ['preferredPosition', '_preferredPosition']],
+  ['attributes', ['attributes']],
+  ['skillMoves', ['skillMoves', '_skillMoves', 'skillmoves']],
+  ['weakFoot', ['weakFoot', '_weakFoot', 'weakfoot']],
+  ['groups', ['groups']],
+  ['tradeability', ['tradeable', 'tradable', 'untradeable', 'untradeableCount']],
+]);
+
+function diagnosticValueSummary(value) {
+  if (value === undefined) return { type: 'undefined' };
+  if (value === null) return { type: 'null', value: null };
+  if (['string', 'number', 'boolean'].includes(typeof value)) {
+    return { type: typeof value, value: primitiveOrNull(value) };
+  }
+  if (Array.isArray(value)) {
+    return {
+      type: 'array',
+      length: value.length,
+      itemIds: value.slice(0, 8).map((entry) => numberOrNull(entry?.id ?? entry?.itemId)),
+    };
+  }
+  if (typeof value === 'object') {
+    let keys = [];
+    try { keys = Object.keys(value).sort(); } catch { }
+    return {
+      type: value?.constructor?.name || 'Object',
+      keys: keys.slice(0, 16),
+      keyCount: keys.length,
+    };
+  }
+  return { type: typeof value };
+}
+
+function inspectRuntimeItemField(item, name, aliases) {
+  const holders = [
+    ['item', item],
+    ['ref', item?.ref],
+    ['_data', item?._data],
+    ['data', item?.data],
+    ['_staticData', item?._staticData],
+    ['staticData', item?.staticData],
+  ].filter(([, holder]) => holder && typeof holder === 'object');
+  const sources = [];
+  for (const [holderName, holder] of holders) {
+    for (const alias of aliases) {
+      let inObject = false;
+      let own = false;
+      let descriptor = null;
+      let descriptorOwner = null;
+      try {
+        inObject = alias in holder;
+        own = Object.prototype.hasOwnProperty.call(holder, alias);
+        let current = holder;
+        let depth = 0;
+        while (current && depth < 8) {
+          descriptor = Object.getOwnPropertyDescriptor(current, alias) || null;
+          if (descriptor) {
+            descriptorOwner = depth === 0
+              ? holderName
+              : `prototype:${current?.constructor?.name || 'Object'}`;
+            break;
+          }
+          current = Object.getPrototypeOf(current);
+          depth++;
+        }
+      } catch { }
+      if (!inObject && !own) continue;
+      let value;
+      let readError = null;
+      try { value = holder[alias]; } catch (error) { readError = error?.message || String(error); }
+      sources.push({
+        holder: holderName,
+        field: alias,
+        own,
+        inherited: inObject && !own,
+        descriptor: descriptor?.get || descriptor?.set ? 'accessor' : 'data',
+        getter: typeof descriptor?.get === 'function',
+        descriptorOwner,
+        value: readError ? { readError } : diagnosticValueSummary(value),
+      });
+    }
+  }
+  const hasDefinedValue = sources.some((source) => source.value?.type !== 'undefined');
+  return {
+    state: !sources.length ? 'missing' : hasDefinedValue ? 'present' : 'present-undefined',
+    aliases,
+    sources,
+  };
+}
+
+export function captureRuntimeInventoryFieldDiagnostics(item) {
+  if (!item || typeof item !== 'object') return null;
+  try {
+    return Object.fromEntries(RUNTIME_ITEM_FIELD_GROUPS.map(([name, aliases]) => [
+      name,
+      inspectRuntimeItemField(item, name, aliases),
+    ]));
+  } catch (error) {
+    return { diagnosticError: error?.message || String(error) };
+  }
+}
+
 function resultLayer(value) {
   if (!value || typeof value !== 'object') return primitiveOrNull(value);
   try {
@@ -102,6 +212,9 @@ export function captureRuntimeInventoryItem(item, options = {}) {
       evolution: isPlayerEvolutionCard(item),
       hasUpgrades: hasPlayerUpgrades(item),
       hasCosmetics: hasPlayerCosmetics(item),
+      ...(options.includeFieldDiagnostics === true
+        ? { fieldDiagnostics: captureRuntimeInventoryFieldDiagnostics(item) }
+        : {}),
       pile: primitiveOrNull(item.pile),
       privatePile: primitiveOrNull(item._pile),
       dataPile: primitiveOrNull(item._data?.pile),

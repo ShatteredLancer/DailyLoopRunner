@@ -100,6 +100,8 @@ export async function submitSbcAttempt(options = {}) {
           challengeRef: context.challengeRef || { id: context.challenge?.id || null },
           consumedItemRefs: context.squadPlan.itemRefs || [],
           reason: prepared.reason || 'SBC player preparation failed',
+          reasonCode: prepared.reasonCode || 'PLAYER_PREPARATION_BLOCKED',
+          details: prepared.details,
         }), { phase: 'player-preparation', context });
       }
       if (prepared?.replan === true || prepared?.status === 'replan') {

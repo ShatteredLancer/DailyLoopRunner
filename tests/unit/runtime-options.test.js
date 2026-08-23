@@ -37,6 +37,7 @@ describe('loop runtime option projection', () => {
       rollingDuplicateSwapMode: 'off',
       rollingProvisionsMaxRating: 88,
       rollingRecoveryStorageFirst: false,
+      rollingStorageRecoveryPriority: 'storage-pressure',
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
       protectFsuLockedPlayers: false,
@@ -67,6 +68,7 @@ describe('loop runtime option projection', () => {
       rollingDuplicateSwapMode: 'off',
       rollingProvisionsMaxRating: 88,
       rollingRecoveryStorageFirst: false,
+      rollingStorageRecoveryPriority: 'storage-pressure',
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
       protectFsuLockedPlayers: false,
@@ -542,6 +544,10 @@ describe('loop runtime option projection', () => {
     expect(normalizePickRuntimeOptions({ rollingRecoveryStorageFirst: true })).toMatchObject({
       rollingRecoveryStorageFirst: true,
     });
+    expect(normalizePickRuntimeOptions({ rollingStorageRecoveryPriority: 'provisions' }))
+      .toMatchObject({ rollingStorageRecoveryPriority: 'provisions' });
+    expect(normalizePickRuntimeOptions({ rollingStorageRecoveryPriority: 'unknown' }))
+      .toMatchObject({ rollingStorageRecoveryPriority: 'storage-pressure' });
     expect(normalizePickRuntimeOptions({ rollingShortageProvisionsPackLimit: 0 }))
       .toMatchObject({ rollingShortageProvisionsPackLimit: 1 });
     expect(normalizePickRuntimeOptions({ rollingShortageProvisionsPackLimit: 99 }))
@@ -557,6 +563,7 @@ describe('loop runtime option projection', () => {
       pickOptions: {
         rollingProvisionsMaxRating: 89,
         rollingRecoveryStorageFirst: true,
+        rollingStorageRecoveryPriority: 'provisions',
         rollingOpenDuplicateProvisionsRewards: true,
         rollingShortageProvisionsPackLimit: 4,
       },
@@ -564,6 +571,7 @@ describe('loop runtime option projection', () => {
     expect(loopDef).toMatchObject({
       runtimeProvisionsMaxRating: 89,
       runtimeRecoveryStorageFirst: true,
+      rollingStorageRecoveryPriority: 'provisions',
       rollingOpenDuplicateProvisionsRewards: true,
       rollingShortageProvisionsPackLimit: 4,
       rollingProvisionsUpgrade: { requirements: [{ maxRating: 89 }] },

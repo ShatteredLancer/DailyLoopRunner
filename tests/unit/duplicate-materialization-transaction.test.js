@@ -473,6 +473,34 @@ describe('duplicate materialization transaction', () => {
     });
   });
 
+  it('preserves explicit cosmetic flags and treats upgrades:null as non-evolution', () => {
+    const base = card(1, { upgrades: null, cosmetics: [], cosmetic: false });
+    const cosmetic = card(2, { upgrades: null, cosmetics: [], cosmetic: true });
+    expect(createDuplicateCardValueFingerprint(base)).toMatchObject({
+      evolution: false,
+      upgrades: null,
+      cosmetics: [],
+    });
+    expect(diffDuplicateCardValueFingerprint(base, cosmetic).changedFields)
+      .toContain('cosmetic');
+  });
+
+  it('reads value fields exposed through prototype getters', () => {
+    const prototype = {
+      get rating() { return 95; },
+      get rareflag() { return 64; },
+    };
+    const raw = card(1, { upgrades: null, cosmetics: [] });
+    delete raw.rating;
+    delete raw.rareflag;
+    const live = Object.assign(Object.create(prototype), raw);
+    expect(createDuplicateCardValueFingerprint(live)).toMatchObject({
+      rating: 95,
+      rareflag: 64,
+      evolution: false,
+    });
+  });
+
   it('validates both live sides against the materialized inventory version', () => {
     const transaction = materialize().transaction;
     const consume = card(925789369999, { pile: 'club' });

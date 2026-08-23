@@ -2,7 +2,10 @@ import {
   isSamePlayerCardVersion,
   readExplicitPlayerRareFlag,
 } from '../domain/player-rarity.js';
-import { duplicateCardValueFingerprintMatches } from '../inventory/duplicate-materialization-transaction.js';
+import {
+  createDuplicateCardValueFingerprint,
+  duplicateCardValueFingerprintMatches,
+} from '../inventory/duplicate-materialization-transaction.js';
 
 export const DUPLICATE_SWAP_MODES = Object.freeze([
   'off',
@@ -31,16 +34,25 @@ function rawHolders(item = {}) {
 function firstRawValue(item, fields) {
   for (const holder of rawHolders(item)) {
     for (const field of fields) {
-      if (holder[field] !== undefined && holder[field] !== null) return holder[field];
+      try {
+        if (holder[field] !== undefined && holder[field] !== null) return holder[field];
+      } catch { }
     }
   }
   return undefined;
 }
 
 function hasRawField(item, fields) {
-  return rawHolders(item).some((holder) => fields.some((field) => (
-    Object.prototype.hasOwnProperty.call(holder, field)
-  )));
+  // EA's UTItemEntity exposes rating/rareflag and other values through
+  // prototype getters. `hasOwnProperty` therefore reports a complete live
+  // entity as incomplete even though the value is safely readable.
+  return rawHolders(item).some((holder) => fields.some((field) => {
+    try {
+      return field in holder && holder[field] !== undefined;
+    } catch {
+      return false;
+    }
+  }));
 }
 
 export function readDuplicateCardTradeability(item = {}) {
@@ -94,7 +106,8 @@ export function readDuplicateSpecialClassification(item = {}, isSpecial) {
 
 export function duplicateCardValueFingerprintIsComplete(item = {}) {
   if (typeof item?.duplicateFingerprintComplete === 'boolean') {
-    return item.duplicateFingerprintComplete;
+    return item.duplicateFingerprintComplete === true
+      && item.duplicateFingerprintSource === 'live-ea';
   }
   if (item?.duplicateValueFingerprint && typeof item.duplicateValueFingerprint === 'object') {
     return false;
@@ -125,6 +138,86 @@ function cardIsSpecial(item, isSpecial) {
   return readDuplicateSpecialClassification(item, isSpecial);
 }
 
+function duplicateSwapBaseIdentityMatches(source, target) {
+  const sourceFingerprint = createDuplicateCardValueFingerprint(source);
+  const targetFingerprint = createDuplicateCardValueFingerprint(target);
+  if (!sourceFingerprint.definitionId
+    || sourceFingerprint.definitionId !== targetFingerprint.definitionId) {
+    return false;
+  }
+  if (sourceFingerprint.rating > 0
+    && targetFingerprint.rating > 0
+    && sourceFingerprint.rating !== targetFingerprint.rating) {
+    return false;
+  }
+  if (sourceFingerprint.rareflag !== targetFingerprint.rareflag) return false;
+  if (sourceFingerprint.databaseId > 0
+    && targetFingerprint.databaseId > 0
+    && sourceFingerprint.databaseId !== targetFingerprint.databaseId) {
+    return false;
+  }
+  return true;
+}
+
+function emptyMutableValue(value) {
+  if (value === null || value === undefined) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') return Object.keys(value).length === 0;
+  return false;
+}
+
+function duplicateSwapSourceIsUnmodified(item) {
+  const fingerprint = createDuplicateCardValueFingerprint(item);
+  // 250 is EA's unmodified/default chemistry style. Other mutable fields are
+  // represented explicitly by the live entity and are therefore safe to
+  // reject without guessing at a card-specific base value.
+  return fingerprint.evolution !== true
+    && emptyMutableValue(fingerprint.upgrades)
+    && emptyMutableValue(fingerprint.cosmetics)
+    && fingerprint.cosmetic !== true
+    && fingerprint.chemistryStyle === 250;
+}
+
+function duplicateSwapTargetHasKnownMutableValue(item) {
+  const fingerprint = createDuplicateCardValueFingerprint(item);
+  return fingerprint.evolution === true
+    || !emptyMutableValue(fingerprint.upgrades)
+    || !emptyMutableValue(fingerprint.cosmetics)
+    || fingerprint.cosmetic === true
+    || (fingerprint.chemistryStyle > 0 && fingerprint.chemistryStyle !== 250);
+}
+
+function duplicateSwapDirectionalValueMatch(source, target) {
+  if (duplicateCardValueFingerprintMatches(source, target)) return true;
+  if (!duplicateSwapSourceIsUnmodified(source)
+    || !duplicateSwapTargetHasKnownMutableValue(target)) return false;
+
+  const sourceFingerprint = createDuplicateCardValueFingerprint(source);
+  const targetFingerprint = createDuplicateCardValueFingerprint(target);
+  const mutableFields = new Set([
+    'evolution',
+    'upgrades',
+    'cosmetics',
+    'cosmetic',
+    'chemistryStyle',
+    'preferredPosition',
+    'attributes',
+    'skillMoves',
+    'weakFoot',
+    'groups',
+  ]);
+  const changedFields = [...new Set([
+    ...Object.keys(sourceFingerprint),
+    ...Object.keys(targetFingerprint),
+  ])].filter((field) => (
+    JSON.stringify(sourceFingerprint[field]) !== JSON.stringify(targetFingerprint[field])
+  ));
+  // A plain Unassigned source may replace a more valuable Club target. Any
+  // identity/tradeability mismatch remains unsafe; the post-move validator
+  // later proves that each value fingerprint stayed on its original entity.
+  return changedFields.length > 0 && changedFields.every((field) => mutableFields.has(field));
+}
+
 export function evaluateDuplicateSwapEligibility({
   source = null,
   target = null,
@@ -146,15 +239,17 @@ export function evaluateDuplicateSwapEligibility({
   if (typeof targetTradeable !== 'boolean') {
     return { eligible: false, reason: 'duplicate Club counterpart tradeability is unknown' };
   }
-  if (!isSamePlayerCardVersion(source, target)) {
+  if (!duplicateSwapBaseIdentityMatches(source, target)) {
     return { eligible: false, reason: 'duplicate source and Club counterpart are different card versions' };
   }
 
   if (normalizedMode === 'all-eligible') return { eligible: true, mode: normalizedMode };
 
-  // Controlled modes never exchange a tradeable Club card and never exchange
-  // a pair whose value fingerprint has already diverged (EVO, cosmetics,
-  // chemistry, attributes, groups, or any other mutable EA card state).
+  // Controlled modes never exchange a tradeable Club card. A plain
+  // Unassigned source may replace a value-modified Club counterpart, but the
+  // source itself may not carry mutable value state. The native response and
+  // the strict two-sided postcondition below are the evidence that the Club
+  // value was displaced intact rather than consumed.
   if (targetTradeable !== false) {
     return { eligible: false, reason: 'controlled duplicate swaps require an untradeable Club counterpart' };
   }
@@ -162,8 +257,8 @@ export function evaluateDuplicateSwapEligibility({
     || !duplicateCardValueFingerprintIsComplete(target)) {
     return { eligible: false, reason: 'controlled duplicate swap value fingerprint is incomplete' };
   }
-  if (!duplicateCardValueFingerprintMatches(source, target)) {
-    return { eligible: false, reason: 'controlled duplicate swap value fingerprint is not identical' };
+  if (!duplicateSwapDirectionalValueMatch(source, target)) {
+    return { eligible: false, reason: 'controlled duplicate swap requires an unmodified Unassigned source' };
   }
 
   const sourceSpecial = cardIsSpecial(source, isSpecial);
@@ -214,6 +309,7 @@ export function planUntradeableDuplicateSwaps({
   const pairLimit = Number.isSafeInteger(Number(maxPairs)) && Number(maxPairs) > 0
     ? Number(maxPairs)
     : Number.POSITIVE_INFINITY;
+  const normalizedMode = normalizeDuplicateSwapMode(swapMode);
   for (const entry of selection?.entries || []) {
     if (swaps.length >= pairLimit) break;
     if (String(entry?.pileName || '') !== 'unassigned') continue;
@@ -224,7 +320,13 @@ export function planUntradeableDuplicateSwaps({
     const target = playerById.get(targetId);
     if (!signalId || !targetId || !target) continue;
     if (signal?.tradeable === true || itemPile(target) !== 'club') continue;
-    if (!isSamePlayerCardVersion(signal, target)) continue;
+    // Controlled/all-eligible modes may intentionally displace a Club card
+    // whose mutable value state differs. The evaluator still enforces the
+    // base identity and directional value rules; the old exact-version gate
+    // is retained only while swaps are disabled.
+    if (normalizedMode === 'off'
+      ? !isSamePlayerCardVersion(signal, target)
+      : !duplicateSwapBaseIdentityMatches(signal, target)) continue;
     if (readDuplicateCardTradeability(signal) !== false) {
       return { ok: false, reason: 'duplicate source tradeability is unknown', swaps: [] };
     }
@@ -340,6 +442,11 @@ export function validateUntradeableDuplicateSwapMaterialization({
     || newClubItem?.tradeable !== false) {
     return failedMaterialization(`duplicate swap Club item #${newItemId} failed same-version untradeable validation`);
   }
+  if (!duplicateCardValueFingerprintIsComplete(originalSignal)
+    || !duplicateCardValueFingerprintIsComplete(newClubItem)
+    || !duplicateCardValueFingerprintMatches(originalSignal, newClubItem)) {
+    return failedMaterialization(`duplicate swap Club item #${newItemId} changed value fingerprint`);
+  }
 
   if (!displacedTarget) {
     return failedMaterialization(`duplicate swap protected Club counterpart #${targetId} disappeared after move`);
@@ -356,6 +463,11 @@ export function validateUntradeableDuplicateSwapMaterialization({
   if (typeof originalTarget?.tradeable !== 'boolean'
     || displacedTarget?.tradeable !== originalTarget.tradeable) {
     return failedMaterialization(`duplicate swap protected Club counterpart #${targetId} changed tradeability`);
+  }
+  if (!duplicateCardValueFingerprintIsComplete(originalTarget)
+    || !duplicateCardValueFingerprintIsComplete(displacedTarget)
+    || !duplicateCardValueFingerprintMatches(originalTarget, displacedTarget)) {
+    return failedMaterialization(`duplicate swap protected Club counterpart #${targetId} changed value fingerprint`);
   }
 
   return {

@@ -24,6 +24,11 @@ import {
 
 export const INVENTORY_MODES = Object.freeze(['inherit', 'inventory-only', 'normal']);
 export const RUNTIME_QUANTITY_MODES = Object.freeze(['user', 'ea-remaining', 'exhaust', 'fixed']);
+export const ROLLING_STORAGE_RECOVERY_PRIORITIES = Object.freeze([
+  'storage-pressure',
+  'provisions',
+]);
+export const DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY = 'storage-pressure';
 export const RUNTIME_QUANTITY_TARGETS = Object.freeze([
   'maxCompletions',
   'rounds',
@@ -32,6 +37,12 @@ export const RUNTIME_QUANTITY_TARGETS = Object.freeze([
 ]);
 export { DUPLICATE_SWAP_MODES, PLAYER_PICK_SELECTION_MODES };
 const PICK_OPTIONS_APPLIED = Symbol('pick-options-applied');
+
+export function normalizeRollingStorageRecoveryPriority(value) {
+  return ROLLING_STORAGE_RECOVERY_PRIORITIES.includes(String(value || '').trim().toLowerCase())
+    ? String(value).trim().toLowerCase()
+    : DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY;
+}
 
 function boundedNumber(value, fallback, min, max) {
   const parsed = Number(value);
@@ -126,6 +137,11 @@ function pickOptionOverrides(input = {}) {
     input.rollingRecoveryStorageFirst,
   );
   assign(
+    'rollingStorageRecoveryPriority',
+    nested.rollingStorageRecoveryPriority,
+    input.rollingStorageRecoveryPriority,
+  );
+  assign(
     'rollingOpenDuplicateProvisionsRewards',
     nested.rollingOpenDuplicateProvisionsRewards,
     input.rollingOpenDuplicateProvisionsRewards,
@@ -203,6 +219,9 @@ export function normalizePickRuntimeOptions(input = {}) {
       input.rollingProvisionsMaxRating,
     ),
     rollingRecoveryStorageFirst: input.rollingRecoveryStorageFirst === true,
+    rollingStorageRecoveryPriority: normalizeRollingStorageRecoveryPriority(
+      input.rollingStorageRecoveryPriority,
+    ),
     rollingOpenDuplicateProvisionsRewards:
       input.rollingOpenDuplicateProvisionsRewards === true,
     rollingShortageProvisionsPackLimit: normalizeRollingShortageProvisionsPackLimit(
@@ -410,6 +429,7 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
     loopDef.rollingDuplicateSwapMode = resolvedPickOptions.rollingDuplicateSwapMode;
     loopDef.runtimeProvisionsMaxRating = resolvedPickOptions.rollingProvisionsMaxRating;
     loopDef.runtimeRecoveryStorageFirst = resolvedPickOptions.rollingRecoveryStorageFirst;
+    loopDef.rollingStorageRecoveryPriority = resolvedPickOptions.rollingStorageRecoveryPriority;
     loopDef.rollingOpenDuplicateProvisionsRewards =
       resolvedPickOptions.rollingOpenDuplicateProvisionsRewards;
     loopDef.rollingShortageProvisionsPackLimit =

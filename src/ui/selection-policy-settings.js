@@ -200,6 +200,17 @@ export function showSelectionPolicySettings(options = {}) {
   );
   applyStyles(rollingStorageSinkMode, { width: '150px' });
   applyStyles(rollingStorageSinkSet, { width: 'min(320px, 100%)' });
+  const rollingStorageRecoveryPriority = selectInput(
+    dom,
+    'bronze-loop-policy-rolling-storage-recovery-priority',
+    pickOptions.rollingStorageRecoveryPriority,
+    [
+      ['storage-pressure', 'Storage Pressure first'],
+      ['provisions', 'Provisions first'],
+    ],
+    mode,
+  );
+  applyStyles(rollingStorageRecoveryPriority, { width: 'min(320px, 100%)' });
   const updateStorageSinkAvailability = () => {
     rollingStorageSinkSet.disabled = rollingStorageSinkMode.value !== 'selected';
     rollingStorageSinkSet.style.opacity = rollingStorageSinkSet.disabled ? '0.65' : '1';
@@ -327,6 +338,7 @@ export function showSelectionPolicySettings(options = {}) {
     rollingOpenDuplicateProvisionsRewards.label,
     wideField(dom, 'Storage pressure recovery', rollingStorageSinkMode, mode, 'Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set'),
     wideField(dom, 'Storage pressure SBC', rollingStorageSinkSet, mode, 'Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility'),
+    wideField(dom, 'Storage recovery priority', rollingStorageRecoveryPriority, mode, 'When protected cards cannot enter Storage, try the selected Storage Pressure SBC or Provisions first; the other path remains a fallback'),
     sectionTitle(dom, 'Submission guards'),
     protectFsuLockedPlayers.label,
     protectActiveSquadPlayers.label,
@@ -398,6 +410,7 @@ export function showSelectionPolicySettings(options = {}) {
         pickOptions.rollingProvisionsMaxRating,
       ),
       rollingRecoveryStorageFirst: rollingRecoveryStorageFirst.input.checked,
+      rollingStorageRecoveryPriority: rollingStorageRecoveryPriority.value,
       rollingOpenDuplicateProvisionsRewards:
         rollingOpenDuplicateProvisionsRewards.input.checked,
       rollingShortageProvisionsPackLimit: readNumber(
@@ -445,6 +458,7 @@ export function showSelectionPolicySettings(options = {}) {
       rollingOpenDuplicateProvisionsRewards.input,
       rollingStorageSinkMode,
       rollingStorageSinkSet,
+      rollingStorageRecoveryPriority,
       openPicksAtEnd.input,
       cancel,
       save,

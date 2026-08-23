@@ -3,6 +3,7 @@ import {
   hasItemViolationConflict,
   inspectItemViolationConflict,
   isRetryableBackgroundSubmitError,
+  planChallengeReloadRetry,
   normalizeSubmitErrorCode,
   planBackgroundSubmitRetry,
   planItemViolationOverride,
@@ -10,6 +11,25 @@ import {
 } from '../../src/sbc/background-submit-retry.js';
 
 describe('background submit retry helpers', () => {
+  it('only retries after a fresh challenge instance was loaded', () => {
+    expect(planChallengeReloadRetry({ reloadOutcome: 'current-challenge-loaded' })).toEqual({
+      retry: true,
+      reason: 'challenge-reloaded',
+    });
+    expect(planChallengeReloadRetry({ reloadOutcome: 'next-challenge-loaded' })).toEqual({
+      retry: true,
+      reason: 'challenge-reloaded',
+    });
+    expect(planChallengeReloadRetry({ reloadOutcome: 'failed' })).toEqual({
+      retry: false,
+      reason: 'challenge-reload-failed',
+    });
+    expect(planChallengeReloadRetry({ reloadOutcome: 'unavailable' })).toEqual({
+      retry: false,
+      reason: 'challenge-reload-unavailable',
+    });
+  });
+
   it('recognizes only a 409 response with non-empty item violations as an item conflict', () => {
     expect(hasItemViolationConflict({ status: 409, data: { itemViolations: [{ itemIds: [1] }] } })).toBe(true);
     expect(hasItemViolationConflict({ status: 409, data: { itemViolations: [] } })).toBe(false);

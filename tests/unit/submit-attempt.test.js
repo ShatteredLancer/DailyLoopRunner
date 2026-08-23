@@ -146,7 +146,12 @@ describe('submitSbcAttempt', () => {
 
   it('blocks before validation and save when player preparation fails closed', async () => {
     const options = baseOptions({
-      preparePlayers: async () => ({ ok: false, reason: 'duplicate swap response is incomplete' }),
+      preparePlayers: async () => ({
+        ok: false,
+        reason: 'duplicate swap response is incomplete',
+        reasonCode: 'DUPLICATE_SWAP_RESPONSE_INVALID',
+        details: { field: 'cosmetics', state: 'missing' },
+      }),
       preSaveValidators: [vi.fn(async () => {})],
     });
 
@@ -154,6 +159,8 @@ describe('submitSbcAttempt', () => {
       status: 'blocked',
       submitted: false,
       reason: 'duplicate swap response is incomplete',
+      reasonCode: 'DUPLICATE_SWAP_RESPONSE_INVALID',
+      details: { field: 'cosmetics', state: 'missing' },
     });
     expect(options.preSaveValidators[0]).not.toHaveBeenCalled();
     expect(options.saveSquad).not.toHaveBeenCalled();

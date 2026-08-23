@@ -2707,7 +2707,11 @@
     return positiveId(value?.id || value?.ref?.id);
   }
   function definitionId(value = {}) {
-    return positiveId(value?.definitionId || value?.ref?.definitionId);
+    return positiveId(readRaw(value, [
+      "definitionId",
+      "definitionID",
+      "defId"
+    ], 0));
   }
   function itemPile(value = {}, fallback = "unknown") {
     return String(value?.pile || value?.ref?.pile || fallback || "unknown");
@@ -2740,41 +2744,79 @@
     seen.delete(value);
     return result;
   }
-  function firstDefined(values = [], fallback = null) {
-    return values.find((value) => value !== void 0 && value !== null) ?? fallback;
-  }
   function rawHolders(item = {}) {
-    return [item, item?._data, item?.data, item?._staticData, item?.staticData].filter((value) => value && typeof value === "object");
+    return [item, item?.ref, item?._data, item?.data, item?._staticData, item?.staticData].filter((value) => value && typeof value === "object");
   }
   function readRaw(item, fields, fallback = null) {
     for (const holder of rawHolders(item)) {
       for (const field5 of fields) {
-        if (holder[field5] !== void 0 && holder[field5] !== null) return holder[field5];
+        try {
+          if (field5 in holder && holder[field5] !== void 0) return holder[field5];
+        } catch {
+        }
       }
     }
     return fallback;
   }
+  function readTradeability(item = {}) {
+    const direct = readRaw(item, ["tradeable", "tradable"], null);
+    if (typeof direct === "boolean") return direct;
+    const untradeable = readRaw(item, ["untradeable"], null);
+    if (typeof untradeable === "boolean") return !untradeable;
+    try {
+      if (typeof item?.isTradeable === "function") {
+        const value = item.isTradeable();
+        if (typeof value === "boolean") return value;
+      }
+    } catch {
+    }
+    try {
+      if (typeof item?.isUntradeable === "function") {
+        const value = item.isUntradeable();
+        if (typeof value === "boolean") return !value;
+      }
+    } catch {
+    }
+    const count = readRaw(item, ["untradeableCount"], null);
+    if (count !== null && Number.isFinite(Number(count))) return Number(count) === 0;
+    return false;
+  }
   function createDuplicateCardValueFingerprint(item = {}) {
-    if (item?.duplicateValueFingerprint && typeof item.duplicateValueFingerprint === "object") {
+    if (item?.duplicateValueFingerprint && typeof item.duplicateValueFingerprint === "object" && item.duplicateFingerprintComplete !== false && (item.duplicateFingerprintComplete === void 0 || item.duplicateFingerprintSource === "live-ea")) {
       return Object.freeze(stableValue(item.duplicateValueFingerprint));
     }
     const upgrades = readRaw(item, ["upgrades"], null);
     const cosmetics = readRaw(item, ["cosmetics"], null);
-    const groups = firstDefined([item.groups, item._data?.groups], []);
+    const cosmetic = readRaw(item, ["cosmetic"], null) === true;
+    const evolutionStatus = readRaw(item, [
+      "evolutionStatus",
+      "evolutionLevel"
+    ], null);
+    const evolutionStatusActive = evolutionStatus === true || typeof evolutionStatus === "number" && evolutionStatus > 0 || typeof evolutionStatus === "string" && !["", "0", "-1", "false", "none", "null"].includes(evolutionStatus.trim().toLowerCase());
+    const groups = readRaw(item, ["groups"], []);
     return Object.freeze({
       definitionId: definitionId(item),
-      databaseId: positiveId(readRaw(item, ["databaseId", "databaseID"], 0)),
+      databaseId: positiveId(readRaw(item, [
+        "databaseId",
+        "databaseID",
+        "databaseid",
+        "_databaseId"
+      ], 0)),
       rating: Number(readRaw(item, ["rating", "_rating"], 0)) || 0,
       rareflag: Number(readRaw(item, ["rareflag", "rareFlag", "_rareflag"], 0)) || 0,
-      tradeable: item.tradeable === true || item.tradable === true || item.untradeable === false,
-      evolution: item.evolution === true || upgrades !== null || positiveId(readRaw(item, ["evolutionId", "evoId"], 0)) > 0,
+      tradeable: readTradeability(item),
+      evolution: item.evolution === true || upgrades !== null || readRaw(item, ["isEvolution", "isEvo"], false) === true || evolutionStatusActive || positiveId(readRaw(item, ["evolutionId", "evoId"], 0)) > 0,
       upgrades: stableValue(upgrades),
       cosmetics: stableValue(cosmetics),
+      // Keep the historical fingerprint shape for ordinary cards so journals
+      // written before this fix remain readable. A positive cosmetic flag is
+      // additive and intentionally makes the value identity stricter.
+      ...cosmetic ? { cosmetic: true } : {},
       chemistryStyle: Number(readRaw(item, ["playStyle", "chemistryStyle", "chemStyle", "styleId"], 0)) || 0,
       preferredPosition: Number(readRaw(item, ["preferredPosition", "_preferredPosition"], 0)) || 0,
       attributes: stableValue(readRaw(item, ["attributes"], [])),
-      skillMoves: Number(readRaw(item, ["skillMoves", "_skillMoves"], 0)) || 0,
-      weakFoot: Number(readRaw(item, ["weakFoot", "_weakFoot"], 0)) || 0,
+      skillMoves: Number(readRaw(item, ["skillMoves", "_skillMoves", "skillmoves"], 0)) || 0,
+      weakFoot: Number(readRaw(item, ["weakFoot", "_weakFoot", "weakfoot"], 0)) || 0,
       groups: Object.freeze([...Array.isArray(groups) ? groups : []].map(Number).sort((a, b) => a - b))
     });
   }
@@ -2784,7 +2826,11 @@
   function diffDuplicateCardValueFingerprint(expected = {}, actualItem = {}) {
     const expectedFingerprint = createDuplicateCardValueFingerprint(expected);
     const actualFingerprint = createDuplicateCardValueFingerprint(actualItem);
-    const changedFields = Object.keys(expectedFingerprint).filter((field5) => JSON.stringify(expectedFingerprint[field5]) !== JSON.stringify(actualFingerprint[field5]));
+    const fields = [.../* @__PURE__ */ new Set([
+      ...Object.keys(expectedFingerprint),
+      ...Object.keys(actualFingerprint)
+    ])];
+    const changedFields = fields.filter((field5) => JSON.stringify(expectedFingerprint[field5]) !== JSON.stringify(actualFingerprint[field5]));
     return Object.freeze({
       changedFields: Object.freeze(changedFields),
       expected: expectedFingerprint,
@@ -3299,13 +3345,22 @@
   function firstRawValue(item, fields) {
     for (const holder of rawHolders2(item)) {
       for (const field5 of fields) {
-        if (holder[field5] !== void 0 && holder[field5] !== null) return holder[field5];
+        try {
+          if (holder[field5] !== void 0 && holder[field5] !== null) return holder[field5];
+        } catch {
+        }
       }
     }
     return void 0;
   }
   function hasRawField(item, fields) {
-    return rawHolders2(item).some((holder) => fields.some((field5) => Object.prototype.hasOwnProperty.call(holder, field5)));
+    return rawHolders2(item).some((holder) => fields.some((field5) => {
+      try {
+        return field5 in holder && holder[field5] !== void 0;
+      } catch {
+        return false;
+      }
+    }));
   }
   function readDuplicateCardTradeability(item = {}) {
     const direct = firstRawValue(item, ["tradeable", "tradable"]);
@@ -3360,7 +3415,7 @@
   }
   function duplicateCardValueFingerprintIsComplete(item = {}) {
     if (typeof item?.duplicateFingerprintComplete === "boolean") {
-      return item.duplicateFingerprintComplete;
+      return item.duplicateFingerprintComplete === true && item.duplicateFingerprintSource === "live-ea";
     }
     if (item?.duplicateValueFingerprint && typeof item.duplicateValueFingerprint === "object") {
       return false;
@@ -3392,6 +3447,58 @@
   function cardIsSpecial(item, isSpecial) {
     return readDuplicateSpecialClassification(item, isSpecial);
   }
+  function duplicateSwapBaseIdentityMatches(source, target) {
+    const sourceFingerprint = createDuplicateCardValueFingerprint(source);
+    const targetFingerprint = createDuplicateCardValueFingerprint(target);
+    if (!sourceFingerprint.definitionId || sourceFingerprint.definitionId !== targetFingerprint.definitionId) {
+      return false;
+    }
+    if (sourceFingerprint.rating > 0 && targetFingerprint.rating > 0 && sourceFingerprint.rating !== targetFingerprint.rating) {
+      return false;
+    }
+    if (sourceFingerprint.rareflag !== targetFingerprint.rareflag) return false;
+    if (sourceFingerprint.databaseId > 0 && targetFingerprint.databaseId > 0 && sourceFingerprint.databaseId !== targetFingerprint.databaseId) {
+      return false;
+    }
+    return true;
+  }
+  function emptyMutableValue(value) {
+    if (value === null || value === void 0) return true;
+    if (Array.isArray(value)) return value.length === 0;
+    if (typeof value === "object") return Object.keys(value).length === 0;
+    return false;
+  }
+  function duplicateSwapSourceIsUnmodified(item) {
+    const fingerprint = createDuplicateCardValueFingerprint(item);
+    return fingerprint.evolution !== true && emptyMutableValue(fingerprint.upgrades) && emptyMutableValue(fingerprint.cosmetics) && fingerprint.cosmetic !== true && fingerprint.chemistryStyle === 250;
+  }
+  function duplicateSwapTargetHasKnownMutableValue(item) {
+    const fingerprint = createDuplicateCardValueFingerprint(item);
+    return fingerprint.evolution === true || !emptyMutableValue(fingerprint.upgrades) || !emptyMutableValue(fingerprint.cosmetics) || fingerprint.cosmetic === true || fingerprint.chemistryStyle > 0 && fingerprint.chemistryStyle !== 250;
+  }
+  function duplicateSwapDirectionalValueMatch(source, target) {
+    if (duplicateCardValueFingerprintMatches(source, target)) return true;
+    if (!duplicateSwapSourceIsUnmodified(source) || !duplicateSwapTargetHasKnownMutableValue(target)) return false;
+    const sourceFingerprint = createDuplicateCardValueFingerprint(source);
+    const targetFingerprint = createDuplicateCardValueFingerprint(target);
+    const mutableFields = /* @__PURE__ */ new Set([
+      "evolution",
+      "upgrades",
+      "cosmetics",
+      "cosmetic",
+      "chemistryStyle",
+      "preferredPosition",
+      "attributes",
+      "skillMoves",
+      "weakFoot",
+      "groups"
+    ]);
+    const changedFields = [.../* @__PURE__ */ new Set([
+      ...Object.keys(sourceFingerprint),
+      ...Object.keys(targetFingerprint)
+    ])].filter((field5) => JSON.stringify(sourceFingerprint[field5]) !== JSON.stringify(targetFingerprint[field5]));
+    return changedFields.length > 0 && changedFields.every((field5) => mutableFields.has(field5));
+  }
   function evaluateDuplicateSwapEligibility({
     source = null,
     target = null,
@@ -3413,7 +3520,7 @@
     if (typeof targetTradeable !== "boolean") {
       return { eligible: false, reason: "duplicate Club counterpart tradeability is unknown" };
     }
-    if (!isSamePlayerCardVersion(source, target)) {
+    if (!duplicateSwapBaseIdentityMatches(source, target)) {
       return { eligible: false, reason: "duplicate source and Club counterpart are different card versions" };
     }
     if (normalizedMode === "all-eligible") return { eligible: true, mode: normalizedMode };
@@ -3423,8 +3530,8 @@
     if (!duplicateCardValueFingerprintIsComplete(source) || !duplicateCardValueFingerprintIsComplete(target)) {
       return { eligible: false, reason: "controlled duplicate swap value fingerprint is incomplete" };
     }
-    if (!duplicateCardValueFingerprintMatches(source, target)) {
-      return { eligible: false, reason: "controlled duplicate swap value fingerprint is not identical" };
+    if (!duplicateSwapDirectionalValueMatch(source, target)) {
+      return { eligible: false, reason: "controlled duplicate swap requires an unmodified Unassigned source" };
     }
     const sourceSpecial = cardIsSpecial(source, isSpecial);
     const targetSpecial = cardIsSpecial(target, isSpecial);
@@ -3464,6 +3571,7 @@
     const seenSignals = /* @__PURE__ */ new Set();
     const seenTargets = /* @__PURE__ */ new Set();
     const pairLimit = Number.isSafeInteger(Number(maxPairs)) && Number(maxPairs) > 0 ? Number(maxPairs) : Number.POSITIVE_INFINITY;
+    const normalizedMode = normalizeDuplicateSwapMode(swapMode);
     for (const entry of selection?.entries || []) {
       if (swaps.length >= pairLimit) break;
       if (String(entry?.pileName || "") !== "unassigned") continue;
@@ -3474,7 +3582,7 @@
       const target = playerById.get(targetId);
       if (!signalId || !targetId || !target) continue;
       if (signal?.tradeable === true || itemPile2(target) !== "club") continue;
-      if (!isSamePlayerCardVersion(signal, target)) continue;
+      if (normalizedMode === "off" ? !isSamePlayerCardVersion(signal, target) : !duplicateSwapBaseIdentityMatches(signal, target)) continue;
       if (readDuplicateCardTradeability(signal) !== false) {
         return { ok: false, reason: "duplicate source tradeability is unknown", swaps: [] };
       }
@@ -3577,6 +3685,9 @@
     if (originalSignal?.tradeable !== false || !isSamePlayerCardVersion(originalSignal, newClubItem) || newClubItem?.tradeable !== false) {
       return failedMaterialization(`duplicate swap Club item #${newItemId} failed same-version untradeable validation`);
     }
+    if (!duplicateCardValueFingerprintIsComplete(originalSignal) || !duplicateCardValueFingerprintIsComplete(newClubItem) || !duplicateCardValueFingerprintMatches(originalSignal, newClubItem)) {
+      return failedMaterialization(`duplicate swap Club item #${newItemId} changed value fingerprint`);
+    }
     if (!displacedTarget) {
       return failedMaterialization(`duplicate swap protected Club counterpart #${targetId} disappeared after move`);
     }
@@ -3592,6 +3703,9 @@
     if (typeof originalTarget?.tradeable !== "boolean" || displacedTarget?.tradeable !== originalTarget.tradeable) {
       return failedMaterialization(`duplicate swap protected Club counterpart #${targetId} changed tradeability`);
     }
+    if (!duplicateCardValueFingerprintIsComplete(originalTarget) || !duplicateCardValueFingerprintIsComplete(displacedTarget) || !duplicateCardValueFingerprintMatches(originalTarget, displacedTarget)) {
+      return failedMaterialization(`duplicate swap protected Club counterpart #${targetId} changed value fingerprint`);
+    }
     return {
       ok: true,
       signalId,
@@ -3603,6 +3717,11 @@
   // src/config/runtime-options.js
   var INVENTORY_MODES = Object.freeze(["inherit", "inventory-only", "normal"]);
   var RUNTIME_QUANTITY_MODES = Object.freeze(["user", "ea-remaining", "exhaust", "fixed"]);
+  var ROLLING_STORAGE_RECOVERY_PRIORITIES = Object.freeze([
+    "storage-pressure",
+    "provisions"
+  ]);
+  var DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY = "storage-pressure";
   var RUNTIME_QUANTITY_TARGETS = Object.freeze([
     "maxCompletions",
     "rounds",
@@ -3610,6 +3729,9 @@
     "validationRounds"
   ]);
   var PICK_OPTIONS_APPLIED = /* @__PURE__ */ Symbol("pick-options-applied");
+  function normalizeRollingStorageRecoveryPriority(value) {
+    return ROLLING_STORAGE_RECOVERY_PRIORITIES.includes(String(value || "").trim().toLowerCase()) ? String(value).trim().toLowerCase() : DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY;
+  }
   function boundedNumber(value, fallback, min, max) {
     const parsed = Number(value);
     return Math.max(min, Math.min(max, Number.isFinite(parsed) ? parsed : fallback));
@@ -3698,6 +3820,11 @@
       input2.rollingRecoveryStorageFirst
     );
     assign(
+      "rollingStorageRecoveryPriority",
+      nested.rollingStorageRecoveryPriority,
+      input2.rollingStorageRecoveryPriority
+    );
+    assign(
       "rollingOpenDuplicateProvisionsRewards",
       nested.rollingOpenDuplicateProvisionsRewards,
       input2.rollingOpenDuplicateProvisionsRewards
@@ -3762,6 +3889,9 @@
         input2.rollingProvisionsMaxRating
       ),
       rollingRecoveryStorageFirst: input2.rollingRecoveryStorageFirst === true,
+      rollingStorageRecoveryPriority: normalizeRollingStorageRecoveryPriority(
+        input2.rollingStorageRecoveryPriority
+      ),
       rollingOpenDuplicateProvisionsRewards: input2.rollingOpenDuplicateProvisionsRewards === true,
       rollingShortageProvisionsPackLimit: normalizeRollingShortageProvisionsPackLimit(
         input2.rollingShortageProvisionsPackLimit
@@ -3933,6 +4063,7 @@
       loopDef.rollingDuplicateSwapMode = resolvedPickOptions.rollingDuplicateSwapMode;
       loopDef.runtimeProvisionsMaxRating = resolvedPickOptions.rollingProvisionsMaxRating;
       loopDef.runtimeRecoveryStorageFirst = resolvedPickOptions.rollingRecoveryStorageFirst;
+      loopDef.rollingStorageRecoveryPriority = resolvedPickOptions.rollingStorageRecoveryPriority;
       loopDef.rollingOpenDuplicateProvisionsRewards = resolvedPickOptions.rollingOpenDuplicateProvisionsRewards;
       loopDef.rollingShortageProvisionsPackLimit = resolvedPickOptions.rollingShortageProvisionsPackLimit;
       if (Array.isArray(loopDef.rollingProvisionsUpgrade?.requirements)) {
@@ -5087,6 +5218,7 @@
       "rollingDuplicateSwapMode",
       "rollingProvisionsMaxRating",
       "rollingRecoveryStorageFirst",
+      "rollingStorageRecoveryPriority",
       "rollingOpenDuplicateProvisionsRewards",
       "rollingShortageProvisionsPackLimit"
     ]);
@@ -5119,6 +5251,9 @@
     }
     if (value.rollingStorageSinkMode !== void 0 && !["off", "automatic", "selected"].includes(value.rollingStorageSinkMode)) {
       errors.push(`${path}.rollingStorageSinkMode must be off, automatic, or selected`);
+    }
+    if (value.rollingStorageRecoveryPriority !== void 0 && !["storage-pressure", "provisions"].includes(value.rollingStorageRecoveryPriority)) {
+      errors.push(`${path}.rollingStorageRecoveryPriority must be storage-pressure or provisions`);
     }
     if (value.rollingDuplicateSwapMode !== void 0 && !["off", "special-only", "safe-only", "all-eligible"].includes(value.rollingDuplicateSwapMode)) {
       errors.push(`${path}.rollingDuplicateSwapMode must be off, special-only, safe-only, or all-eligible`);
@@ -14871,7 +15006,9 @@
             submitted: false,
             challengeRef: context.challengeRef || { id: context.challenge?.id || null },
             consumedItemRefs: context.squadPlan.itemRefs || [],
-            reason: prepared.reason || "SBC player preparation failed"
+            reason: prepared.reason || "SBC player preparation failed",
+            reasonCode: prepared.reasonCode || "PLAYER_PREPARATION_BLOCKED",
+            details: prepared.details
           }), { phase: "player-preparation", context });
         }
         if (prepared?.replan === true || prepared?.status === "replan") {
@@ -24824,6 +24961,118 @@
     }
     return null;
   }
+  var RUNTIME_ITEM_FIELD_GROUPS = Object.freeze([
+    ["upgrades", ["upgrades"]],
+    ["evolution", ["evolution", "isEvolution", "isEvo", "evolutionId", "evoId", "evolutionStatus"]],
+    ["cosmetics", ["cosmetics", "cosmetic"]],
+    ["definitionId", ["definitionId", "definitionID", "defId"]],
+    ["rating", ["rating", "_rating"]],
+    ["rareflag", ["rareflag", "rareFlag", "_rareflag"]],
+    ["chemistryStyle", ["chemistryStyle", "chemStyle", "styleId", "playStyle"]],
+    ["preferredPosition", ["preferredPosition", "_preferredPosition"]],
+    ["attributes", ["attributes"]],
+    ["skillMoves", ["skillMoves", "_skillMoves", "skillmoves"]],
+    ["weakFoot", ["weakFoot", "_weakFoot", "weakfoot"]],
+    ["groups", ["groups"]],
+    ["tradeability", ["tradeable", "tradable", "untradeable", "untradeableCount"]]
+  ]);
+  function diagnosticValueSummary(value) {
+    if (value === void 0) return { type: "undefined" };
+    if (value === null) return { type: "null", value: null };
+    if (["string", "number", "boolean"].includes(typeof value)) {
+      return { type: typeof value, value: primitiveOrNull(value) };
+    }
+    if (Array.isArray(value)) {
+      return {
+        type: "array",
+        length: value.length,
+        itemIds: value.slice(0, 8).map((entry) => numberOrNull(entry?.id ?? entry?.itemId))
+      };
+    }
+    if (typeof value === "object") {
+      let keys = [];
+      try {
+        keys = Object.keys(value).sort();
+      } catch {
+      }
+      return {
+        type: value?.constructor?.name || "Object",
+        keys: keys.slice(0, 16),
+        keyCount: keys.length
+      };
+    }
+    return { type: typeof value };
+  }
+  function inspectRuntimeItemField(item, name, aliases) {
+    const holders = [
+      ["item", item],
+      ["ref", item?.ref],
+      ["_data", item?._data],
+      ["data", item?.data],
+      ["_staticData", item?._staticData],
+      ["staticData", item?.staticData]
+    ].filter(([, holder]) => holder && typeof holder === "object");
+    const sources = [];
+    for (const [holderName, holder] of holders) {
+      for (const alias of aliases) {
+        let inObject = false;
+        let own = false;
+        let descriptor2 = null;
+        let descriptorOwner = null;
+        try {
+          inObject = alias in holder;
+          own = Object.prototype.hasOwnProperty.call(holder, alias);
+          let current = holder;
+          let depth = 0;
+          while (current && depth < 8) {
+            descriptor2 = Object.getOwnPropertyDescriptor(current, alias) || null;
+            if (descriptor2) {
+              descriptorOwner = depth === 0 ? holderName : `prototype:${current?.constructor?.name || "Object"}`;
+              break;
+            }
+            current = Object.getPrototypeOf(current);
+            depth++;
+          }
+        } catch {
+        }
+        if (!inObject && !own) continue;
+        let value;
+        let readError = null;
+        try {
+          value = holder[alias];
+        } catch (error) {
+          readError = error?.message || String(error);
+        }
+        sources.push({
+          holder: holderName,
+          field: alias,
+          own,
+          inherited: inObject && !own,
+          descriptor: descriptor2?.get || descriptor2?.set ? "accessor" : "data",
+          getter: typeof descriptor2?.get === "function",
+          descriptorOwner,
+          value: readError ? { readError } : diagnosticValueSummary(value)
+        });
+      }
+    }
+    const hasDefinedValue = sources.some((source) => source.value?.type !== "undefined");
+    return {
+      state: !sources.length ? "missing" : hasDefinedValue ? "present" : "present-undefined",
+      aliases,
+      sources
+    };
+  }
+  function captureRuntimeInventoryFieldDiagnostics(item) {
+    if (!item || typeof item !== "object") return null;
+    try {
+      return Object.fromEntries(RUNTIME_ITEM_FIELD_GROUPS.map(([name, aliases]) => [
+        name,
+        inspectRuntimeItemField(item, name, aliases)
+      ]));
+    } catch (error) {
+      return { diagnosticError: error?.message || String(error) };
+    }
+  }
   function resultLayer(value) {
     if (!value || typeof value !== "object") return primitiveOrNull(value);
     try {
@@ -24902,6 +25151,7 @@
         evolution: isPlayerEvolutionCard(item),
         hasUpgrades: hasPlayerUpgrades(item),
         hasCosmetics: hasPlayerCosmetics(item),
+        ...options.includeFieldDiagnostics === true ? { fieldDiagnostics: captureRuntimeInventoryFieldDiagnostics(item) } : {},
         pile: primitiveOrNull(item.pile),
         privatePile: primitiveOrNull(item._pile),
         dataPile: primitiveOrNull(item._data?.pile),
@@ -26168,6 +26418,16 @@
     const base = Math.max(200, Math.min(5e3, Number(baseDelayMs) || 800));
     const delayMs = Math.min(3e3, base + current * 500);
     return { retry: true, delayMs, reason: code };
+  }
+  function planChallengeReloadRetry({ reloadOutcome = "unavailable" } = {}) {
+    const outcome3 = String(reloadOutcome || "").trim();
+    if (outcome3 === "current-challenge-loaded" || outcome3 === "next-challenge-loaded") {
+      return { retry: true, reason: "challenge-reloaded" };
+    }
+    return {
+      retry: false,
+      reason: outcome3 === "failed" ? "challenge-reload-failed" : "challenge-reload-unavailable"
+    };
   }
   function hasItemViolationConflict(result, detail = "") {
     const codes = [detail, result?.status, result?.error?.code].map(normalizeSubmitErrorCode).filter(Boolean);
@@ -28013,6 +28273,7 @@
     const surplusCraftingEnabled = options.surplusCraftingEnabled === true;
     const provisionsShortageRecoveryEnabled = options.provisionsShortageRecoveryEnabled === true;
     const requiredSpecialRecoveryEnabled = options.requiredSpecialRecoveryEnabled === true;
+    const storageRecoveryPriority = options.storageRecoveryPriority === "provisions" ? "provisions" : "storage-pressure";
     const shortageProvisionsPackLimit = boundedPositive(
       options.shortageProvisionsPackLimit,
       DEFAULT_SHORTAGE_PROVISIONS_PACK_LIMIT,
@@ -28253,30 +28514,57 @@
         }
       };
     }
+    async function recoverStorageBlocked(context = {}) {
+      const order = storageRecoveryPriority === "provisions" ? ["provisions", "storageSink"] : ["storageSink", "provisions"];
+      let last = null;
+      let lastKind = null;
+      let attempted = false;
+      let firstAttemptedValue = null;
+      let lastAttemptedValue = null;
+      let storageSinkAttempted = false;
+      for (const kind of order) {
+        const attemptContext = {
+          ...context,
+          ...kind === "storageSink" && lastKind === "provisions" ? { provisions: last } : {},
+          ...kind === "provisions" && lastKind === "storageSink" ? { storageSink: last } : {}
+        };
+        const actionAttempted = kind === "provisions" ? provisionsShortageRecoveryEnabled === true && typeof options.recoverProvisions === "function" : options.storageSinkEnabled === true && typeof options.recoverStorageSink === "function";
+        attempted = attempted || actionAttempted;
+        if (kind === "storageSink") storageSinkAttempted = storageSinkAttempted || actionAttempted;
+        const value = kind === "provisions" ? await recoverProvisions(attemptContext) : options.storageSinkEnabled === true ? await recoverStorageSink(attemptContext) : { status: "skipped", reason: "Storage pressure recovery is disabled in Settings" };
+        if (actionAttempted) {
+          if (firstAttemptedValue === null) firstAttemptedValue = value;
+          lastAttemptedValue = value;
+        }
+        if (isProgressed(value)) return { progressed: true, value, kind };
+        if (isStopped(value) || value?.status === "planned") {
+          return { terminal: value, value, kind, attempted, storageSinkAttempted };
+        }
+        last = value;
+        lastKind = kind;
+      }
+      return {
+        value: attempted ? storageRecoveryPriority === "storage-pressure" ? firstAttemptedValue || last : lastAttemptedValue || firstAttemptedValue : null,
+        attempted,
+        storageSinkAttempted
+      };
+    }
     async function recoverBlockedRewardStorage(reward, context = {}) {
       if (!isBlocked(reward) || reasonCode(reward) !== "PROTECTED_STORAGE_BLOCKED") {
         return { matched: false };
       }
-      if (options.storageSinkEnabled !== true) {
-        return {
-          matched: true,
-          failure: finishRecoveryFailure(
-            reward,
-            context.blockedReason || "recovery reward needs more Storage headroom",
-            "PROTECTED_STORAGE_BLOCKED"
-          )
-        };
-      }
-      const storageSink = await recoverStorageSink({
+      const recovery = await recoverStorageBlocked({
         trigger: "storage-pressure",
         storage: reward,
         source: context.source || "recovery-reward-pre-open"
       });
-      if (isProgressed(storageSink)) return { matched: true, progressed: true };
+      if (recovery.progressed) return { matched: true, progressed: true };
+      const value = recovery.terminal || recovery.value || reward;
+      const failureValue = options.storageSinkEnabled !== true && !recovery.storageSinkAttempted && ["unavailable", "skipped"].includes(String(value?.status || "")) ? reward : value;
       return {
         matched: true,
         failure: finishRecoveryFailure(
-          storageSink,
+          failureValue,
           context.recoveryReason || "Storage pressure SBC could not clear room for the recovery reward",
           "STORAGE_SINK_RECOVERY_BLOCKED"
         )
@@ -28542,33 +28830,18 @@
               storageCode
             );
           }
-          const provisions = await recoverProvisions({ trigger: "storage-pressure", storage });
-          if (isProgressed(provisions)) continue;
-          if (isStopped(provisions) || provisions?.status === "planned" || ["blocked", "failed"].includes(String(provisions?.status || ""))) {
+          const recovery = await recoverStorageBlocked({ trigger: "storage-pressure", storage });
+          if (recovery.progressed) continue;
+          const failure2 = options.storageSinkEnabled !== true && !recovery.storageSinkAttempted && ["unavailable", "skipped"].includes(String(recovery.value?.status || "")) ? storage : recovery.terminal || recovery.value || storage;
+          if (isStopped(failure2) || isBlocked(failure2) || failure2?.status === "planned") {
             return finishRecoveryFailure(
-              provisions,
-              "protected cards cannot be stored",
-              storageCode
-            );
-          }
-          if (options.storageSinkEnabled !== true) {
-            return finishRecoveryFailure(
-              storage,
-              "protected cards cannot be stored",
-              storageCode
-            );
-          }
-          const storageSink = await recoverStorageSink({ trigger: "storage-pressure", storage, provisions });
-          if (isProgressed(storageSink)) continue;
-          if (isStopped(storageSink) || isBlocked(storageSink) || storageSink?.status === "planned") {
-            return finishRecoveryFailure(
-              storageSink,
+              failure2,
               "Storage pressure SBC recovery failed",
               "STORAGE_SINK_RECOVERY_BLOCKED"
             );
           }
           return finishRecoveryFailure(
-            storage,
+            failure2,
             "protected cards cannot be stored",
             storageCode
           );
@@ -28712,33 +28985,14 @@
           );
         }
         if (planCode === "PROTECTED_STORAGE_BLOCKED") {
-          const provisions = await recoverProvisions({
+          const recovery = await recoverStorageBlocked({
             trigger: "storage-pressure",
             storage: planned
           });
-          if (isProgressed(provisions)) continue;
-          if (isStopped(provisions) || provisions?.status === "planned" || ["blocked", "failed"].includes(String(provisions?.status || ""))) {
-            return finishRecoveryFailure(
-              provisions,
-              "primary-pack duplicates cannot be stored safely",
-              "PROTECTED_STORAGE_BLOCKED"
-            );
-          }
-          if (options.storageSinkEnabled !== true) {
-            return finishRecoveryFailure(
-              planned,
-              "primary-pack duplicates cannot be stored safely",
-              "PROTECTED_STORAGE_BLOCKED"
-            );
-          }
-          const storageSink = await recoverStorageSink({
-            trigger: "storage-pressure",
-            storage: planned,
-            provisions
-          });
-          if (isProgressed(storageSink)) continue;
+          if (recovery.progressed) continue;
+          const failure2 = options.storageSinkEnabled !== true && !recovery.storageSinkAttempted && ["unavailable", "skipped"].includes(String(recovery.value?.status || "")) ? planned : recovery.terminal || recovery.value || planned;
           return finishRecoveryFailure(
-            storageSink?.status ? storageSink : planned,
+            failure2?.status ? failure2 : planned,
             "primary-pack duplicate Storage recovery failed",
             "PROTECTED_STORAGE_BLOCKED"
           );
@@ -30259,12 +30513,13 @@
       pickOptions.rollingProvisionsMaxRating
     );
     const recoveryPileOrder = pickOptions.rollingRecoveryStorageFirst === true ? "Storage first" : "Unassigned first";
+    const storageRecoveryPriority = pickOptions.rollingStorageRecoveryPriority === "provisions" ? "Provisions first" : "Storage Pressure first";
     const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true ? "immediate" : "on shortage";
     const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
     const fsuLockedProtection = pickOptions.protectFsuLockedPlayers === true ? "on" : "off";
     const activeSquadProtection = pickOptions.protectActiveSquadPlayers === true ? "replace/review" : "confirm";
     summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickModeLabel}`;
-    summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; normal recovery order ${recoveryPileOrder}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate swap experimental ${duplicateSwap}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}; FSU locked players ${fsuLockedProtection}; Active Squad 409 ${activeSquadProtection}`;
+    summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; normal recovery order ${recoveryPileOrder}; Storage recovery priority ${storageRecoveryPriority}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate swap experimental ${duplicateSwap}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}; FSU locked players ${fsuLockedProtection}; Active Squad 409 ${activeSquadProtection}`;
   }
   function renderMainPanelScanProgress(options = {}) {
     const panel = options.panel;
@@ -34953,6 +35208,17 @@
     );
     applyStyles6(rollingStorageSinkMode, { width: "150px" });
     applyStyles6(rollingStorageSinkSet, { width: "min(320px, 100%)" });
+    const rollingStorageRecoveryPriority = selectInput2(
+      dom,
+      "bronze-loop-policy-rolling-storage-recovery-priority",
+      pickOptions.rollingStorageRecoveryPriority,
+      [
+        ["storage-pressure", "Storage Pressure first"],
+        ["provisions", "Provisions first"]
+      ],
+      mode
+    );
+    applyStyles6(rollingStorageRecoveryPriority, { width: "min(320px, 100%)" });
     const updateStorageSinkAvailability = () => {
       rollingStorageSinkSet.disabled = rollingStorageSinkMode.value !== "selected";
       rollingStorageSinkSet.style.opacity = rollingStorageSinkSet.disabled ? "0.65" : "1";
@@ -35076,6 +35342,7 @@
       rollingOpenDuplicateProvisionsRewards.label,
       wideField(dom, "Storage pressure recovery", rollingStorageSinkMode, mode, "Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set"),
       wideField(dom, "Storage pressure SBC", rollingStorageSinkSet, mode, "Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility"),
+      wideField(dom, "Storage recovery priority", rollingStorageRecoveryPriority, mode, "When protected cards cannot enter Storage, try the selected Storage Pressure SBC or Provisions first; the other path remains a fallback"),
       sectionTitle(dom, "Submission guards"),
       protectFsuLockedPlayers.label,
       protectActiveSquadPlayers.label,
@@ -35132,6 +35399,7 @@
           pickOptions.rollingProvisionsMaxRating
         ),
         rollingRecoveryStorageFirst: rollingRecoveryStorageFirst.input.checked,
+        rollingStorageRecoveryPriority: rollingStorageRecoveryPriority.value,
         rollingOpenDuplicateProvisionsRewards: rollingOpenDuplicateProvisionsRewards.input.checked,
         rollingShortageProvisionsPackLimit: readNumber(
           rollingShortageProvisionsPackLimit,
@@ -35180,6 +35448,7 @@
         rollingOpenDuplicateProvisionsRewards.input,
         rollingStorageSinkMode,
         rollingStorageSinkSet,
+        rollingStorageRecoveryPriority,
         openPicksAtEnd.input,
         cancel,
         save
@@ -45751,7 +46020,12 @@
             currentChallenge = reloaded;
             reloadOutcome = "current-challenge-loaded";
           } else {
-            const next = await findAvailableRatingSbcChallenge(set, `${label} submit-retry`);
+            const nextContext = await findAvailableRatingSbcChallengeContext(
+              set,
+              `${label} submit-retry`,
+              { force: true }
+            );
+            const next = nextContext.challenge;
             if (next) {
               currentChallenge = await loadRatingSbcChallenge(next, `${label} submit-retry`, {
                 force: true,
@@ -45764,6 +46038,33 @@
           reloadOutcome = "failed";
           reloadError = sanitizeBackgroundSubmitResult({ success: false, error });
           log(`${label}: challenge reload after submit conflict failed: ${error?.message || error}`);
+          try {
+            const nextContext = await findAvailableRatingSbcChallengeContext(
+              set,
+              `${label} submit-retry fresh challenge`,
+              { force: true }
+            );
+            const next = nextContext.challenge;
+            if (next) {
+              currentChallenge = await loadRatingSbcChallenge(
+                next,
+                `${label} submit-retry fresh challenge`,
+                {
+                  force: true,
+                  onDiagnostic: (diagnostic) => reloadAttempts.push({ source: "fresh-challenge", ...diagnostic })
+                }
+              ) || next;
+              reloadOutcome = "next-challenge-loaded";
+              reloadError = null;
+            }
+          } catch (fallbackError) {
+            reloadAttempts.push({
+              source: "fresh-challenge-list",
+              result: sanitizeBackgroundSubmitResult({ success: false, error: fallbackError })
+            });
+            reloadError = sanitizeBackgroundSubmitResult({ success: false, error: fallbackError });
+            log(`${label}: fresh challenge reload after submit conflict failed: ${fallbackError?.message || fallbackError}`);
+          }
         }
         emitDiagnostic(log, () => `${label}: background submit retry reconciliation diagnostic ${diagnosticJson({
           trigger: {
@@ -45790,6 +46091,11 @@
             getPackCountsById()
           )
         })}`);
+        const reloadPlan = planChallengeReloadRetry({ reloadOutcome });
+        if (!reloadPlan.retry) {
+          const reloadDetail = reloadError?.error?.message || reloadError?.message || lastDetail;
+          fail2(`${label}: background submit aborted after ${reloadPlan.reason}: ${reloadDetail}`);
+        }
         if (!canSubmit && attempt < maxAttempts) {
           await sleep(Math.min(3e3, (Number(CFG.pauseMs) || 800) + attempt * 500));
         }
@@ -46502,7 +46808,7 @@
         log("Player Pick scan: scanned metadata preference disabled; configured Pick Loops reverted to static fallback");
       }
       const storageSink = options.rollingStorageSinkMode === "selected" ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ""}`.trim() : options.rollingStorageSinkMode;
-      log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? "; open Picks at end" : ""}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? "Storage-first" : "Unassigned-first"}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? "enabled" : "off"}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? "allowed" : "off"}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? "allowed" : "off"}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? "immediate" : "on shortage"}; Storage pressure SBC ${storageSink}`);
+      log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? "; open Picks at end" : ""}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? "Storage-first" : "Unassigned-first"}; Storage recovery priority ${options.rollingStorageRecoveryPriority === "provisions" ? "Provisions-first" : "Storage-Pressure-first"}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? "enabled" : "off"}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? "allowed" : "off"}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? "allowed" : "off"}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? "immediate" : "on shortage"}; Storage pressure SBC ${storageSink}`);
       renderCurrentSelectionPolicySummary();
       return options;
     }
@@ -49616,6 +49922,7 @@
     function duplicateSwapSnapshot(item, pile) {
       const tradeable = readDuplicateCardTradeability(item);
       const special = readDuplicateSpecialClassification(item, isSbcSpecialItem);
+      const fingerprintComplete = duplicateCardValueFingerprintIsComplete(item);
       return {
         ...ratingSelectionItemSnapshot(item, pile),
         // Keep unknown identity state as null. The generic inventory snapshot
@@ -49626,22 +49933,39 @@
         duplicateSpecial: special === true,
         duplicateSpecialKnown: special !== null,
         duplicateValueFingerprint: createDuplicateCardValueFingerprint(item),
-        duplicateFingerprintComplete: duplicateCardValueFingerprintIsComplete(item),
+        duplicateFingerprintComplete: fingerprintComplete,
+        duplicateFingerprintSource: fingerprintComplete ? "live-ea" : "untrusted",
         pile,
         ref: liveItemRef(item, pile)
       };
     }
-    function duplicateSwapSelectionSnapshot(selection, players) {
+    function duplicateSwapSelectionSnapshot(selection, players, resolveLive = null) {
       const playerById = new Map((players || []).map((item) => [Number(item?.id || 0), item]).filter(([id]) => id));
+      const liveFor = (id, pile, fallback = null) => {
+        if (typeof resolveLive !== "function") return fallback;
+        try {
+          const resolved = resolveLive(Number(id || 0), pile);
+          return resolved?.item || resolved || null;
+        } catch {
+          return null;
+        }
+      };
       return {
         entries: (selection?.entries || []).map((entry) => {
-          const signal = entry?.signal || entry?.signalRef || null;
+          const signalRef = entry?.signal || entry?.signalRef || null;
+          const signalId = Number(signalRef?.id || signalRef?.ref?.id || 0);
           const plannedItem = entry?.item || entry?.itemRef || null;
-          const selectedItem = playerById.get(Number(plannedItem?.id || plannedItem?.ref?.id || 0)) || plannedItem;
+          const targetId = Number(plannedItem?.id || plannedItem?.ref?.id || 0);
+          const signal = liveFor(signalId, "unassigned", resolveLive ? null : signalRef);
+          const selectedItem = liveFor(
+            targetId,
+            "club",
+            resolveLive ? null : playerById.get(targetId) || plannedItem
+          );
           return {
             ...entry,
             signal: signal ? duplicateSwapSnapshot(signal, "unassigned") : null,
-            item: selectedItem ? duplicateSwapSnapshot(selectedItem, liveItemRef(selectedItem).pile) : null
+            item: selectedItem ? duplicateSwapSnapshot(selectedItem, "club") : null
           };
         })
       };
@@ -49767,20 +50091,50 @@
       const selection = context?.squadPlan?.selection;
       const players = Array.isArray(context?.players) ? context.players : [];
       if (!selection?.entries?.length || !players.length) return { ok: true };
+      const selectionFieldDiagnostics = (entries = []) => entries.map((entry) => {
+        const signalId = Number(entry?.signal?.id || entry?.signal?.ref?.id || 0);
+        const targetId = Number(entry?.item?.id || entry?.item?.ref?.id || 0);
+        const signal = findCachedItemById(signalId, ["unassigned"])?.item || entry?.signal || null;
+        const target = players.find((item) => Number(item?.id || 0) === targetId) || findCachedItemById(targetId, ["club"])?.item || entry?.item || null;
+        return {
+          signal: {
+            id: signalId || null,
+            definitionId: signal?.definitionId || signal?.ref?.definitionId || null,
+            source: signal === entry?.signal ? "selection" : "live-unassigned",
+            fields: captureRuntimeInventoryFieldDiagnostics(signal)
+          },
+          target: {
+            id: targetId || null,
+            definitionId: target?.definitionId || target?.ref?.definitionId || null,
+            source: target === entry?.item ? "selection" : "live-club",
+            fields: captureRuntimeInventoryFieldDiagnostics(target)
+          }
+        };
+      });
       const configuredSwapMode = normalizeDuplicateSwapMode(
         runtime?.duplicateSwapMode,
         runtime?.duplicateSwapEnabled === true
       );
       const activeMaterialization = runtime?.duplicateMaterializationTransaction?.status === "materialized";
       const discoverySwapMode = activeMaterialization || configuredSwapMode === "off" ? "all-eligible" : configuredSwapMode;
+      const resolveLiveDuplicateItem = (id, pile) => findCachedItemById(id, [pile])?.item || null;
+      const livePlayers = players.map((item) => resolveLiveDuplicateItem(Number(item?.id || 0), "club") || item);
       const originalPlan = planUntradeableDuplicateSwaps({
-        selection: duplicateSwapSelectionSnapshot(selection, players),
-        players: players.map((item) => duplicateSwapSnapshot(item, liveItemRef(item).pile)),
+        selection: duplicateSwapSelectionSnapshot(selection, livePlayers, resolveLiveDuplicateItem),
+        players: livePlayers.map((item) => duplicateSwapSnapshot(item, "club")),
         swapMode: discoverySwapMode,
         isSpecial: isSbcSpecialItem,
         maxPairs: rollingDuplicateSwapPairLimit(discoverySwapMode)
       });
-      if (!originalPlan.ok || !originalPlan.swaps.length) return originalPlan;
+      if (!originalPlan.ok) {
+        const details = {
+          ...originalPlan.details || {},
+          swapDiagnostics: selectionFieldDiagnostics(selection.entries)
+        };
+        log(`${context.label}: duplicate swap planning blocked: ${originalPlan.reason || "unknown reason"}; field diagnostics:${diagnosticJson(details.swapDiagnostics)}`);
+        return { ...originalPlan, details };
+      }
+      if (!originalPlan.swaps.length) return originalPlan;
       if (runtime?.duplicateSwapEnabled !== true) {
         return {
           ok: false,
@@ -49790,6 +50144,24 @@
         };
       }
       if (activeMaterialization) {
+        for (const pair of runtime.duplicateMaterializationTransaction.pairs || []) {
+          const consume = pair.materializedConsumeRef?.id ? findCachedItemById(pair.materializedConsumeRef.id, ["club"])?.item : null;
+          const protectedCard = pair.displacedProtectedRef?.id ? findCachedItemById(pair.displacedProtectedRef.id, ["unassigned"])?.item : null;
+          if (consume && !duplicateCardValueFingerprintMatches(pair.sourceFingerprint, consume)) {
+            return {
+              ok: false,
+              reason: `materialized consume item #${pair.materializedConsumeRef.id} changed value identity before replan`,
+              reasonCode: "DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED"
+            };
+          }
+          if (protectedCard && !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, protectedCard)) {
+            return {
+              ok: false,
+              reason: `protected counterpart #${pair.displacedProtectedRef.id} changed value identity before replan`,
+              reasonCode: "DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED"
+            };
+          }
+        }
         const replanValidation = validateDuplicateTransactionReplanSwapPlan(
           runtime.duplicateMaterializationTransaction,
           originalPlan.swaps
@@ -49818,7 +50190,7 @@
       }
       const liveSelection = {
         entries: originalPlan.swaps.map((swap, index) => {
-          const target = players.find((item) => Number(item?.id || 0) === swap.targetId);
+          const target = livePlayers.find((item) => Number(item?.id || 0) === swap.targetId);
           return {
             pileName: "unassigned",
             signal: duplicateSwapSnapshot(signalItems[index], "unassigned"),
@@ -49834,7 +50206,31 @@
         maxPairs: rollingDuplicateSwapPairLimit(configuredSwapMode)
       });
       if (!livePlan.ok || livePlan.swaps.length !== originalPlan.swaps.length) {
-        return { ok: false, reason: livePlan.reason || "duplicate swap eligibility changed before move" };
+        const details = {
+          originalPlan,
+          livePlan,
+          liveSelection,
+          swapDiagnostics: liveSelection.entries.map((entry, index) => ({
+            signal: {
+              id: entry.signal?.id || null,
+              definitionId: entry.signal?.definitionId || null,
+              fields: captureRuntimeInventoryFieldDiagnostics(signalItems[index])
+            },
+            target: {
+              id: entry.item?.id || null,
+              definitionId: entry.item?.definitionId || null,
+              fields: captureRuntimeInventoryFieldDiagnostics(
+                players.find((item) => Number(item?.id || 0) === Number(entry.item?.id || 0))
+              )
+            }
+          }))
+        };
+        log(`${context.label}: duplicate swap eligibility changed before move: ${livePlan.reason || "unknown reason"}; field diagnostics:${diagnosticJson(details.swapDiagnostics)}`);
+        return {
+          ok: false,
+          reason: livePlan.reason || "duplicate swap eligibility changed before move",
+          details
+        };
       }
       const beforeInventoryVersion = Number(runtime?.coordinator?.getLedger?.()?.summary?.().inventoryVersion || 0);
       let transaction;
@@ -49848,7 +50244,7 @@
           beforeInventoryVersion,
           pairs: livePlan.swaps.map((swap, index) => rollingDuplicateMaterializationPair(
             signalItems[index],
-            players.find((item) => Number(item?.id || 0) === swap.targetId)
+            livePlayers.find((item) => Number(item?.id || 0) === swap.targetId)
           ))
         });
       } catch (error) {
@@ -49864,9 +50260,13 @@
       for (let index = 0; index < livePlan.swaps.length; index++) {
         const swap = livePlan.swaps[index];
         const signalItem = findCachedItemById(swap.signalId, ["unassigned"])?.item || null;
+        const protectedClubLocation = findCachedItemById(swap.targetId, ["club"]);
         if (!signalItem || !duplicateCardValueFingerprintMatches(
           transaction.pairs[index].sourceFingerprint,
           signalItem
+        ) || !protectedClubLocation || !duplicateCardValueFingerprintMatches(
+          transaction.pairs[index].counterpartFingerprint,
+          protectedClubLocation.item
         )) {
           const compensation = await compensateUnsubmittedDuplicateTransaction(
             runtime,
@@ -51260,6 +51660,36 @@
           reason: validation.reason,
           reasonCode: "DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED"
         };
+      }
+      for (const pair of transaction.pairs || []) {
+        const consume = pair.materializedConsumeRef?.id ? findCachedItemById(pair.materializedConsumeRef.id, ["club"])?.item : null;
+        const protectedCard = pair.displacedProtectedRef?.id ? findCachedItemById(pair.displacedProtectedRef.id, ["unassigned"])?.item : null;
+        if (consume && !duplicateCardValueFingerprintMatches(pair.sourceFingerprint, consume)) {
+          runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+            transaction,
+            "recovery-required",
+            { reason: `materialized consume item #${pair.materializedConsumeRef.id} changed value identity` }
+          );
+          persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+          return {
+            ok: false,
+            reason: runtime.duplicateMaterializationTransaction.reason,
+            reasonCode: "DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED"
+          };
+        }
+        if (protectedCard && !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, protectedCard)) {
+          runtime.duplicateMaterializationTransaction = transitionDuplicateMaterializationTransaction(
+            transaction,
+            "recovery-required",
+            { reason: `protected counterpart #${pair.displacedProtectedRef.id} changed value identity` }
+          );
+          persistRollingDuplicateTransaction(runtime.duplicateMaterializationTransaction);
+          return {
+            ok: false,
+            reason: runtime.duplicateMaterializationTransaction.reason,
+            reasonCode: "DUPLICATE_MATERIALIZATION_IDENTITY_CHANGED"
+          };
+        }
       }
       return {
         ok: true,
@@ -54395,16 +54825,7 @@
       );
       log(`${loopDef.name}: resumed ${duplicates.length} Unassigned duplicate(s); primary:${runtime.primaryDuplicateRefs.length}, pending Storage:${runtime.openRouting.pendingItems.length}, route:${runtime.openRouting.status}`);
       if (finalRoute.status === "blocked" && finalRoute.reasonCode === "DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED") {
-        return {
-          status: "blocked",
-          reason: finalRoute.reason,
-          reasonCode: finalRoute.reasonCode,
-          details: {
-            resumedDuplicates: duplicates.length,
-            primaryDuplicates: 0,
-            pendingStorage: runtime.openRouting.pendingItems.length
-          }
-        };
+        log(`${loopDef.name}: native duplicate swaps are disabled; retaining ${runtime.openRouting.pendingItems.length} pending Storage item(s) for recovery`);
       }
       return {
         status: "ready",
@@ -54500,6 +54921,7 @@
         result = await runRollingUpgradeWorkflow({
           maxCompletions: Number(loopDef.maxCompletions || 0),
           storageSinkEnabled: loopDef.rollingStorageSinkEnabled === true,
+          storageRecoveryPriority: loopDef.rollingStorageRecoveryPriority,
           surplusCraftingEnabled: loopDef.rollingSurplusCraftingEnabled === true,
           provisionsShortageRecoveryEnabled: loopDef.rollingProvisionsShortageRecoveryEnabled === true,
           requiredSpecialRecoveryEnabled: loopDef.rollingRequiredSpecialRecoveryEnabled === true,
@@ -54682,6 +55104,17 @@
             const goldDuplicates = unassignedItems.filter((item) => recoveryRefs.some((ref) => rollingItemMatchesRef(item, ref)) && rollingOrdinaryGoldDuplicate(item, runtime.primaryContext?.activeLoopDef || loopDef));
             runtime.recoveryDuplicateRefs = recoveryRefs.filter((ref) => goldDuplicates.some((item) => rollingItemMatchesRef(item, ref)));
             const rareDuplicates = goldDuplicates.filter(isRare);
+            if (loopDef.rollingStorageSinkEnabled === true && loopDef.rollingStorageSink) {
+              const pendingStoragePick = await resumePendingRollingStorageSinkReward(
+                loopDef,
+                runtime,
+                loopDef.rollingStorageSink
+              );
+              if (pendingStoragePick?.status === "selected" || pendingStoragePick?.status === "planned" || pendingStoragePick?.status === "blocked" || pendingStoragePick?.status === "stopped") {
+                await reportPhase?.(ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK);
+                return pendingStoragePick;
+              }
+            }
             const pickCapability = loopDef.rollingPlayerPick;
             const pendingPickLoop = pickCapability?.status === "resolved" ? await findPendingRollingPlayerPickLoop(pickCapability) : null;
             if (pendingPickLoop || rareDuplicates.length) {
@@ -55559,7 +55992,7 @@
         const fodderPolicy = getSbcFodderPolicy(loopDef);
         if (loopDef.strategy === "rollingUpgrade") {
           const storageSinkSummary = loopDef.rollingStorageSinkEnabled ? `${loopDef.rollingStorageSink?.mode || "automatic"}/${loopDef.rollingStorageSink?.capability?.setName || "unavailable"}` : "off";
-          log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? "Storage-first" : "Unassigned-first"}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? "enabled" : "off"}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? "allowed" : "off"}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? "allowed" : "off"}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || "special-only"})` : "off; Storage route only"}; Storage pressure SBC ${storageSinkSummary}`);
+          log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? "Storage-first" : "Unassigned-first"}; Storage recovery priority ${loopDef.rollingStorageRecoveryPriority === "provisions" ? "Provisions-first" : "Storage-Pressure-first"}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? "enabled" : "off"}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? "allowed" : "off"}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? "allowed" : "off"}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || "special-only"})` : "off; Storage route only"}; Storage pressure SBC ${storageSinkSummary}`);
         } else {
           log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
         }

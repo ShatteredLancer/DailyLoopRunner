@@ -335,6 +335,7 @@ function validatePickOptions(value, path, errors) {
     'rollingDuplicateSwapMode',
     'rollingProvisionsMaxRating',
     'rollingRecoveryStorageFirst',
+    'rollingStorageRecoveryPriority',
     'rollingOpenDuplicateProvisionsRewards',
     'rollingShortageProvisionsPackLimit',
   ]);
@@ -371,6 +372,10 @@ function validatePickOptions(value, path, errors) {
   if (value.rollingStorageSinkMode !== undefined
     && !['off', 'automatic', 'selected'].includes(value.rollingStorageSinkMode)) {
     errors.push(`${path}.rollingStorageSinkMode must be off, automatic, or selected`);
+  }
+  if (value.rollingStorageRecoveryPriority !== undefined
+    && !['storage-pressure', 'provisions'].includes(value.rollingStorageRecoveryPriority)) {
+    errors.push(`${path}.rollingStorageRecoveryPriority must be storage-pressure or provisions`);
   }
   if (value.rollingDuplicateSwapMode !== undefined
     && !['off', 'special-only', 'safe-only', 'all-eligible'].includes(value.rollingDuplicateSwapMode)) {

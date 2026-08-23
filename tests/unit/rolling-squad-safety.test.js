@@ -234,4 +234,49 @@ describe('Rolling squad safety inspection', () => {
       upgrades: { evolutionId: 42 },
     });
   });
+
+  it('resolves selection summaries to live pile entities before controlled planning', async () => {
+    const liveSource = makePlayer({ id: 601, definitionId: 6001, rating: 92, rareflag: 64 });
+    Object.assign(liveSource, {
+      duplicateId: 602,
+      pile: 'unassigned',
+      upgrades: null,
+      cosmetics: [],
+      playStyle: 250,
+      preferredPosition: 18,
+      attributes: [92, 92, 92, 92, 92, 92],
+      skillMoves: 5,
+      weakFoot: 4,
+      groups: [19, 35],
+    });
+    const liveTarget = { ...liveSource, id: 602, pile: 'club', tradeable: false };
+    const summary = {
+      id: liveSource.id,
+      definitionId: liveSource.definitionId,
+      rating: liveSource.rating,
+      rareflag: liveSource.rareflag,
+      duplicateId: liveTarget.id,
+      tradeable: false,
+      special: true,
+    };
+    const { api } = await loadUserscript();
+    const snapshot = api.duplicateSwapSelectionSnapshot(
+      { entries: [{ pileName: 'unassigned', signal: summary, item: { id: liveTarget.id } }] },
+      [liveTarget],
+      (id, pile) => id === liveSource.id && pile === 'unassigned'
+        ? liveSource
+        : id === liveTarget.id && pile === 'club'
+          ? liveTarget
+          : null,
+    );
+    expect(snapshot.entries[0].signal).toMatchObject({
+      id: liveSource.id,
+      duplicateFingerprintComplete: true,
+      duplicateValueFingerprint: expect.objectContaining({ upgrades: null, cosmetics: [] }),
+    });
+    expect(snapshot.entries[0].item).toMatchObject({
+      id: liveTarget.id,
+      duplicateFingerprintComplete: true,
+    });
+  });
 });

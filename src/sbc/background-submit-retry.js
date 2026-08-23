@@ -42,6 +42,22 @@ export function planBackgroundSubmitRetry({
   return { retry: true, delayMs, reason: code };
 }
 
+/**
+ * A submit retry is only safe after EA supplied a fresh challenge instance.
+ * Reusing the old squad after a failed reload turns one ambiguous conflict
+ * into a burst of duplicate submissions and rate-limit errors.
+ */
+export function planChallengeReloadRetry({ reloadOutcome = 'unavailable' } = {}) {
+  const outcome = String(reloadOutcome || '').trim();
+  if (outcome === 'current-challenge-loaded' || outcome === 'next-challenge-loaded') {
+    return { retry: true, reason: 'challenge-reloaded' };
+  }
+  return {
+    retry: false,
+    reason: outcome === 'failed' ? 'challenge-reload-failed' : 'challenge-reload-unavailable',
+  };
+}
+
 export function hasItemViolationConflict(result, detail = '') {
   const codes = [detail, result?.status, result?.error?.code]
     .map(normalizeSubmitErrorCode)

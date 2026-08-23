@@ -4,6 +4,7 @@ import {
   captureMoveResult,
   captureRuntimePack,
   captureRuntimeInventoryItem,
+  captureRuntimeInventoryFieldDiagnostics,
   captureUnassignedRefreshResult,
   createRuntimeObjectIdentityTracker,
   diagnosticJson,
@@ -40,7 +41,7 @@ describe('Unassigned runtime diagnostics', () => {
       untradeable: true,
     });
 
-    const first = captureRuntimeInventoryItem(item, { identify });
+    const first = captureRuntimeInventoryItem(item, { identify, includeFieldDiagnostics: true });
     const second = captureRuntimeInventoryItem(item, { identify });
     const replacement = captureRuntimeInventoryItem({ ...item }, { identify });
 
@@ -58,6 +59,10 @@ describe('Unassigned runtime diagnostics', () => {
       hasUpgrades: false,
       hasCosmetics: false,
     });
+    expect(first.fieldDiagnostics.cosmetics.state).toBe('missing');
+    expect(first.fieldDiagnostics.tradeability.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ holder: 'item', field: 'untradeable', own: true }),
+    ]));
     expect(second.objectRef).toBe(first.objectRef);
     expect(replacement.objectRef).toBe('test-item-2');
   });
@@ -67,11 +72,37 @@ describe('Unassigned runtime diagnostics', () => {
     evolved.upgrades = { evolutionId: 12 };
     evolved.cosmetics = [{ id: 7 }];
 
-    expect(captureRuntimeInventoryItem(evolved)).toMatchObject({
+    expect(captureRuntimeInventoryItem(evolved, { includeFieldDiagnostics: true })).toMatchObject({
       evolution: true,
       hasUpgrades: true,
       hasCosmetics: true,
     });
+    expect(captureRuntimeInventoryFieldDiagnostics(evolved).cosmetics).toMatchObject({
+      state: 'present',
+      sources: [expect.objectContaining({ field: 'cosmetics', own: true })],
+    });
+  });
+
+  it('distinguishes inherited getters, explicit nulls, and missing fields', () => {
+    const prototype = {};
+    Object.defineProperty(prototype, 'cosmetics', {
+      configurable: true,
+      get() { return []; },
+    });
+    const item = Object.assign(Object.create(prototype), player(9, 9009));
+    item.upgrades = null;
+    const diagnostic = captureRuntimeInventoryFieldDiagnostics(item);
+
+    expect(diagnostic.cosmetics).toMatchObject({
+      state: 'present',
+      sources: [expect.objectContaining({ inherited: true, getter: true })],
+    });
+    expect(diagnostic.upgrades.sources[0].value).toEqual({ type: 'null', value: null });
+    expect(diagnostic.attributes.state).toBe('missing');
+    const undefinedValue = player(10, 9010);
+    undefinedValue.cosmetics = undefined;
+    expect(captureRuntimeInventoryFieldDiagnostics(undefinedValue).cosmetics.state)
+      .toBe('present-undefined');
   });
 
   it('reports every same-definition location without serializing unrelated inventory', () => {

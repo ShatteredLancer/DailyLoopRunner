@@ -539,6 +539,7 @@ describe('10x85+ Rolling workflow', () => {
     const recoverStorageSink = vi.fn(async () => ({ status: 'submitted', submitted: true }));
     const options = harness({
       storageSinkEnabled: true,
+      storageRecoveryPriority: 'provisions',
       recoverProvisions,
       recoverStorageSink,
       resolveProtectedStorage: vi.fn()
@@ -1392,6 +1393,7 @@ describe('10x85+ Rolling workflow', () => {
     let storageReady = false;
     const options = harness({
       storageSinkEnabled: true,
+      storageRecoveryPriority: 'provisions',
       getProgressFingerprint: vi.fn(async () => inventoryVersion),
       resolveProtectedStorage: vi.fn(async () => storageReady
         ? { status: 'ready' }
@@ -1431,10 +1433,6 @@ describe('10x85+ Rolling workflow', () => {
       recoverProvisions,
       recoverStorageSink: vi.fn(async ({ context }) => {
         expect(context.trigger).toBe('storage-pressure');
-        expect(context.provisions).toMatchObject({
-          status: 'skipped',
-          reasonCode: 'PROVISIONS_SHORTAGE_RECOVERY_DISABLED',
-        });
         storageReady = true;
         inventoryVersion++;
         return { status: 'selected' };
@@ -1518,7 +1516,7 @@ describe('10x85+ Rolling workflow', () => {
       status: 'completed',
       recoveries: { storageSink: 0, requiredSpecial: 1 },
     });
-    expect(calls).toEqual(['provisions', 'storage-sink', 'required-special']);
+    expect(calls).toEqual(['storage-sink', 'required-special']);
     expect(options.resolveProtectedStorage).toHaveBeenCalledTimes(2);
   });
 
@@ -1697,6 +1695,7 @@ describe('10x85+ Rolling workflow', () => {
     expect(normal.recoverStorageSink).not.toHaveBeenCalled();
 
     const blocked = harness({
+      storageRecoveryPriority: 'provisions',
       resolveProtectedStorage: vi.fn(async () => ({ status: 'blocked', reasonCode: 'PROTECTED_STORAGE_BLOCKED' })),
       recoverProvisions: vi.fn(async () => ({ status: 'blocked', reason: 'EA submit failed' })),
       recoverStorageSink: vi.fn(),

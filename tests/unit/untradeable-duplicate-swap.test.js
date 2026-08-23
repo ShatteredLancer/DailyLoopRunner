@@ -59,11 +59,82 @@ describe('untradeable duplicate SBC swap planning', () => {
       .toEqual({ eligible: false, reason: 'controlled duplicate swap value fingerprint is incomplete' });
   });
 
-  it('allows only identical untradeable special pairs in special-only mode', () => {
+  it('accepts an EA-style prototype getter and explicit upgrades:null as complete live evidence', () => {
+    const prototype = {
+      get rating() { return 85; },
+      get rareflag() { return 64; },
+    };
+    const sourceRaw = card(101, {
+      duplicateId: 201,
+      evolution: undefined,
+      upgrades: null,
+      cosmetics: [],
+    });
+    delete sourceRaw.rating;
+    delete sourceRaw.rareflag;
+    const source = Object.assign(Object.create(prototype), sourceRaw);
+    const targetRaw = card(201, {
+      pile: 'club',
+      evolution: undefined,
+      upgrades: null,
+      cosmetics: [],
+    });
+    delete targetRaw.rating;
+    delete targetRaw.rareflag;
+    const target = Object.assign(Object.create(prototype), targetRaw);
+    expect(evaluateDuplicateSwapEligibility({
+      source,
+      target,
+      mode: 'special-only',
+    })).toMatchObject({ eligible: true, mode: 'special-only' });
+  });
+
+  it('does not treat a normalized selection summary as live fingerprint evidence', () => {
+    const source = {
+      id: 101,
+      definitionId: 501,
+      rating: 85,
+      rareflag: 64,
+      tradeable: false,
+      special: true,
+      duplicateId: 201,
+      pile: 'unassigned',
+    };
+    const target = {
+      ...card(201, { pile: 'club', rareflag: 64 }),
+    };
+    expect(evaluateDuplicateSwapEligibility({ source, target, mode: 'special-only' }))
+      .toEqual({ eligible: false, reason: 'controlled duplicate swap value fingerprint is incomplete' });
+  });
+
+  it('rejects an embedded fingerprint without live-EA provenance even when marked complete', () => {
+    const source = {
+      ...card(101, { duplicateId: 201, rareflag: 64 }),
+      duplicateFingerprintComplete: true,
+      duplicateValueFingerprint: { definitionId: 501 },
+    };
+    const target = card(201, { pile: 'club', rareflag: 64 });
+    expect(evaluateDuplicateSwapEligibility({ source, target, mode: 'special-only' }))
+      .toEqual({ eligible: false, reason: 'controlled duplicate swap value fingerprint is incomplete' });
+  });
+
+  it('allows identical or Club-value-modified untradeable special pairs in special-only mode', () => {
     const source = card(101, { duplicate: true, duplicateId: 201, rareflag: 64 });
     const target = card(201, { pile: 'club', rareflag: 64 });
     expect(evaluateDuplicateSwapEligibility({ source, target, mode: 'special-only' }))
       .toMatchObject({ eligible: true, mode: 'special-only' });
+    expect(evaluateDuplicateSwapEligibility({
+      source,
+      target: card(201, {
+        pile: 'club',
+        rareflag: 64,
+        evolution: true,
+        upgrades: { evolutionId: 42 },
+        cosmetics: [{ id: 7 }],
+        chemistryStyle: 268,
+      }),
+      mode: 'special-only',
+    })).toMatchObject({ eligible: true, mode: 'special-only' });
     expect(evaluateDuplicateSwapEligibility({
       source: card(101, { duplicate: true, duplicateId: 201 }),
       target: card(201, { pile: 'club' }),
@@ -71,12 +142,50 @@ describe('untradeable duplicate SBC swap planning', () => {
     })).toEqual({ eligible: false, reason: 'duplicate swap mode only permits special cards' });
   });
 
-  it('rejects a special-only pair when its value fingerprint has changed', () => {
+  it('rejects a special-only pair when the Unassigned source carries value changes', () => {
+    expect(evaluateDuplicateSwapEligibility({
+      source: card(101, {
+        duplicate: true,
+        duplicateId: 201,
+        rareflag: 64,
+        evolution: true,
+        upgrades: { evolutionId: 42 },
+        cosmetics: [{ id: 7 }],
+        chemistryStyle: 268,
+      }),
+      target: card(201, { pile: 'club', rareflag: 64 }),
+      mode: 'special-only',
+    })).toEqual({ eligible: false, reason: 'controlled duplicate swap requires an unmodified Unassigned source' });
+  });
+
+  it('fails closed when the value difference has no directional EA marker', () => {
+    expect(evaluateDuplicateSwapEligibility({
+      source: card(101, {
+        duplicate: true,
+        duplicateId: 201,
+        rareflag: 64,
+        attributes: [86, 85, 85, 85, 85, 85],
+      }),
+      target: card(201, { pile: 'club', rareflag: 64 }),
+      mode: 'special-only',
+    })).toEqual({ eligible: false, reason: 'controlled duplicate swap requires an unmodified Unassigned source' });
     expect(evaluateDuplicateSwapEligibility({
       source: card(101, { duplicate: true, duplicateId: 201, rareflag: 64 }),
-      target: card(201, { pile: 'club', rareflag: 64, chemistryStyle: 251 }),
+      target: card(201, {
+        pile: 'club',
+        rareflag: 64,
+        attributes: [86, 85, 85, 85, 85, 85],
+      }),
       mode: 'special-only',
-    })).toEqual({ eligible: false, reason: 'controlled duplicate swap value fingerprint is not identical' });
+    })).toEqual({ eligible: false, reason: 'controlled duplicate swap requires an unmodified Unassigned source' });
+  });
+
+  it('rejects a directional swap when the base card identity changes', () => {
+    expect(evaluateDuplicateSwapEligibility({
+      source: card(101, { duplicate: true, duplicateId: 201, rareflag: 64 }),
+      target: card(201, { pile: 'club', rareflag: 64, rating: 86 }),
+      mode: 'special-only',
+    })).toEqual({ eligible: false, reason: 'duplicate source and Club counterpart are different card versions' });
   });
 
   it('keeps safe-only ordinary swaps narrower than special-only and all-eligible', () => {
@@ -134,6 +243,27 @@ describe('untradeable duplicate SBC swap planning', () => {
         targetId: 201,
         definitionId: 501,
       }],
+    });
+  });
+
+  it('plans a controlled swap when the protected Club card has mutable value state', () => {
+    const signal = card(101, { duplicate: true, duplicateId: 201, rareflag: 64 });
+    const selected = card(201, {
+      tradeable: false,
+      pile: 'club',
+      rareflag: 64,
+      evolution: true,
+      upgrades: { evolutionId: 42 },
+      cosmetics: [{ id: 7 }],
+      chemistryStyle: 268,
+    });
+    expect(planUntradeableDuplicateSwaps({
+      selection: { entries: [{ pileName: 'unassigned', signal, item: selected }] },
+      players: [selected],
+      swapMode: 'special-only',
+    })).toEqual({
+      ok: true,
+      swaps: [{ signalId: 101, targetId: 201, definitionId: 501 }],
     });
   });
 
@@ -266,6 +396,42 @@ describe('untradeable duplicate SBC swap planning', () => {
       signalId: 101,
       targetId: 201,
       newItemId: 301,
+    });
+  });
+
+  it('preserves a value-modified untradeable Club counterpart through materialization', () => {
+    const protectedTarget = card(201, {
+      tradeable: false,
+      pile: 'club',
+      evolution: true,
+      upgrades: { evolutionId: 42 },
+      cosmetics: [{ id: 7 }],
+      chemistryStyle: 268,
+    });
+    expect(validateUntradeableDuplicateSwapMaterialization({
+      replacement: { signalId: 101, targetId: 201, newItemId: 301 },
+      originalSignal: card(101),
+      originalTarget: protectedTarget,
+      newClubItem: card(301, { pile: 'club' }),
+      displacedTarget: { ...protectedTarget, pile: 'unassigned' },
+    })).toEqual({
+      ok: true,
+      signalId: 101,
+      targetId: 201,
+      newItemId: 301,
+    });
+  });
+
+  it('rejects a post-move fingerprint change even when card version is unchanged', () => {
+    expect(validateUntradeableDuplicateSwapMaterialization({
+      replacement: { signalId: 101, targetId: 201, newItemId: 301 },
+      originalSignal: card(101),
+      originalTarget: card(201, { tradeable: false, pile: 'club' }),
+      newClubItem: card(301, { tradeable: false, pile: 'club', chemistryStyle: 268 }),
+      displacedTarget: card(201, { tradeable: false, pile: 'unassigned' }),
+    })).toEqual({
+      ok: false,
+      reason: 'duplicate swap Club item #301 changed value fingerprint',
     });
   });
 

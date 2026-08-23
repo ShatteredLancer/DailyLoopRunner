@@ -2118,6 +2118,7 @@ describe('Rolling runtime recovery helpers', () => {
       unassigned: [duplicate],
       pileSizes: { storage: 100 },
       pileCounts: { storage: 99 },
+      pageReady: true,
       fastTimers: true,
     });
     window.services.Item.requestUnassignedItems = () => successfulObservable();
@@ -2157,6 +2158,67 @@ describe('Rolling runtime recovery helpers', () => {
     expect(inventoryPiles.unassigned).toEqual([]);
     expect(inventoryPiles.storage).toContain(duplicate);
     expect(runtime.openRouting).toMatchObject({ status: 'ready', reasonCode: null });
+  });
+
+  it('keeps disabled-swap startup duplicates pending so the main workflow can recover Storage', async () => {
+    const duplicates = [makePlayer({
+      id: 726,
+      definitionId: 9726,
+      rating: 95,
+      duplicate: true,
+      duplicateId: 1726,
+    }), makePlayer({
+      id: 727,
+      definitionId: 9727,
+      rating: 94,
+      duplicate: true,
+      duplicateId: 1727,
+    })];
+    duplicates.forEach((duplicate) => {
+      duplicate.pile = 'unassigned';
+      duplicate.duplicate = true;
+    });
+    const { api, window } = await loadUserscript({
+      unassigned: duplicates,
+      pileSizes: { storage: 100 },
+      pileCounts: { storage: 99 },
+      pageReady: true,
+      fastTimers: true,
+    });
+    window.services.Item.requestUnassignedItems = () => successfulObservable();
+    window.services.Item.requestStorageItems = () => successfulObservable();
+    const ledger = {
+      classifiedEntries: () => duplicates.map((item) => ({
+        item,
+        pile: 'unassigned',
+        classification: { duplicate: true },
+      })),
+      summary: () => ({ inventoryVersion: 1 }),
+    };
+    const runtime = {
+      primaryContext: { model: {} },
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ledger,
+      },
+    };
+
+    const result = await api.resumeRollingPendingUnassigned({
+      name: 'Disabled swap startup',
+      rollingDuplicateSwapEnabled: false,
+      rollingDuplicateSwapMode: 'off',
+      rollingSurplusCraftingEnabled: false,
+      rollingProvisionsUpgrade: null,
+      rollingProtectAllClubNonTotwSpecials: false,
+    }, runtime);
+
+    expect(result).toMatchObject({ status: 'ready', primaryPending: true });
+    expect(runtime.openRouting).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'DUPLICATE_SWAP_DISABLED_STORAGE_BLOCKED',
+    });
+    expect(runtime.pendingUnassignedRefs).toHaveLength(2);
+    expect(runtime.pendingUnassignedRefs.map((ref) => ref.id)).toEqual([726, 727]);
   });
 
   it('preserves the existing primary duplicate behavior for a ready route', async () => {

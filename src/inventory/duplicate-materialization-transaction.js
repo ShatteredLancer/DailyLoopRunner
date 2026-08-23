@@ -17,7 +17,9 @@ function itemId(value = {}) {
 }
 
 function definitionId(value = {}) {
-  return positiveId(value?.definitionId || value?.ref?.definitionId);
+  return positiveId(readRaw(value, [
+    'definitionId', 'definitionID', 'defId',
+  ], 0));
 }
 
 function itemPile(value = {}, fallback = 'unknown') {
@@ -54,47 +56,92 @@ function stableValue(value, depth = 0, seen = new WeakSet()) {
   return result;
 }
 
-function firstDefined(values = [], fallback = null) {
-  return values.find((value) => value !== undefined && value !== null) ?? fallback;
-}
-
 function rawHolders(item = {}) {
-  return [item, item?._data, item?.data, item?._staticData, item?.staticData]
+  return [item, item?.ref, item?._data, item?.data, item?._staticData, item?.staticData]
     .filter((value) => value && typeof value === 'object');
 }
 
 function readRaw(item, fields, fallback = null) {
   for (const holder of rawHolders(item)) {
     for (const field of fields) {
-      if (holder[field] !== undefined && holder[field] !== null) return holder[field];
+      try {
+        // Preserve an explicit null. EA uses `upgrades: null` for an
+        // un-evolved card, and that is evidence rather than a missing field.
+        if (field in holder && holder[field] !== undefined) return holder[field];
+      } catch { }
     }
   }
   return fallback;
 }
 
+function readTradeability(item = {}) {
+  const direct = readRaw(item, ['tradeable', 'tradable'], null);
+  if (typeof direct === 'boolean') return direct;
+  const untradeable = readRaw(item, ['untradeable'], null);
+  if (typeof untradeable === 'boolean') return !untradeable;
+  try {
+    if (typeof item?.isTradeable === 'function') {
+      const value = item.isTradeable();
+      if (typeof value === 'boolean') return value;
+    }
+  } catch { }
+  try {
+    if (typeof item?.isUntradeable === 'function') {
+      const value = item.isUntradeable();
+      if (typeof value === 'boolean') return !value;
+    }
+  } catch { }
+  const count = readRaw(item, ['untradeableCount'], null);
+  if (count !== null && Number.isFinite(Number(count))) return Number(count) === 0;
+  // Keep the historical serialized shape for legacy journals. Controlled
+  // swap planning still fails closed on unknown tradeability via its own
+  // evidence check; this fallback only preserves old fingerprint records.
+  return false;
+}
+
 export function createDuplicateCardValueFingerprint(item = {}) {
-  if (item?.duplicateValueFingerprint && typeof item.duplicateValueFingerprint === 'object') {
+  if (item?.duplicateValueFingerprint
+    && typeof item.duplicateValueFingerprint === 'object'
+    && item.duplicateFingerprintComplete !== false
+    && (item.duplicateFingerprintComplete === undefined
+      || item.duplicateFingerprintSource === 'live-ea')) {
     return Object.freeze(stableValue(item.duplicateValueFingerprint));
   }
   const upgrades = readRaw(item, ['upgrades'], null);
   const cosmetics = readRaw(item, ['cosmetics'], null);
-  const groups = firstDefined([item.groups, item._data?.groups], []);
+  const cosmetic = readRaw(item, ['cosmetic'], null) === true;
+  const evolutionStatus = readRaw(item, [
+    'evolutionStatus', 'evolutionLevel',
+  ], null);
+  const evolutionStatusActive = evolutionStatus === true
+    || (typeof evolutionStatus === 'number' && evolutionStatus > 0)
+    || (typeof evolutionStatus === 'string'
+      && !['', '0', '-1', 'false', 'none', 'null'].includes(evolutionStatus.trim().toLowerCase()));
+  const groups = readRaw(item, ['groups'], []);
   return Object.freeze({
     definitionId: definitionId(item),
-    databaseId: positiveId(readRaw(item, ['databaseId', 'databaseID'], 0)),
+    databaseId: positiveId(readRaw(item, [
+      'databaseId', 'databaseID', 'databaseid', '_databaseId',
+    ], 0)),
     rating: Number(readRaw(item, ['rating', '_rating'], 0)) || 0,
     rareflag: Number(readRaw(item, ['rareflag', 'rareFlag', '_rareflag'], 0)) || 0,
-    tradeable: item.tradeable === true || item.tradable === true || item.untradeable === false,
+    tradeable: readTradeability(item),
     evolution: item.evolution === true
       || upgrades !== null
+      || readRaw(item, ['isEvolution', 'isEvo'], false) === true
+      || evolutionStatusActive
       || positiveId(readRaw(item, ['evolutionId', 'evoId'], 0)) > 0,
     upgrades: stableValue(upgrades),
     cosmetics: stableValue(cosmetics),
+    // Keep the historical fingerprint shape for ordinary cards so journals
+    // written before this fix remain readable. A positive cosmetic flag is
+    // additive and intentionally makes the value identity stricter.
+    ...(cosmetic ? { cosmetic: true } : {}),
     chemistryStyle: Number(readRaw(item, ['playStyle', 'chemistryStyle', 'chemStyle', 'styleId'], 0)) || 0,
     preferredPosition: Number(readRaw(item, ['preferredPosition', '_preferredPosition'], 0)) || 0,
     attributes: stableValue(readRaw(item, ['attributes'], [])),
-    skillMoves: Number(readRaw(item, ['skillMoves', '_skillMoves'], 0)) || 0,
-    weakFoot: Number(readRaw(item, ['weakFoot', '_weakFoot'], 0)) || 0,
+    skillMoves: Number(readRaw(item, ['skillMoves', '_skillMoves', 'skillmoves'], 0)) || 0,
+    weakFoot: Number(readRaw(item, ['weakFoot', '_weakFoot', 'weakfoot'], 0)) || 0,
     groups: Object.freeze([...(Array.isArray(groups) ? groups : [])].map(Number).sort((a, b) => a - b)),
   });
 }
@@ -107,7 +154,11 @@ export function duplicateCardValueFingerprintMatches(left = {}, right = {}) {
 export function diffDuplicateCardValueFingerprint(expected = {}, actualItem = {}) {
   const expectedFingerprint = createDuplicateCardValueFingerprint(expected);
   const actualFingerprint = createDuplicateCardValueFingerprint(actualItem);
-  const changedFields = Object.keys(expectedFingerprint).filter((field) => (
+  const fields = [...new Set([
+    ...Object.keys(expectedFingerprint),
+    ...Object.keys(actualFingerprint),
+  ])];
+  const changedFields = fields.filter((field) => (
     JSON.stringify(expectedFingerprint[field]) !== JSON.stringify(actualFingerprint[field])
   ));
   return Object.freeze({

@@ -495,6 +495,10 @@ describe('current direct side-effect call baseline', () => {
     expect(candidateBlock).toContain("if (result?.status !== 'unavailable') return result;");
     expect(candidateBlock).toContain('trying the next dynamic Rare Gold Pick candidate');
     expect(drainBlock).toContain('ROLLING_UPGRADE_PHASES.REDEEM_RARE_GOLD_PICK');
+    expect(drainBlock).toContain('resumePendingRollingStorageSinkReward');
+    expect(drainBlock.indexOf('resumePendingRollingStorageSinkReward')).toBeLessThan(
+      drainBlock.indexOf('findPendingRollingPlayerPickLoop'),
+    );
     expect(drainBlock.indexOf('runRollingPlayerPickRecovery')).toBeLessThan(drainBlock.indexOf('submitRollingRequirementRecovery'));
     expect(drainBlock).not.toContain('85+ Pick');
   });
