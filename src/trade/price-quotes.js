@@ -2,7 +2,39 @@ import { TRADE_PRICE_PROVIDERS } from './contracts.js';
 
 export const PRICE_QUOTE_SCHEMA_VERSION = 1;
 export const DEFAULT_PRICE_QUOTE_TTL_MS = 10 * 60_000;
+export const DEFAULT_FUTGG_CIRCUIT_TTL_MS = 30 * 60_000;
 export const PRICE_QUOTE_HEALTH_SCHEMA_VERSION = 1;
+
+export function normalizeFutGgProxy(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  let parsed;
+  try { parsed = new URL(raw); } catch { throw new Error('FUT.GG proxy must be a valid HTTPS URL'); }
+  if (parsed.protocol !== 'https:') throw new Error('FUT.GG proxy must use HTTPS');
+  if (parsed.username || parsed.password) throw new Error('FUT.GG proxy must not contain username or password');
+  parsed.hash = '';
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+  return parsed.toString().replace(/\/$/, '');
+}
+
+export function buildFutGgPriceUrl({ proxy = '', definitionIds = [], platform = 'pc' } = {}) {
+  const ids = normalizeDefinitionIds(definitionIds);
+  const normalizedProxy = normalizeFutGgProxy(proxy);
+  const base = normalizedProxy || 'https://www.fut.gg/api/fut';
+  const separator = base.includes('?') ? (/[?&]$/.test(base) ? '' : '&') : '?';
+  const prefix = normalizedProxy ? `${base}${separator}futggapi=` : `${base}/`;
+  return `${prefix}player-prices/26/?ids=${encodeURIComponent(ids.join(','))}&platform=${encodeURIComponent(platform)}`;
+}
+
+function proxyOrigin(value) {
+  try {
+    const normalized = normalizeFutGgProxy(value);
+    if (!normalized) return null;
+    return new URL(normalized).origin;
+  } catch {
+    return null;
+  }
+}
 
 function parseJson(text, source) {
   try { return JSON.parse(text); } catch { throw new Error(`${source} returned invalid JSON`); }
@@ -57,12 +89,16 @@ export function parseFutNextPriceResponse(text) {
 }
 
 async function requestFutGg(options, ids) {
-  const url = `https://www.fut.gg/api/fut/player-prices/26/?ids=${encodeURIComponent(ids.join(','))}&platform=${encodeURIComponent(options.platform)}`;
+  const proxy = typeof options.getFutGgProxy === 'function'
+    ? options.getFutGgProxy()
+    : options.futGgProxy;
+  const usingProxy = Boolean(normalizeFutGgProxy(proxy));
+  const url = buildFutGgPriceUrl({ proxy, definitionIds: ids, platform: options.platform });
   const text = await options.requestText(url, {
-    sendCookies: true,
+    sendCookies: !usingProxy,
     headers: {
       Accept: 'application/json, text/plain, */*',
-      Referer: options.referer || '',
+      ...(usingProxy ? {} : { Referer: options.referer || '' }),
       'X-Requested-With': 'XMLHttpRequest',
     },
   });
@@ -93,6 +129,14 @@ export async function loadPriceQuotes(options = {}) {
   for (const source of providerSteps) {
     const missingIds = ids.filter((id) => !loaded.has(id));
     if (!missingIds.length) break;
+    if (source === 'futgg' && provider === 'auto' && options.skipFutGg === true) {
+      result.attempts.push({
+        source: 'FUT.GG',
+        status: 'skipped',
+        reason: options.skipFutGgReason || 'FUT.GG circuit is open; using FUTNext',
+      });
+      continue;
+    }
     if (source === 'futnext' && provider === 'auto' && loaded.size && options.fallbackOnPartial === false) break;
     try {
       const entries = source === 'futgg'
@@ -135,6 +179,14 @@ export function createPriceQuoteProvider(options = {}) {
   let loadCount = 0;
   let lastLoad = null;
   let lastClearedAt = null;
+  let futGgBlockedUntil = 0;
+  let futGgBlockReason = null;
+
+  function isFutGgCircuitError(error) {
+    return /(?:\bHTTP\s*)?403\b|cloudflare|cf-mitigated|forbidden/i.test(
+      String(error?.message || error || ''),
+    );
+  }
 
   async function load(request = {}) {
     const provider = normalizeProvider(request.provider || options.provider);
@@ -146,6 +198,7 @@ export function createPriceQuoteProvider(options = {}) {
       .filter((entry) => entry && entry.expiresAt > currentTime && quoteMatchesProvider(entry, provider));
     const freshIds = new Set(fresh.map((entry) => entry.definitionId));
     const missingIds = ids.filter((id) => !freshIds.has(id));
+    const futGgCircuitOpen = provider === 'auto' && currentTime < futGgBlockedUntil;
     const loaded = missingIds.length ? await loadPriceQuotes({
       ...options,
       ...request,
@@ -153,7 +206,21 @@ export function createPriceQuoteProvider(options = {}) {
       platform,
       definitionIds: missingIds,
       now: currentTime,
+      skipFutGg: futGgCircuitOpen,
+      skipFutGgReason: futGgBlockReason || undefined,
     }) : { quotes: [], ids: [], source: null, attempts: [] };
+    const futGgAttempt = loaded.attempts.find((attempt) => attempt.source === 'FUT.GG');
+    if (provider === 'auto' && futGgAttempt?.status === 'error' && isFutGgCircuitError(futGgAttempt.reason)) {
+      const circuitTtlMs = Math.max(
+        1,
+        Number(request.futGgCircuitTtlMs || options.futGgCircuitTtlMs || DEFAULT_FUTGG_CIRCUIT_TTL_MS),
+      );
+      futGgBlockedUntil = currentTime + circuitTtlMs;
+      futGgBlockReason = `FUT.GG unavailable (${futGgAttempt.reason}); using FUTNext for ${Math.ceil(circuitTtlMs / 60000)} minutes`;
+    } else if (futGgAttempt?.status === 'loaded') {
+      futGgBlockedUntil = 0;
+      futGgBlockReason = null;
+    }
     for (const entry of loaded.quotes) cache.set(cacheKey(entry.platform, entry.definitionId), entry);
     const quotes = ids.map((id) => cache.get(cacheKey(platform, id)))
       .filter((entry) => entry && entry.expiresAt > currentTime && quoteMatchesProvider(entry, provider));
@@ -186,6 +253,8 @@ export function createPriceQuoteProvider(options = {}) {
 
   function clear() {
     cache.clear();
+    futGgBlockedUntil = 0;
+    futGgBlockReason = null;
     lastClearedAt = Number(now());
   }
 
@@ -207,6 +276,10 @@ export function createPriceQuoteProvider(options = {}) {
       schemaVersion: PRICE_QUOTE_HEALTH_SCHEMA_VERSION,
       capturedAt: currentTime,
       providers: ['FUT.GG', 'FUTNext'],
+      futGgProxy: {
+        configured: Boolean(proxyOrigin(typeof options.getFutGgProxy === 'function' ? options.getFutGgProxy() : options.futGgProxy)),
+        origin: proxyOrigin(typeof options.getFutGgProxy === 'function' ? options.getFutGgProxy() : options.futGgProxy),
+      },
       status: !entries.length ? 'empty' : !expired ? 'fresh' : !fresh.length ? 'stale' : 'partial',
       cache: {
         entries: entries.length,
@@ -223,6 +296,11 @@ export function createPriceQuoteProvider(options = {}) {
         loadCount,
         lastLoad: lastLoad ? JSON.parse(JSON.stringify(lastLoad)) : null,
         lastClearedAt,
+      },
+      futGgCircuit: {
+        state: futGgBlockedUntil > currentTime ? 'open' : 'closed',
+        blockedUntil: futGgBlockedUntil || null,
+        reason: futGgBlockedUntil > currentTime ? futGgBlockReason : null,
       },
     };
   }

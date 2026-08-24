@@ -3,6 +3,29 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.44] - 2026-08-24
+
+### Added
+
+- Add an optional HTTPS forwarding proxy for FUT.GG, configurable from the
+  Trade Scheduler provider panel without exposing proxy credentials.
+- Show the configured FUT.GG proxy origin and the provider circuit state in
+  the live provider diagnostics.
+
+### Fixed
+
+- Treat FUT.GG HTTP 403, Cloudflare, and equivalent forbidden responses as a
+  session-level circuit failure and automatically use FUTNext in Auto mode
+  until the retry window expires or a FUT.GG request succeeds.
+- Route Player Pick and special-card recap pricing through the shared quote
+  provider so cache, fallback, proxy, and recovery behavior stay consistent.
+
+### Verification
+
+- Full `npm run verify` passed: `199` test files / `1774` tests, plus syntax,
+  ESLint, config/profile, architecture, FSU patch replay, userscript/FSU
+  builds, dist equality, metadata, and release-asset checks.
+
 ## [0.8.43] - 2026-08-24
 
 ### Fixed

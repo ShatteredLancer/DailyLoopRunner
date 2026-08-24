@@ -1,12 +1,35 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createPriceQuoteProvider,
+  buildFutGgPriceUrl,
   loadPriceQuotes,
+  normalizeFutGgProxy,
   parseFutGgPriceResponse,
   parseFutNextPriceResponse,
 } from '../../src/trade/price-quotes.js';
 
 describe('Trade Price Quote Provider', () => {
+  it('normalizes an HTTPS proxy and emits the FSU-compatible forwarding query', () => {
+    expect(normalizeFutGgProxy(' https://prices.example/api/ ')).toBe('https://prices.example/api');
+    expect(buildFutGgPriceUrl({
+      proxy: 'https://prices.example/api/', definitionIds: [10, 20], platform: 'pc',
+    })).toBe('https://prices.example/api?futggapi=player-prices/26/?ids=10%2C20&platform=pc');
+    expect(() => normalizeFutGgProxy('http://prices.example')).toThrow('HTTPS');
+    expect(() => normalizeFutGgProxy('https://user:pass@prices.example')).toThrow('username');
+  });
+
+  it('uses the configured proxy without forwarding FUT.GG cookies', async () => {
+    const requestText = vi.fn(async () => JSON.stringify({ data: [{ eaId: 10, price: 1000 }] }));
+    const result = await loadPriceQuotes({
+      definitionIds: [10], platform: 'pc', provider: 'futgg', futGgProxy: 'https://prices.example/', requestText,
+    });
+    expect(result.source).toBe('FUT.GG');
+    expect(requestText).toHaveBeenCalledWith(
+      'https://prices.example?futggapi=player-prices/26/?ids=10&platform=pc',
+      expect.objectContaining({ sendCookies: false, headers: expect.not.objectContaining({ Referer: expect.anything() }) }),
+    );
+  });
+
   it('parses provider responses into validated definition prices', () => {
     expect(parseFutGgPriceResponse(JSON.stringify({ data: [
       { eaId: 10, price: 1000 },
@@ -91,6 +114,47 @@ describe('Trade Price Quote Provider', () => {
       status: 'empty',
       cache: { entries: 0 },
       activity: { loadCount: 1, lastClearedAt: 1200 },
+      futGgCircuit: { state: 'closed', blockedUntil: null, reason: null },
     });
+  });
+
+  it('opens an Auto-only FUT.GG cooldown after Cloudflare 403 and resets it on clear', async () => {
+    let time = 1000;
+    const requestText = vi.fn(async (url) => {
+      if (url.includes('fut.gg')) throw new Error('HTTP 403');
+      const id = url.includes('ids=20') ? 20 : 10;
+      return JSON.stringify([{ definitionId: id, prices: [id * 100] }]);
+    });
+    const provider = createPriceQuoteProvider({ requestText, now: () => time, futGgCircuitTtlMs: 1000 });
+
+    const first = await provider.load({ definitionIds: [10], provider: 'auto' });
+    expect(first.quotes).toEqual([expect.objectContaining({ definitionId: 10, source: 'FUTNext' })]);
+    expect(first.attempts).toEqual([
+      { source: 'FUT.GG', status: 'error', reason: 'HTTP 403' },
+      { source: 'FUTNext', status: 'loaded' },
+    ]);
+    expect(provider.inspect()).toMatchObject({
+      futGgCircuit: {
+        state: 'open',
+        blockedUntil: 2000,
+        reason: expect.stringContaining('HTTP 403'),
+      },
+    });
+
+    time = 1100;
+    const second = await provider.load({ definitionIds: [20], provider: 'auto' });
+    expect(second.attempts).toEqual([
+      { source: 'FUT.GG', status: 'skipped', reason: expect.stringContaining('using FUTNext') },
+      { source: 'FUTNext', status: 'loaded' },
+    ]);
+    expect(requestText.mock.calls.filter(([url]) => url.includes('fut.gg'))).toHaveLength(1);
+
+    await provider.load({ definitionIds: [20], provider: 'futgg', forceRefresh: true });
+    expect(requestText.mock.calls.filter(([url]) => url.includes('fut.gg'))).toHaveLength(2);
+
+    provider.clear();
+    expect(provider.inspect().futGgCircuit).toEqual({ state: 'closed', blockedUntil: null, reason: null });
+    await provider.load({ definitionIds: [20], provider: 'auto' });
+    expect(requestText.mock.calls.filter(([url]) => url.includes('fut.gg'))).toHaveLength(3);
   });
 });

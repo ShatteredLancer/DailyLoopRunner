@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.8.43`
-- Git 基线：`main` Rolling Required Special reward-journal recovery
+- Userscript 版本：`0.8.44`
+- Git 基线：`main` FUT.GG proxy / price-provider recovery
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -17,6 +17,11 @@ Storage-first 顺序。待处理 Unassigned 重复卡仍强制 Unassigned-first�
 pressure 与 maintenance 仍使用专用 Storage-first 及净释放校验。Provisions reserve
 上限可选 `88/89/90/91`，默认 `88`，已有较高保存值继续有效。该修正取代下方
 `0.8.20` 发布记录中的全局 Storage-first 和新安装默认 `91` 行为。
+
+`0.8.44` 发布记录：FUT.GG 价格请求支持可选 HTTPS forwarding proxy；Auto 价格源在
+FUT.GG 返回 403、Cloudflare 或 forbidden 错误后进入会话级熔断并回退 FUTNext，
+成功请求后恢复。Trade Scheduler Provider 面板显示代理来源和熔断状态，Player Pick
+与特殊卡 recap 共用同一价格 Provider、缓存和恢复逻辑。
 
 `0.8.43` 发布记录：持久化的 Required Special/TOTW 奖励 journal 在奖励包不可见、
 Storage/Club 没有可用 Requirement Special、且 Inventory Ledger 实时核对成功时，

@@ -1132,14 +1132,18 @@ export function showTradeSchedulerDialog(options = {}) {
     quoteGroup.appendChild(quoteHeading);
     const sources = Object.entries(quotes.cache?.bySource || {}).map(([source, count]) => `${source}:${count}`).join(', ') || 'none';
     const platforms = Object.entries(quotes.cache?.byPlatform || {}).map(([platform, count]) => `${platform}:${count}`).join(', ') || 'none';
+    const futGgCircuit = quotes.futGgCircuit || {};
     appendRows(quoteGroup, [
       ['Providers', (quotes.providers || ['FUT.GG', 'FUTNext']).join(' / ')], ['Status', quotes.status || 'unavailable'],
+      ['FUT.GG proxy', quotes.futGgProxy?.configured ? (quotes.futGgProxy.origin || 'configured') : 'direct'],
       ['Entries', quotes.cache?.entries], ['Fresh / expired', `${Number(quotes.cache?.freshEntries || 0)} / ${Number(quotes.cache?.expiredEntries || 0)}`],
       ['Sources', sources], ['Platforms', platforms], ['Loads', quotes.activity?.loadCount],
       ['Last load', quotes.activity?.lastLoad?.at ? new Date(quotes.activity.lastLoad.at).toLocaleString() : 'none'],
+      ['FUT.GG circuit', futGgCircuit.state || 'closed'],
+      ['FUT.GG retry after', futGgCircuit.blockedUntil ? new Date(futGgCircuit.blockedUntil).toLocaleString() : 'now'],
     ]);
     const clearQuotes = button(dom, 'Clear price quotes', mode, 'bronze-loop-trade-clear-price-quotes');
-    clearQuotes.disabled = !Number(quotes.cache?.entries || 0);
+    clearQuotes.disabled = !Number(quotes.cache?.entries || 0) && futGgCircuit.state !== 'open';
     clearQuotes.addEventListener('click', () => {
       try {
         options.onClearPriceQuoteCache?.();
@@ -1153,8 +1157,43 @@ export function showTradeSchedulerDialog(options = {}) {
     styles(clearQuotes, { marginTop: '8px' });
     quoteGroup.appendChild(clearQuotes);
 
+    const proxyGroup = styles(dom.create('div'), { borderTop: '1px solid #47576b', paddingTop: '8px', marginTop: '12px', minWidth: '0' });
+    const proxyHeading = dom.create('div');
+    proxyHeading.textContent = 'FUT.GG forwarding proxy';
+    styles(proxyHeading, { fontWeight: '700', marginBottom: '6px' });
+    const proxyInput = input(dom, 'url', options.getFutGgProxy?.() || '', mode, 'bronze-loop-trade-futgg-proxy');
+    proxyInput.placeholder = 'https://proxy.example/';
+    proxyInput.autocomplete = 'off';
+    const proxyActions = styles(dom.create('div'), { display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' });
+    const saveProxy = button(dom, 'Save FUT.GG proxy', mode, 'bronze-loop-trade-save-futgg-proxy');
+    const clearProxy = button(dom, 'Clear FUT.GG proxy', mode, 'bronze-loop-trade-clear-futgg-proxy');
+    clearProxy.disabled = !String(options.getFutGgProxy?.() || '').trim();
+    saveProxy.addEventListener('click', () => {
+      try {
+        options.onSetFutGgProxy?.(proxyInput.value);
+        refreshSnapshot();
+        setStatus('FUT.GG proxy saved; price cache cleared and Scheduler relocked');
+        render();
+      } catch (error) {
+        setStatus(`FUT.GG proxy save failed: ${error?.message || error}`);
+      }
+    });
+    clearProxy.addEventListener('click', () => {
+      try {
+        options.onSetFutGgProxy?.('');
+        refreshSnapshot();
+        setStatus('FUT.GG proxy cleared; direct FUT.GG is enabled');
+        render();
+      } catch (error) {
+        setStatus(`FUT.GG proxy clear failed: ${error?.message || error}`);
+      }
+    });
+    proxyActions.append(saveProxy, clearProxy);
+    proxyGroup.append(proxyHeading, proxyInput, proxyActions);
+
     grid.append(catalogGroup, quoteGroup);
     content.appendChild(grid);
+    content.appendChild(proxyGroup);
   }
 
   function render(input = {}) {

@@ -551,6 +551,7 @@ describe('Trade Scheduler dialog', () => {
         providers: ['FUT.GG', 'FUTNext'], status: 'partial',
         cache: { entries: 3, freshEntries: 2, expiredEntries: 1, bySource: { 'FUT.GG': 2, FUTNext: 1 }, byPlatform: { pc: 3 } },
         activity: { loadCount: 2, lastLoad: { at: 1000 } },
+        futGgCircuit: { state: 'open', blockedUntil: 61000, reason: 'HTTP 403' },
       },
     };
     const onClearPlayerCatalogCache = vi.fn(() => {
@@ -568,6 +569,8 @@ describe('Trade Scheduler dialog', () => {
     ui.byId('bronze-loop-trade-providers-tab').click();
     expect(ui.created.some((element) => element.textContent === 'Player catalog')).toBe(true);
     expect(ui.created.some((element) => element.textContent.includes('FUTNext'))).toBe(true);
+    expect(ui.created.some((element) => element.textContent === 'FUT.GG circuit')).toBe(true);
+    expect(ui.created.some((element) => element.textContent === 'open')).toBe(true);
     expect(ui.byId('bronze-loop-trade-clear-player-catalog').disabled).toBe(false);
     expect(ui.byId('bronze-loop-trade-clear-price-quotes').disabled).toBe(false);
     ui.byId('bronze-loop-trade-clear-player-catalog').click();
@@ -575,6 +578,25 @@ describe('Trade Scheduler dialog', () => {
     expect(ui.created.filter((element) => element.id === 'bronze-loop-trade-clear-player-catalog').at(-1).disabled).toBe(true);
     ui.created.filter((element) => element.id === 'bronze-loop-trade-clear-price-quotes').at(-1).click();
     expect(onClearPriceQuoteCache).toHaveBeenCalledOnce();
+  });
+
+  it('saves and clears the FUT.GG forwarding proxy from Providers', () => {
+    const ui = uiHarness();
+    const onSetFutGgProxy = vi.fn();
+    showTradeSchedulerDialog({
+      dom: ui.dom,
+      snapshot: schedulerSnapshot(),
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+      getProviderHealth: () => ({ priceQuotes: { futGgProxy: { configured: false }, cache: {} } }),
+      getFutGgProxy: () => '',
+      onSetFutGgProxy,
+    });
+    ui.byId('bronze-loop-trade-providers-tab').click();
+    const proxy = ui.byId('bronze-loop-trade-futgg-proxy');
+    proxy.value = 'https://prices.example/';
+    ui.byId('bronze-loop-trade-save-futgg-proxy').click();
+    expect(onSetFutGgProxy).toHaveBeenCalledWith('https://prices.example/');
+    expect(ui.created.some((element) => element.textContent.includes('FUT.GG proxy saved'))).toBe(true);
   });
 
   it('exports Job-only config and requires unchanged validated JSON before atomic import', () => {

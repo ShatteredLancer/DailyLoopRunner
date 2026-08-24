@@ -18,6 +18,7 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @connect      www.fut.gg
+// @connect      *
 // @connect      www.futbin.org
 // @connect      enhancer-api.futnext.com
 // @connect      rest.futnext.com
@@ -48,6 +49,7 @@ import {
   TRADE_JOB_STORE_KEY,
   TRADE_PLAYER_CATALOG_CACHE_KEY,
   TRADE_REQUEST_PACING_KEY,
+  TRADE_FUTGG_PROXY_KEY,
   TRADE_RECOVERY_AUDIT_KEY,
   TRADE_RUN_LEASE_KEY,
 } from './config/runtime.js';
@@ -251,7 +253,7 @@ import {
 } from './reward/player-pick.js';
 import { loadPlayerPickPrices } from './reward/player-prices.js';
 import { createPlayerCatalogProvider } from './trade/player-catalog.js';
-import { createPriceQuoteProvider } from './trade/price-quotes.js';
+import { createPriceQuoteProvider, normalizeFutGgProxy } from './trade/price-quotes.js';
 import { createListingPreparation } from './trade/listing-preparation.js';
 import { createListingPreview } from './trade/listing-preview.js';
 import { createListingTransaction } from './trade/listing-transaction.js';
@@ -528,9 +530,12 @@ const SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED = true;
     cacheKey: TRADE_PLAYER_CATALOG_CACHE_KEY,
     season: '26',
   });
+  const getFutGgProxy = () => String(adapters.userscriptStorage.get(TRADE_FUTGG_PROXY_KEY, '') || '').trim();
   const tradePriceQuoteProvider = createPriceQuoteProvider({
     requestText: adapters.http.getText,
     provider: 'auto',
+    referer: pageRuntime.origin(),
+    getFutGgProxy,
   });
   const inspectTradeProviders = () => ({
     schemaVersion: 1,
@@ -1794,6 +1799,17 @@ const state = {
         tradeJobStore.relock();
         tradePriceQuoteProvider.clear();
         log('Trade Scheduler: price quote cache cleared; scheduler relocked and all Jobs disarmed');
+        return inspectTradeProviders();
+      },
+      getFutGgProxy,
+      onSetFutGgProxy: (value) => {
+        const normalized = normalizeFutGgProxy(value);
+        tradeJobStore.relock();
+        adapters.userscriptStorage.set(TRADE_FUTGG_PROXY_KEY, normalized);
+        tradePriceQuoteProvider.clear();
+        log(normalized
+          ? `Trade Scheduler: FUT.GG proxy set to ${new URL(normalized).origin}; price cache cleared and all Jobs disarmed`
+          : 'Trade Scheduler: FUT.GG proxy cleared; direct FUT.GG enabled; price cache cleared and all Jobs disarmed');
         return inspectTradeProviders();
       },
       onOpenManualListing: (job = null) => openTradeListingDialogModal(job),
@@ -11264,6 +11280,7 @@ function updateLoopControls() {
       items,
       platform: loopDef.pricePlatform,
       referer: pageRuntime.origin(),
+      priceQuoteProvider: tradePriceQuoteProvider,
       requestText: adapters.http.getText,
     });
     for (const attempt of result.attempts) {
@@ -12168,6 +12185,7 @@ function updateLoopControls() {
         items: specialItems,
         platform: 'pc',
         referer: pageRuntime.origin(),
+        priceQuoteProvider: tradePriceQuoteProvider,
         requestText: adapters.http.getText,
       });
     } catch (error) {

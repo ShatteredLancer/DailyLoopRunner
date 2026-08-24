@@ -54,4 +54,25 @@ describe('Player Pick price fallback', () => {
       { source: 'FUTNext', status: 'error', reason: 'HTTP 500' },
     ]);
   });
+
+  it('uses the shared quote provider so Pick and recap loads share cache and provider health', async () => {
+    const priceQuoteProvider = {
+      load: vi.fn(async (request) => ({
+        ids: request.definitionIds,
+        quotes: [{ definitionId: 10, price: 9000, source: 'FUTNext' }],
+        source: 'FUTNext',
+        attempts: [{ source: 'FUTNext', status: 'loaded' }],
+      })),
+    };
+    const requestText = vi.fn();
+    const result = await loadPlayerPickPrices({ items, priceQuoteProvider, requestText });
+
+    expect(result.prices.get(10)).toBe(9000);
+    expect(priceQuoteProvider.load).toHaveBeenCalledWith(expect.objectContaining({
+      definitionIds: [10, 20],
+      provider: 'auto',
+      fallbackOnPartial: false,
+    }));
+    expect(requestText).not.toHaveBeenCalled();
+  });
 });

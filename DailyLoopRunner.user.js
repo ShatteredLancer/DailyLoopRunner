@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.43
+// @version      0.8.44
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -18,6 +18,7 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @connect      www.fut.gg
+// @connect      *
 // @connect      www.futbin.org
 // @connect      enhancer-api.futnext.com
 // @connect      rest.futnext.com
@@ -29,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.43",
+    version: "0.8.44",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -87,6 +88,7 @@
   var TRADE_BULK_RELIST_JOURNAL_KEY = "fc-loop-runner-trade-bulk-relist-journal-v1";
   var TRADE_REQUEST_PACING_KEY = "fc-loop-runner-trade-request-pacing-v1";
   var TRADE_RECOVERY_AUDIT_KEY = "fc-loop-runner-trade-recovery-audit-v1";
+  var TRADE_FUTGG_PROXY_KEY = "fc-loop-runner-trade-futgg-proxy-v1";
   var ROLLING_DUPLICATE_TRANSACTION_KEY = "fc-loop-runner-rolling-duplicate-transaction-v1";
   var ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY = "fc-loop-runner-rolling-pending-required-special-reward-v1";
   var ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
@@ -15977,7 +15979,40 @@
   // src/trade/price-quotes.js
   var PRICE_QUOTE_SCHEMA_VERSION = 1;
   var DEFAULT_PRICE_QUOTE_TTL_MS = 10 * 6e4;
+  var DEFAULT_FUTGG_CIRCUIT_TTL_MS = 30 * 6e4;
   var PRICE_QUOTE_HEALTH_SCHEMA_VERSION = 1;
+  function normalizeFutGgProxy(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    let parsed;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw new Error("FUT.GG proxy must be a valid HTTPS URL");
+    }
+    if (parsed.protocol !== "https:") throw new Error("FUT.GG proxy must use HTTPS");
+    if (parsed.username || parsed.password) throw new Error("FUT.GG proxy must not contain username or password");
+    parsed.hash = "";
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+    return parsed.toString().replace(/\/$/, "");
+  }
+  function buildFutGgPriceUrl({ proxy = "", definitionIds: definitionIds2 = [], platform = "pc" } = {}) {
+    const ids = normalizeDefinitionIds(definitionIds2);
+    const normalizedProxy = normalizeFutGgProxy(proxy);
+    const base = normalizedProxy || "https://www.fut.gg/api/fut";
+    const separator = base.includes("?") ? /[?&]$/.test(base) ? "" : "&" : "?";
+    const prefix = normalizedProxy ? `${base}${separator}futggapi=` : `${base}/`;
+    return `${prefix}player-prices/26/?ids=${encodeURIComponent(ids.join(","))}&platform=${encodeURIComponent(platform)}`;
+  }
+  function proxyOrigin(value) {
+    try {
+      const normalized = normalizeFutGgProxy(value);
+      if (!normalized) return null;
+      return new URL(normalized).origin;
+    } catch {
+      return null;
+    }
+  }
   function parseJson(text, source) {
     try {
       return JSON.parse(text);
@@ -16029,12 +16064,14 @@
     return [...new Map(prices.map((entry) => [entry.definitionId, entry])).values()];
   }
   async function requestFutGg(options, ids) {
-    const url = `https://www.fut.gg/api/fut/player-prices/26/?ids=${encodeURIComponent(ids.join(","))}&platform=${encodeURIComponent(options.platform)}`;
+    const proxy = typeof options.getFutGgProxy === "function" ? options.getFutGgProxy() : options.futGgProxy;
+    const usingProxy = Boolean(normalizeFutGgProxy(proxy));
+    const url = buildFutGgPriceUrl({ proxy, definitionIds: ids, platform: options.platform });
     const text = await options.requestText(url, {
-      sendCookies: true,
+      sendCookies: !usingProxy,
       headers: {
         Accept: "application/json, text/plain, */*",
-        Referer: options.referer || "",
+        ...usingProxy ? {} : { Referer: options.referer || "" },
         "X-Requested-With": "XMLHttpRequest"
       }
     });
@@ -16062,6 +16099,14 @@
     for (const source of providerSteps) {
       const missingIds = ids.filter((id) => !loaded.has(id));
       if (!missingIds.length) break;
+      if (source === "futgg" && provider === "auto" && options.skipFutGg === true) {
+        result.attempts.push({
+          source: "FUT.GG",
+          status: "skipped",
+          reason: options.skipFutGgReason || "FUT.GG circuit is open; using FUTNext"
+        });
+        continue;
+      }
       if (source === "futnext" && provider === "auto" && loaded.size && options.fallbackOnPartial === false) break;
       try {
         const entries = source === "futgg" ? await requestFutGg({ ...options, platform }, missingIds) : await requestFutNext({ ...options, platform }, missingIds);
@@ -16100,6 +16145,13 @@
     let loadCount = 0;
     let lastLoad = null;
     let lastClearedAt = null;
+    let futGgBlockedUntil = 0;
+    let futGgBlockReason = null;
+    function isFutGgCircuitError(error) {
+      return /(?:\bHTTP\s*)?403\b|cloudflare|cf-mitigated|forbidden/i.test(
+        String(error?.message || error || "")
+      );
+    }
     async function load(request = {}) {
       const provider = normalizeProvider(request.provider || options.provider);
       const ids = normalizeDefinitionIds(request.definitionIds);
@@ -16108,14 +16160,29 @@
       const fresh = request.forceRefresh === true ? [] : ids.map((id) => cache.get(cacheKey(platform, id))).filter((entry) => entry && entry.expiresAt > currentTime && quoteMatchesProvider(entry, provider));
       const freshIds = new Set(fresh.map((entry) => entry.definitionId));
       const missingIds = ids.filter((id) => !freshIds.has(id));
+      const futGgCircuitOpen = provider === "auto" && currentTime < futGgBlockedUntil;
       const loaded = missingIds.length ? await loadPriceQuotes({
         ...options,
         ...request,
         provider,
         platform,
         definitionIds: missingIds,
-        now: currentTime
+        now: currentTime,
+        skipFutGg: futGgCircuitOpen,
+        skipFutGgReason: futGgBlockReason || void 0
       }) : { quotes: [], ids: [], source: null, attempts: [] };
+      const futGgAttempt = loaded.attempts.find((attempt) => attempt.source === "FUT.GG");
+      if (provider === "auto" && futGgAttempt?.status === "error" && isFutGgCircuitError(futGgAttempt.reason)) {
+        const circuitTtlMs = Math.max(
+          1,
+          Number(request.futGgCircuitTtlMs || options.futGgCircuitTtlMs || DEFAULT_FUTGG_CIRCUIT_TTL_MS)
+        );
+        futGgBlockedUntil = currentTime + circuitTtlMs;
+        futGgBlockReason = `FUT.GG unavailable (${futGgAttempt.reason}); using FUTNext for ${Math.ceil(circuitTtlMs / 6e4)} minutes`;
+      } else if (futGgAttempt?.status === "loaded") {
+        futGgBlockedUntil = 0;
+        futGgBlockReason = null;
+      }
       for (const entry of loaded.quotes) cache.set(cacheKey(entry.platform, entry.definitionId), entry);
       const quotes = ids.map((id) => cache.get(cacheKey(platform, id))).filter((entry) => entry && entry.expiresAt > currentTime && quoteMatchesProvider(entry, provider));
       const sources = [...new Set(quotes.map((entry) => entry.source))];
@@ -16146,6 +16213,8 @@
     }
     function clear() {
       cache.clear();
+      futGgBlockedUntil = 0;
+      futGgBlockReason = null;
       lastClearedAt = Number(now());
     }
     function snapshot() {
@@ -16163,6 +16232,10 @@
         schemaVersion: PRICE_QUOTE_HEALTH_SCHEMA_VERSION,
         capturedAt: currentTime,
         providers: ["FUT.GG", "FUTNext"],
+        futGgProxy: {
+          configured: Boolean(proxyOrigin(typeof options.getFutGgProxy === "function" ? options.getFutGgProxy() : options.futGgProxy)),
+          origin: proxyOrigin(typeof options.getFutGgProxy === "function" ? options.getFutGgProxy() : options.futGgProxy)
+        },
         status: !entries.length ? "empty" : !expired ? "fresh" : !fresh.length ? "stale" : "partial",
         cache: {
           entries: entries.length,
@@ -16179,6 +16252,11 @@
           loadCount,
           lastLoad: lastLoad ? JSON.parse(JSON.stringify(lastLoad)) : null,
           lastClearedAt
+        },
+        futGgCircuit: {
+          state: futGgBlockedUntil > currentTime ? "open" : "closed",
+          blockedUntil: futGgBlockedUntil || null,
+          reason: futGgBlockedUntil > currentTime ? futGgBlockReason : null
         }
       };
     }
@@ -16188,7 +16266,12 @@
   // src/reward/player-prices.js
   async function loadPlayerPickPrices(options = {}) {
     const ids = [...new Set((options.items || []).map((item) => Number(item?.definitionId || 0)).filter(Boolean))];
-    const loaded = await loadPriceQuotes({
+    const loaded = typeof options.priceQuoteProvider?.load === "function" ? await options.priceQuoteProvider.load({
+      ...options,
+      definitionIds: ids,
+      provider: "auto",
+      fallbackOnPartial: false
+    }) : await loadPriceQuotes({
       ...options,
       definitionIds: ids,
       provider: "auto",
@@ -38094,18 +38177,22 @@
       quoteGroup.appendChild(quoteHeading);
       const sources = Object.entries(quotes.cache?.bySource || {}).map(([source, count]) => `${source}:${count}`).join(", ") || "none";
       const platforms = Object.entries(quotes.cache?.byPlatform || {}).map(([platform, count]) => `${platform}:${count}`).join(", ") || "none";
+      const futGgCircuit = quotes.futGgCircuit || {};
       appendRows(quoteGroup, [
         ["Providers", (quotes.providers || ["FUT.GG", "FUTNext"]).join(" / ")],
         ["Status", quotes.status || "unavailable"],
+        ["FUT.GG proxy", quotes.futGgProxy?.configured ? quotes.futGgProxy.origin || "configured" : "direct"],
         ["Entries", quotes.cache?.entries],
         ["Fresh / expired", `${Number(quotes.cache?.freshEntries || 0)} / ${Number(quotes.cache?.expiredEntries || 0)}`],
         ["Sources", sources],
         ["Platforms", platforms],
         ["Loads", quotes.activity?.loadCount],
-        ["Last load", quotes.activity?.lastLoad?.at ? new Date(quotes.activity.lastLoad.at).toLocaleString() : "none"]
+        ["Last load", quotes.activity?.lastLoad?.at ? new Date(quotes.activity.lastLoad.at).toLocaleString() : "none"],
+        ["FUT.GG circuit", futGgCircuit.state || "closed"],
+        ["FUT.GG retry after", futGgCircuit.blockedUntil ? new Date(futGgCircuit.blockedUntil).toLocaleString() : "now"]
       ]);
       const clearQuotes = button5(dom, "Clear price quotes", mode, "bronze-loop-trade-clear-price-quotes");
-      clearQuotes.disabled = !Number(quotes.cache?.entries || 0);
+      clearQuotes.disabled = !Number(quotes.cache?.entries || 0) && futGgCircuit.state !== "open";
       clearQuotes.addEventListener("click", () => {
         try {
           options.onClearPriceQuoteCache?.();
@@ -38118,8 +38205,42 @@
       });
       styles3(clearQuotes, { marginTop: "8px" });
       quoteGroup.appendChild(clearQuotes);
+      const proxyGroup = styles3(dom.create("div"), { borderTop: "1px solid #47576b", paddingTop: "8px", marginTop: "12px", minWidth: "0" });
+      const proxyHeading = dom.create("div");
+      proxyHeading.textContent = "FUT.GG forwarding proxy";
+      styles3(proxyHeading, { fontWeight: "700", marginBottom: "6px" });
+      const proxyInput = input(dom, "url", options.getFutGgProxy?.() || "", mode, "bronze-loop-trade-futgg-proxy");
+      proxyInput.placeholder = "https://proxy.example/";
+      proxyInput.autocomplete = "off";
+      const proxyActions = styles3(dom.create("div"), { display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" });
+      const saveProxy = button5(dom, "Save FUT.GG proxy", mode, "bronze-loop-trade-save-futgg-proxy");
+      const clearProxy = button5(dom, "Clear FUT.GG proxy", mode, "bronze-loop-trade-clear-futgg-proxy");
+      clearProxy.disabled = !String(options.getFutGgProxy?.() || "").trim();
+      saveProxy.addEventListener("click", () => {
+        try {
+          options.onSetFutGgProxy?.(proxyInput.value);
+          refreshSnapshot();
+          setStatus("FUT.GG proxy saved; price cache cleared and Scheduler relocked");
+          render();
+        } catch (error) {
+          setStatus(`FUT.GG proxy save failed: ${error?.message || error}`);
+        }
+      });
+      clearProxy.addEventListener("click", () => {
+        try {
+          options.onSetFutGgProxy?.("");
+          refreshSnapshot();
+          setStatus("FUT.GG proxy cleared; direct FUT.GG is enabled");
+          render();
+        } catch (error) {
+          setStatus(`FUT.GG proxy clear failed: ${error?.message || error}`);
+        }
+      });
+      proxyActions.append(saveProxy, clearProxy);
+      proxyGroup.append(proxyHeading, proxyInput, proxyActions);
       grid.append(catalogGroup, quoteGroup);
       content.appendChild(grid);
+      content.appendChild(proxyGroup);
     }
     function render(input2 = {}) {
       if (input2.refresh !== false) refreshSnapshot();
@@ -39117,9 +39238,12 @@
       cacheKey: TRADE_PLAYER_CATALOG_CACHE_KEY,
       season: "26"
     });
+    const getFutGgProxy = () => String(adapters.userscriptStorage.get(TRADE_FUTGG_PROXY_KEY, "") || "").trim();
     const tradePriceQuoteProvider = createPriceQuoteProvider({
       requestText: adapters.http.getText,
-      provider: "auto"
+      provider: "auto",
+      referer: pageRuntime.origin(),
+      getFutGgProxy
     });
     const inspectTradeProviders = () => ({
       schemaVersion: 1,
@@ -40326,6 +40450,15 @@
           tradeJobStore.relock();
           tradePriceQuoteProvider.clear();
           log("Trade Scheduler: price quote cache cleared; scheduler relocked and all Jobs disarmed");
+          return inspectTradeProviders();
+        },
+        getFutGgProxy,
+        onSetFutGgProxy: (value) => {
+          const normalized = normalizeFutGgProxy(value);
+          tradeJobStore.relock();
+          adapters.userscriptStorage.set(TRADE_FUTGG_PROXY_KEY, normalized);
+          tradePriceQuoteProvider.clear();
+          log(normalized ? `Trade Scheduler: FUT.GG proxy set to ${new URL(normalized).origin}; price cache cleared and all Jobs disarmed` : "Trade Scheduler: FUT.GG proxy cleared; direct FUT.GG enabled; price cache cleared and all Jobs disarmed");
           return inspectTradeProviders();
         },
         onOpenManualListing: (job = null) => openTradeListingDialogModal(job),
@@ -48735,6 +48868,7 @@
         items,
         platform: loopDef.pricePlatform,
         referer: pageRuntime.origin(),
+        priceQuoteProvider: tradePriceQuoteProvider,
         requestText: adapters.http.getText
       });
       for (const attempt of result.attempts) {
@@ -49578,6 +49712,7 @@
           items: specialItems,
           platform: "pc",
           referer: pageRuntime.origin(),
+          priceQuoteProvider: tradePriceQuoteProvider,
           requestText: adapters.http.getText
         });
       } catch (error) {
