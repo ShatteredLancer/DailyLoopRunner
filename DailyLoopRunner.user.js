@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.44
+// @version      0.8.45
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.44",
+    version: "0.8.45",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -34134,6 +34134,14 @@
     if (!Number.isFinite(Number(value))) return "price:?";
     return `price:${formatPrice?.(Number(value)) || Number(value)}`;
   }
+  function candidateFutbinUrl(candidate, resolveFutbinPlayerId) {
+    if (typeof resolveFutbinPlayerId !== "function") return null;
+    try {
+      return createFutbinPlayerUrl(resolveFutbinPlayerId(candidate?.item));
+    } catch {
+      return null;
+    }
+  }
   function waitForManualPlayerPickSelection(options = {}) {
     if (!options.dom?.create || !options.dom?.appendToBody) throw new TypeError("dom adapter is required");
     if (typeof options.describeCandidate !== "function") throw new TypeError("describeCandidate is required");
@@ -34197,8 +34205,9 @@
         confirm.disabled = selected2.size !== pickCount;
       };
       ranked.forEach((candidate) => {
-        const card = options.dom.create("button");
-        card.type = "button";
+        const card = options.dom.create("div");
+        card.role = "button";
+        card.tabIndex = 0;
         const description = String(options.describeCandidate(candidate) || "");
         card.title = description;
         applyStyles2(card, {
@@ -34216,9 +34225,17 @@
           gap: "4px 8px",
           alignItems: "center"
         });
-        const name = options.dom.create("span");
+        const futbinUrl = candidateFutbinUrl(candidate, options.resolveFutbinPlayerId);
+        const name = options.dom.create(futbinUrl ? "a" : "span");
         name.textContent = candidateName(candidate, description, options.itemDisplayName);
-        name.title = name.textContent;
+        name.title = futbinUrl ? `Open ${name.textContent} on FUTBIN` : name.textContent;
+        if (futbinUrl) {
+          name.href = futbinUrl;
+          name.target = "_blank";
+          name.rel = "noopener noreferrer";
+          name.addEventListener("click", (event) => event?.stopPropagation?.());
+          name.addEventListener("keydown", (event) => event?.stopPropagation?.());
+        }
         applyStyles2(name, {
           gridColumn: "1",
           gridRow: "1",
@@ -34226,7 +34243,9 @@
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          fontWeight: "700"
+          fontWeight: "700",
+          color: futbinUrl ? "#9EC5FF" : "#F3F5F7",
+          textDecoration: futbinUrl ? "underline" : "none"
         });
         const details = options.dom.create("span");
         details.textContent = candidateDetails(candidate);
@@ -34254,10 +34273,16 @@
           fontSize: "12px"
         });
         card.append(name, details, price);
-        card.addEventListener("click", () => {
+        const toggle = () => {
           if (selected2.has(candidate)) selected2.delete(candidate);
           else if (selected2.size < pickCount) selected2.add(candidate);
           refresh();
+        };
+        card.addEventListener("click", toggle);
+        card.addEventListener("keydown", (event) => {
+          if (!["Enter", " "].includes(event?.key)) return;
+          event.preventDefault?.();
+          toggle();
         });
         cards.push({ card, candidate });
         list.appendChild(card);
@@ -48943,6 +48968,18 @@
       const ranked = selectionPlan.ranked;
       ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
       const manualReason = selectionPlan.manualReason;
+      let resolveManualPickFutbinPlayerId = () => null;
+      if (manualReason) {
+        try {
+          resolveManualPickFutbinPlayerId = await resolveRecapFutbinPlayerIds(
+            ranked.map((candidate) => candidate.item),
+            `${loopDef.name} Pick review`,
+            createRecapItemHydrator()
+          );
+        } catch (error) {
+          log(`${loopDef.name}: Pick review FUTBIN link lookup failed (${error?.message || error}); candidate names remain plain text`);
+        }
+      }
       const selected2 = manualReason ? await waitForManualPlayerPickSelection({
         dom: adapters.dom,
         ranked,
@@ -48951,6 +48988,7 @@
         describeCandidate: describePlayerPickCandidate,
         itemDisplayName,
         formatPrice: formatCompactPrice,
+        resolveFutbinPlayerId: resolveManualPickFutbinPlayerId,
         scheduleStopCheck: setInterval,
         cancelStopCheck: clearInterval,
         isStopping: () => state.stopping

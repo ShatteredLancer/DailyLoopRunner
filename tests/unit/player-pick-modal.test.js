@@ -17,7 +17,8 @@ function createUiHarness() {
       append(...items) { children.push(...items); },
       appendChild(item) { children.push(item); },
       remove() { element.removed = true; },
-      click() { listeners.get('click')?.(); },
+      click(event = {}) { listeners.get('click')?.(event); },
+      keydown(event = {}) { listeners.get('keydown')?.(event); },
       children,
     };
     created.push(element);
@@ -48,20 +49,31 @@ describe('manual Player Pick modal', () => {
       reason: 'tie',
       describeCandidate: (candidate) => `Player ${candidate.item.id}`,
       formatPrice: (price) => `${price / 1000}k`,
+      resolveFutbinPlayerId: (item) => (item.id === 1 ? 12345 : null),
       scheduleStopCheck: () => 7,
       cancelStopCheck,
       isStopping: () => false,
     });
 
-    const cards = harness.created.filter((element) => element.type === 'button');
+    const cards = harness.created.filter((element) => element.role === 'button');
     const confirm = harness.created.find((element) => element.textContent === 'Confirm selection');
-    expect(harness.created.find((element) => element.textContent === 'Player One')).toMatchObject({
-      style: expect.objectContaining({ gridColumn: '1', gridRow: '1' }),
+    const linkedName = harness.created.find((element) => element.textContent === 'Player One');
+    expect(linkedName).toMatchObject({
+      tagName: 'a',
+      href: 'https://www.futbin.com/26/player/12345/1',
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      style: expect.objectContaining({ gridColumn: '1', gridRow: '1', textDecoration: 'underline' }),
     });
+    expect(harness.created.find((element) => element.textContent === 'Player Two')).toMatchObject({ tagName: 'span' });
     expect(harness.created.find((element) => element.textContent === 'rating:90, special, new')).toBeTruthy();
     expect(harness.created.find((element) => element.textContent === 'price:135k')).toMatchObject({
       style: expect.objectContaining({ gridColumn: '2', gridRow: '1 / span 2' }),
     });
+    expect(confirm.disabled).toBe(true);
+    const stopPropagation = vi.fn();
+    linkedName.click({ stopPropagation });
+    expect(stopPropagation).toHaveBeenCalledOnce();
     expect(confirm.disabled).toBe(true);
     cards[0].click();
     expect(confirm.disabled).toBe(true);

@@ -3,6 +3,20 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.45] - 2026-08-24
+
+### Added
+
+- Make each resolvable candidate name in the Manual Player Pick review a direct
+  FUTBIN card link using the existing exact-ID resolver and cache. Links open in
+  a new tab without selecting the candidate; unresolved names remain plain text.
+
+### Verification
+
+- Full `npm run verify` passed: `199` test files / `1774` tests, plus syntax,
+  ESLint, config/profile, architecture, FSU patch replay, userscript/FSU
+  builds, dist equality, metadata, and release-asset checks.
+
 ## [0.8.44] - 2026-08-24
 
 ### Added
