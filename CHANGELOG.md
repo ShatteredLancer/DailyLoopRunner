@@ -3,6 +3,19 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Make Rolling check existing Required Special/TOTW rewards before crafting,
+  then open existing Provisions rewards one at a time and replan before
+  attempting a new Provisions SBC only after those rewards are exhausted.
+- Track exact Pack reward IDs and names for fully scanned TOTW and Provisions
+  activity families, including bounded account-scoped history, so old and new
+  reward IDs remain usable while avoiding similar unverified Pack names.
+- Log the verified family reward candidates and current My Packs counts when
+  Rolling enters TOTW or Provisions recovery.
+
 ## [0.8.46] - 2026-08-24
 
 ### Changed

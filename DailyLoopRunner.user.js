@@ -4460,6 +4460,11 @@
       identityPattern: /\b2\s*x\s*84\+|\b2\s+84\+/i
     })
   ]);
+  var PERSISTED_ACTIVITY_FAMILY_REWARDS = /* @__PURE__ */ new Set([
+    "totw-upgrade",
+    "provisions-upgrade"
+  ]);
+  var MAX_ACTIVITY_FAMILY_REWARD_IDENTITIES = 24;
   var SBC_ACTIVITY_FAMILY_IDS = Object.freeze([
     ...FAMILY_DEFS.map((family) => family.id),
     ...Object.values(MATERIAL_SINK_FAMILIES),
@@ -4816,7 +4821,53 @@
     ) : clone3(activity.requirements || []);
     return merged;
   }
-  function materializeBoundTarget(target, activitiesByFamily, diagnostics, path) {
+  function normalizeActivityFamilyRewardHistory(history = {}) {
+    const source = history?.families && typeof history.families === "object" ? history.families : {};
+    return {
+      version: 1,
+      families: Object.fromEntries([...PERSISTED_ACTIVITY_FAMILY_REWARDS].map((family) => [
+        family,
+        {
+          packIds: unique2((source[family]?.packIds || []).map(positiveInteger4).filter(Boolean)).slice(0, MAX_ACTIVITY_FAMILY_REWARD_IDENTITIES),
+          packNames: unique2((source[family]?.packNames || []).map(normalizedText4).filter(Boolean)).slice(0, MAX_ACTIVITY_FAMILY_REWARD_IDENTITIES)
+        }
+      ]))
+    };
+  }
+  function mergeActivityFamilyRewardHistory(history = {}, activities = []) {
+    const result = normalizeActivityFamilyRewardHistory(history);
+    for (const family of PERSISTED_ACTIVITY_FAMILY_REWARDS) {
+      const matches = activities.filter((activity) => activity?.familyId === family);
+      result.families[family] = {
+        packIds: unique2([
+          ...matches.flatMap((activity) => activity.rewardPackIds || []).map(positiveInteger4).filter(Boolean),
+          ...result.families[family].packIds
+        ]).slice(0, MAX_ACTIVITY_FAMILY_REWARD_IDENTITIES),
+        packNames: unique2([
+          ...matches.flatMap((activity) => activity.rewardPackNames || []).map(normalizedText4).filter(Boolean),
+          ...result.families[family].packNames
+        ]).slice(0, MAX_ACTIVITY_FAMILY_REWARD_IDENTITIES)
+      };
+    }
+    return result;
+  }
+  function mergeActivityFamilyRewardMetadata(target = {}, matches = [], rewardHistory = {}) {
+    const family = target?.activityBinding?.family;
+    if (!PERSISTED_ACTIVITY_FAMILY_REWARDS.has(family)) return target;
+    const history = rewardHistory?.families?.[family] || {};
+    return {
+      ...target,
+      activityFamilyRewardPackIds: unique2([
+        ...matches.flatMap((activity) => activity.rewardPackIds || []).map(positiveInteger4).filter(Boolean),
+        ...history.packIds || []
+      ]),
+      activityFamilyRewardPackNames: unique2([
+        ...matches.flatMap((activity) => activity.rewardPackNames || []).map(normalizedText4).filter(Boolean),
+        ...history.packNames || []
+      ])
+    };
+  }
+  function materializeBoundTarget(target, activitiesByFamily, diagnostics, path, rewardHistory = {}) {
     if (!target?.activityBinding?.family) return clone3(target);
     const family = target.activityBinding.family;
     const matches = activitiesByFamily.get(family) || [];
@@ -4836,7 +4887,11 @@
     }
     const compatibleMatches = Array.isArray(target.requirements) && target.requirements.length ? matches.filter((activity) => activityAcceptsConfiguredConsumption(activity, target)) : matches;
     if (compatibleMatches.length === 1) {
-      return mergeScannedActivityMetadata(target, compatibleMatches[0]);
+      return mergeActivityFamilyRewardMetadata(
+        mergeScannedActivityMetadata(target, compatibleMatches[0]),
+        matches,
+        rewardHistory
+      );
     }
     if (compatibleMatches.length > 1) {
       diagnostics.push(`${path}: activity family ${family} is ambiguous (${compatibleMatches.map((entry) => `#${entry.setId} ${entry.setName}`).join(", ")})`);
@@ -4845,15 +4900,16 @@
     }
     return clone3(target);
   }
-  function materializeLoop(loop, activitiesByFamily, diagnostics) {
-    let result = materializeBoundTarget(loop, activitiesByFamily, diagnostics, `Loop ${loop.id || loop.name || "?"}`);
+  function materializeLoop(loop, activitiesByFamily, diagnostics, rewardHistory = {}) {
+    let result = materializeBoundTarget(loop, activitiesByFamily, diagnostics, `Loop ${loop.id || loop.name || "?"}`, rewardHistory);
     for (const field5 of ["stages", "craftingUpgrades"]) {
       if (!Array.isArray(result[field5])) continue;
       result[field5] = result[field5].map((entry, index) => materializeBoundTarget(
         entry,
         activitiesByFamily,
         diagnostics,
-        `Loop ${loop.id || loop.name || "?"}.${field5}[${index}]`
+        `Loop ${loop.id || loop.name || "?"}.${field5}[${index}]`,
+        rewardHistory
       ));
     }
     for (const field5 of [
@@ -4870,7 +4926,8 @@
         result[field5],
         activitiesByFamily,
         diagnostics,
-        `Loop ${loop.id || loop.name || "?"}.${field5}`
+        `Loop ${loop.id || loop.name || "?"}.${field5}`,
+        rewardHistory
       );
     }
     return result;
@@ -4904,9 +4961,18 @@
       activitiesByFamily.set(family, [...activitiesByFamily.get(family) || [], clone3(activity)]);
     }
     const diagnostics = [];
+    const activityFamilyRewardHistory = mergeActivityFamilyRewardHistory(
+      input2.activityFamilyRewardHistory,
+      [...activitiesByFamily.values()].flat()
+    );
     const loopOverrides = {};
     for (const loop of input2.configuredLoops || []) {
-      const materialized = materializeLoop(loop, activitiesByFamily, diagnostics);
+      const materialized = materializeLoop(
+        loop,
+        activitiesByFamily,
+        diagnostics,
+        activityFamilyRewardHistory
+      );
       if (JSON.stringify(materialized) !== JSON.stringify(loop)) loopOverrides[loop.id] = materialized;
     }
     const recoveryRecipeOverrides = {};
@@ -4915,7 +4981,8 @@
         recipe2,
         activitiesByFamily,
         diagnostics,
-        `Recovery ${recipe2.id || recipe2.name || "?"}`
+        `Recovery ${recipe2.id || recipe2.name || "?"}`,
+        activityFamilyRewardHistory
       );
       if (JSON.stringify(materialized) !== JSON.stringify(recipe2)) recoveryRecipeOverrides[recipe2.id] = materialized;
     }
@@ -4924,6 +4991,7 @@
       recoveryRecipeOverrides,
       results,
       diagnostics: unique2(diagnostics),
+      activityFamilyRewardHistory,
       activities: [...activitiesByFamily.values()].flat().map((activity) => ({
         ...clone3(activity),
         consumers: activityConsumers(activity, loopOverrides, recoveryRecipeOverrides)
@@ -29050,6 +29118,37 @@
             return finish("blocked", planned, "primary squad is infeasible", planCode);
           }
           if (recovery?.recoverableByProvisions === true) {
+            if (typeof options.processLeftoverRecoveryReward === "function") {
+              const existingProvisions = await runRecovery(
+                "reward",
+                ROLLING_UPGRADE_PHASES.PROCESS_RECOVERY_REWARD,
+                options.processLeftoverRecoveryReward,
+                {
+                  trigger: "required-special-fodder-shortage",
+                  plan: planned,
+                  dependency: recovery
+                }
+              );
+              if (isProgressed(existingProvisions)) {
+                continue;
+              }
+              const existingProvisionsStorage = await recoverBlockedRewardStorage(existingProvisions, {
+                source: "required-special-provisions-pre-open",
+                blockedReason: "existing Provisions reward needs more Storage headroom",
+                recoveryReason: "Storage pressure SBC could not clear room for the existing Provisions reward"
+              });
+              if (existingProvisionsStorage.matched) {
+                if (existingProvisionsStorage.progressed) continue;
+                return existingProvisionsStorage.failure;
+              }
+              if (isStopped(existingProvisions) || isBlocked(existingProvisions) || existingProvisions?.status === "planned") {
+                return finishRecoveryFailure(
+                  existingProvisions,
+                  "existing Provisions reward could not be processed",
+                  "REQUIRED_SPECIAL_RECOVERY_BLOCKED"
+                );
+              }
+            }
             const provisions = await recoverProvisions({
               trigger: "required-special-fodder-shortage",
               plan: planned,
@@ -43052,6 +43151,9 @@
     function dynamicSbcStorageSinkCatalogKey() {
       return `${dynamicSbcCacheStorageKey()}:storage-sink-index`;
     }
+    function dynamicSbcFamilyRewardHistoryKey() {
+      return `${dynamicSbcCacheStorageKey()}:family-reward-history`;
+    }
     function createDynamicSbcRequestPacer() {
       const healthKey = dynamicSbcScanHealthStorageKey();
       const previous = normalizeDynamicSbcScanHealth(adapters.userscriptStorage.get(healthKey, null), Date.now());
@@ -43162,9 +43264,11 @@
       ]);
       const cacheKey = dynamicSbcCacheStorageKey();
       const storageSinkCatalogKey = dynamicSbcStorageSinkCatalogKey();
+      const familyRewardHistoryKey = dynamicSbcFamilyRewardHistoryKey();
       if (clearCache) {
         adapters.userscriptStorage.remove(cacheKey);
         adapters.userscriptStorage.remove(storageSinkCatalogKey);
+        adapters.userscriptStorage.remove(familyRewardHistoryKey);
       }
       const cached = clearCache ? null : adapters.userscriptStorage.get(cacheKey, null);
       let storageSinkIndexes = clearCache ? [] : adapters.userscriptStorage.get(storageSinkCatalogKey, []);
@@ -43324,8 +43428,13 @@
           ...upgradeSession.rollingLoops
         ],
         recoveryRecipes: getConfiguredRecoveryRecipes(),
-        additionalActivities: collectScannedUpgradeActivities(upgradeSession.results)
+        additionalActivities: collectScannedUpgradeActivities(upgradeSession.results),
+        activityFamilyRewardHistory: clearCache ? null : adapters.userscriptStorage.get(familyRewardHistoryKey, null)
       });
+      adapters.userscriptStorage.set(
+        familyRewardHistoryKey,
+        activitySession.activityFamilyRewardHistory
+      );
       const configuredLoopIds = new Set(configuredLoops.map((loopDef) => String(loopDef?.id || "")).filter(Boolean));
       const configuredActivityOverrides = Object.fromEntries(
         Object.entries(activitySession.loopOverrides).filter(([loopId]) => configuredLoopIds.has(String(loopId)))
@@ -46322,9 +46431,42 @@
       if (!pack && loopDef.rewardPackIds?.length) {
         pack = loopDef.rewardPackIds.map((id) => findById(id)).find(Boolean);
       }
-      if (!pack && loopDef.rewardPackNames?.length) pack = findByName(loopDef.rewardPackNames);
+      if (!pack && loopDef.activityFamilyRewardPackIds?.length) {
+        pack = loopDef.activityFamilyRewardPackIds.map((id) => findById(id)).find(Boolean);
+      }
+      const hasActivityFamilyRewardIdentity = Boolean(
+        loopDef.activityFamilyRewardPackIds?.length || loopDef.activityFamilyRewardPackNames?.length
+      );
+      const hasActivityFamilyRewardIds = Boolean(
+        loopDef.rewardPackIds?.length || loopDef.activityFamilyRewardPackIds?.length
+      );
+      if (!pack && hasActivityFamilyRewardIdentity && !hasActivityFamilyRewardIds) {
+        const familyNames = new Set([
+          ...loopDef.rewardPackNames || [],
+          ...loopDef.activityFamilyRewardPackNames || []
+        ].map((name) => String(name || "").trim().toLowerCase()).filter(Boolean));
+        pack = packs.find((candidate) => familyNames.has(String(packName(candidate) || "").trim().toLowerCase())) || null;
+      }
+      if (!pack && !hasActivityFamilyRewardIdentity && loopDef.rewardPackNames?.length) {
+        pack = findByName(loopDef.rewardPackNames);
+      }
       if (!pack && options.fallbackPackMatcher) pack = findByPredicate(options.fallbackPackMatcher);
       return pack || null;
+    }
+    function rollingFamilyRewardInventorySummary(definition = {}) {
+      const candidateIds = [...new Set([
+        ...definition.rewardPackIds || [],
+        ...definition.activityFamilyRewardPackIds || []
+      ].map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+      const counts = new Map(candidateIds.map((id) => [id, 0]));
+      for (const pack of getAvailableRepositoryMyPacks()) {
+        const id = Number(packIdKey3(pack) || 0);
+        if (counts.has(id)) counts.set(id, counts.get(id) + 1);
+      }
+      return {
+        candidateIds,
+        available: [...counts.entries()].filter(([, count]) => count > 0)
+      };
     }
     async function findRewardPack(loopDef, explicitPackId = null, options = {}) {
       const attempts = Math.max(1, Number(options.attempts || 1) || 1);
@@ -55396,13 +55538,21 @@
             if (opened.status === "opened") clearRollingPendingRequiredSpecialReward(runtime);
             return opened;
           },
-          processLeftoverRecoveryReward: async () => {
-            for (const field5 of ["rollingProvisionsUpgrade", "rollingGoldSinkUpgrade"]) {
+          processLeftoverRecoveryReward: async ({ context } = {}) => {
+            const requiredSpecialDependency = context?.trigger === "required-special-fodder-shortage";
+            const fields = requiredSpecialDependency ? ["rollingProvisionsUpgrade"] : ["rollingProvisionsUpgrade", "rollingGoldSinkUpgrade"];
+            for (const field5 of fields) {
               const definition = rollingRecoveryDef(loopDef[field5], loopDef, { inventoryFirst: true });
               if (!rollingCapabilityAvailable(definition)) continue;
+              if (definition.dynamicSbcFamily === "provisions-upgrade") {
+                const inventory = rollingFamilyRewardInventorySummary(definition);
+                const candidates = inventory.candidateIds.map((id) => `#${id}`).join(", ") || "none";
+                const available = inventory.available.map(([id, count]) => `#${id} x${count}`).join(", ") || "none";
+                log(`${loopDef.name}: Provision family reward candidates ${candidates}; available in My Packs: ${available}`);
+              }
               const pack = findRewardPackInCache(definition, null, { repositoryOnly: true });
               if (!pack) continue;
-              log(`${loopDef.name}: primary fodder shortage; opening existing leftover ${definition.name} reward`);
+              log(`${loopDef.name}: ${requiredSpecialDependency ? "Required Special recovery fodder shortage" : "primary fodder shortage"}; opening existing leftover ${definition.name} reward #${packIdKey3(pack) || "?"}`);
               const opened = await openRollingRecoveryReward(loopDef, runtime, definition, pack, {
                 captureRecoveryDuplicates: definition.dynamicSbcFamily === "provisions-upgrade"
               });
@@ -55567,6 +55717,10 @@
             if (!rollingCapabilityAvailable(definition)) {
               return { status: "unavailable", reason: "dynamic 84+ TOTW Upgrade capability is unavailable" };
             }
+            const rewardInventory = rollingFamilyRewardInventorySummary(definition);
+            const rewardCandidates = rewardInventory.candidateIds.map((id) => `#${id}`).join(", ") || "none";
+            const availableRewards = rewardInventory.available.map(([id, count]) => `#${id} x${count}`).join(", ") || "none";
+            log(`${loopDef.name}: Required Special family reward candidates ${rewardCandidates}; available in My Packs: ${availableRewards}`);
             const pack = await findRewardPack(definition, null, {
               attempts: 2,
               delayMs: 1e3,

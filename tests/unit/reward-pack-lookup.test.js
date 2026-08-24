@@ -26,4 +26,40 @@ describe('reward pack lookup', () => {
       repositoryOnly: true,
     })).toBe(first);
   });
+
+  it('finds a previously scanned reward from the same activity family after the selected SBC reward ID changes', async () => {
+    const olderProvision = { id: 20643, name: '85+ Provisions Pack' };
+    const unrelated = { id: 99999, name: 'Provisions Pack Preview' };
+    const { api } = await loadUserscript({ packs: [unrelated, olderProvision] });
+    const definition = {
+      rewardPackIds: [21346],
+      rewardPackNames: ['87+ Repeatable Provisions Pack'],
+      activityFamilyRewardPackIds: [20643, 21346],
+      activityFamilyRewardPackNames: ['85+ Provisions Pack', '87+ Repeatable Provisions Pack'],
+    };
+
+    expect(api.findRewardPackInCache(definition, null, { repositoryOnly: true })).toBe(olderProvision);
+  });
+
+  it('does not use a similar unverified name as an activity-family reward fallback', async () => {
+    const unrelated = { id: 99999, name: '85+ Provisions Pack Preview' };
+    const { api } = await loadUserscript({ packs: [unrelated] });
+
+    expect(api.findRewardPackInCache({
+      rewardPackNames: ['85+ Provisions Pack'],
+      activityFamilyRewardPackNames: ['85+ Provisions Pack'],
+    }, null, { repositoryOnly: true })).toBeNull();
+  });
+
+  it('does not use an exact but unverified name when scanned family reward IDs are available', async () => {
+    const unrelated = { id: 99999, name: '85+ Provisions Pack' };
+    const { api } = await loadUserscript({ packs: [unrelated] });
+
+    expect(api.findRewardPackInCache({
+      rewardPackIds: [21346],
+      rewardPackNames: ['85+ Provisions Pack'],
+      activityFamilyRewardPackIds: [20643, 21346],
+      activityFamilyRewardPackNames: ['85+ Provisions Pack'],
+    }, null, { repositoryOnly: true })).toBeNull();
+  });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildActivityBindingSession,
   collectActivityBindingSbcNames,
+  mergeActivityFamilyRewardHistory,
   parseBasicUpgradeActivitySnapshot,
 } from '../../src/config/activity-discovery.js';
 import {
@@ -516,9 +517,88 @@ describe('basic Upgrade activity discovery', () => {
       activityResolved: true,
       sbcSetIds: [1354],
       rewardPackIds: [21346],
+      activityFamilyRewardPackIds: [20643, 21346],
       requirements: [expect.objectContaining({ count: 4, minRating: 87, maxRating: 88 })],
     });
     expect(session.diagnostics).toEqual([]);
+  });
+
+  it('retains previously verified Provision reward IDs after the producing SBC leaves the current scan', () => {
+    const loop = {
+      id: 'rolling-provisions-history',
+      strategy: 'rollingUpgrade',
+      rollingProvisionsUpgrade: {
+        activityBinding: { family: 'provisions-upgrade', category: 'Upgrades', required: true },
+        requirements: [{ tier: 'gold', count: 4, minRating: 87, maxRating: 88 }],
+      },
+    };
+    const priorHistory = mergeActivityFamilyRewardHistory({}, [{
+      familyId: 'provisions-upgrade',
+      setId: 1000,
+      rewardPackIds: [20643],
+      rewardPackNames: ['Older Provisions Pack'],
+    }]);
+    const session = buildActivityBindingSession({
+      sets: [],
+      configuredLoops: [loop],
+      activityFamilyRewardHistory: priorHistory,
+      additionalActivities: [{
+        familyId: 'provisions-upgrade',
+        setId: 2000,
+        setName: 'Current Provisions Upgrade',
+        rewardPackIds: [21346],
+        rewardPackNames: ['Current Provisions Pack'],
+        requirements: [{ tier: 'gold', count: 4, minRating: 87 }],
+      }],
+    });
+
+    expect(session.loopOverrides[loop.id].rollingProvisionsUpgrade).toMatchObject({
+      rewardPackIds: [21346],
+      activityFamilyRewardPackIds: [21346, 20643],
+      activityFamilyRewardPackNames: ['Current Provisions Pack', 'Older Provisions Pack'],
+    });
+  });
+
+  it('does not retain reward identities for unrelated activity families', () => {
+    const history = mergeActivityFamilyRewardHistory({
+      families: { 'high-rated-x10': { packIds: [99999], packNames: ['Unrelated Pack'] } },
+    }, [{
+      familyId: 'high-rated-x10',
+      setId: 3000,
+      rewardPackIds: [88888],
+      rewardPackNames: ['Current Unrelated Pack'],
+    }]);
+
+    expect(history.families['high-rated-x10']).toBeUndefined();
+    expect(history.families['provisions-upgrade']).toEqual({ packIds: [], packNames: [] });
+  });
+
+  it('does not attach family reward metadata to unrelated activity consumers', () => {
+    const loop = {
+      id: 'high-rated-history-boundary',
+      strategy: 'ratingCraft',
+      activityBinding: { family: 'high-rated-x10', category: 'Upgrades', required: true },
+      requirements: [{ tier: 'gold', count: 11, minRating: 84 }],
+    };
+    const session = buildActivityBindingSession({
+      sets: [],
+      configuredLoops: [loop],
+      additionalActivities: [{
+        familyId: 'high-rated-x10',
+        setId: 3000,
+        setName: 'High Rated Upgrade',
+        rewardPackIds: [88888],
+        rewardPackNames: ['Current Unrelated Pack'],
+        requirements: [{ tier: 'gold', count: 11, minRating: 84 }],
+      }],
+    });
+
+    expect(session.loopOverrides[loop.id]).toMatchObject({
+      activityResolved: true,
+      rewardPackIds: [88888],
+    });
+    expect(session.loopOverrides[loop.id]).not.toHaveProperty('activityFamilyRewardPackIds');
+    expect(session.loopOverrides[loop.id]).not.toHaveProperty('activityFamilyRewardPackNames');
   });
 
   it('collects activity-bound SBC aliases from direct and nested consumers for scan prefiltering', () => {

@@ -917,6 +917,148 @@ describe('10x85+ Rolling workflow', () => {
     expect(calls).toEqual(['required-special', 'provisions', 'required-special']);
   });
 
+  it('opens an existing Provisions reward before crafting one when Required Special recovery lacks fodder', async () => {
+    let inventoryVersion = 1;
+    let fodderReady = false;
+    let specialReady = false;
+    let existingProvisions = 1;
+    const calls = [];
+    const options = harness({
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => specialReady
+        ? { ok: true }
+        : { ok: false, missing: { code: 'REQUIRED_SPECIAL_SHORTAGE' } }),
+      recoverRequiredSpecial: vi.fn(async () => {
+        calls.push('required-special');
+        if (!fodderReady) {
+          return {
+            status: 'blocked',
+            reason: 'TOTW squad rating shortage',
+            recoverableByProvisions: true,
+          };
+        }
+        specialReady = true;
+        inventoryVersion++;
+        return { status: 'progressed' };
+      }),
+      processLeftoverRecoveryReward: vi.fn(async ({ context }) => {
+        calls.push('check-existing-provisions');
+        expect(context.trigger).toBe('required-special-fodder-shortage');
+        if (!existingProvisions) return { status: 'skipped' };
+        existingProvisions--;
+        fodderReady = true;
+        inventoryVersion++;
+        calls.push('open-existing-provisions');
+        return {
+          status: 'opened',
+          details: { recoveryFamily: 'provisions-upgrade' },
+        };
+      }),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('craft-provisions');
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      recoveries: { reward: 1, provisions: 0, requiredSpecial: 1 },
+    });
+    expect(calls).toEqual([
+      'required-special',
+      'check-existing-provisions',
+      'open-existing-provisions',
+      'required-special',
+    ]);
+    expect(options.recoverProvisions).not.toHaveBeenCalled();
+  });
+
+  it('crafts Provisions only after the existing family rewards are exhausted', async () => {
+    let inventoryVersion = 1;
+    let fodderReady = false;
+    let specialReady = false;
+    const calls = [];
+    const options = harness({
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => specialReady
+        ? { ok: true }
+        : { ok: false, missing: { code: 'REQUIRED_SPECIAL_SHORTAGE' } }),
+      recoverRequiredSpecial: vi.fn(async () => {
+        calls.push('required-special');
+        if (!fodderReady) {
+          return { status: 'blocked', recoverableByProvisions: true };
+        }
+        specialReady = true;
+        inventoryVersion++;
+        return { status: 'progressed' };
+      }),
+      processLeftoverRecoveryReward: vi.fn(async () => {
+        calls.push('check-existing-provisions');
+        return { status: 'skipped' };
+      }),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('craft-provisions');
+        fodderReady = true;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result.status).toBe('completed');
+    expect(calls).toEqual([
+      'required-special',
+      'check-existing-provisions',
+      'craft-provisions',
+      'required-special',
+    ]);
+  });
+
+  it('opens all existing Provision rewards needed by Required Special before crafting another', async () => {
+    let inventoryVersion = 1;
+    let specialReady = false;
+    let existingProvisions = 3;
+    const calls = [];
+    const options = harness({
+      shortageProvisionsPackLimit: 2,
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => specialReady
+        ? { ok: true }
+        : { ok: false, missing: { code: 'REQUIRED_SPECIAL_SHORTAGE' } }),
+      recoverRequiredSpecial: vi.fn(async () => {
+        calls.push('required-special');
+        if (existingProvisions > 0) return { status: 'blocked', recoverableByProvisions: true };
+        specialReady = true;
+        inventoryVersion++;
+        return { status: 'progressed' };
+      }),
+      processLeftoverRecoveryReward: vi.fn(async () => {
+        calls.push('open-existing-provisions');
+        existingProvisions--;
+        inventoryVersion++;
+        return { status: 'opened', details: { recoveryFamily: 'provisions-upgrade' } };
+      }),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('craft-provisions');
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result.status).toBe('completed');
+    expect(calls.filter((entry) => entry === 'open-existing-provisions')).toHaveLength(3);
+    expect(calls.filter((entry) => entry === 'required-special')).toHaveLength(4);
+    expect(calls).not.toContain('craft-provisions');
+    expect(options.recoverProvisions).not.toHaveBeenCalled();
+  });
+
   it('runs Provisions, opens its reward, drains Rare through Pick, then Gold through 5x80+', async () => {
     let inventoryVersion = 1;
     let stage = 'shortage';

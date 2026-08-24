@@ -900,6 +900,38 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           return finish('blocked', planned, 'primary squad is infeasible', planCode);
         }
         if (recovery?.recoverableByProvisions === true) {
+          if (typeof options.processLeftoverRecoveryReward === 'function') {
+            const existingProvisions = await runRecovery(
+              'reward',
+              ROLLING_UPGRADE_PHASES.PROCESS_RECOVERY_REWARD,
+              options.processLeftoverRecoveryReward,
+              {
+                trigger: 'required-special-fodder-shortage',
+                plan: planned,
+                dependency: recovery,
+              },
+            );
+            if (isProgressed(existingProvisions)) {
+              continue;
+            }
+            const existingProvisionsStorage = await recoverBlockedRewardStorage(existingProvisions, {
+              source: 'required-special-provisions-pre-open',
+              blockedReason: 'existing Provisions reward needs more Storage headroom',
+              recoveryReason: 'Storage pressure SBC could not clear room for the existing Provisions reward',
+            });
+            if (existingProvisionsStorage.matched) {
+              if (existingProvisionsStorage.progressed) continue;
+              return existingProvisionsStorage.failure;
+            }
+            if (isStopped(existingProvisions) || isBlocked(existingProvisions)
+              || existingProvisions?.status === 'planned') {
+              return finishRecoveryFailure(
+                existingProvisions,
+                'existing Provisions reward could not be processed',
+                'REQUIRED_SPECIAL_RECOVERY_BLOCKED',
+              );
+            }
+          }
           const provisions = await recoverProvisions({
             trigger: 'required-special-fodder-shortage',
             plan: planned,

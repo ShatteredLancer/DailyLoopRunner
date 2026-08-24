@@ -53,6 +53,12 @@ const FAMILY_DEFS = Object.freeze([
   }),
 ]);
 
+const PERSISTED_ACTIVITY_FAMILY_REWARDS = new Set([
+  'totw-upgrade',
+  'provisions-upgrade',
+]);
+const MAX_ACTIVITY_FAMILY_REWARD_IDENTITIES = 24;
+
 export const SBC_ACTIVITY_FAMILIES = FAMILY_DEFS;
 export const SBC_ACTIVITY_FAMILY_IDS = Object.freeze([
   ...FAMILY_DEFS.map((family) => family.id),
@@ -477,7 +483,60 @@ export function mergeScannedActivityMetadata(target = {}, activity = {}) {
   return merged;
 }
 
-function materializeBoundTarget(target, activitiesByFamily, diagnostics, path) {
+function normalizeActivityFamilyRewardHistory(history = {}) {
+  const source = history?.families && typeof history.families === 'object'
+    ? history.families
+    : {};
+  return {
+    version: 1,
+    families: Object.fromEntries([...PERSISTED_ACTIVITY_FAMILY_REWARDS].map((family) => [
+      family,
+      {
+        packIds: unique((source[family]?.packIds || []).map(positiveInteger).filter(Boolean))
+          .slice(0, MAX_ACTIVITY_FAMILY_REWARD_IDENTITIES),
+        packNames: unique((source[family]?.packNames || []).map(normalizedText).filter(Boolean))
+          .slice(0, MAX_ACTIVITY_FAMILY_REWARD_IDENTITIES),
+      },
+    ])),
+  };
+}
+
+export function mergeActivityFamilyRewardHistory(history = {}, activities = []) {
+  const result = normalizeActivityFamilyRewardHistory(history);
+  for (const family of PERSISTED_ACTIVITY_FAMILY_REWARDS) {
+    const matches = activities.filter((activity) => activity?.familyId === family);
+    result.families[family] = {
+      packIds: unique([
+        ...matches.flatMap((activity) => activity.rewardPackIds || []).map(positiveInteger).filter(Boolean),
+        ...result.families[family].packIds,
+      ]).slice(0, MAX_ACTIVITY_FAMILY_REWARD_IDENTITIES),
+      packNames: unique([
+        ...matches.flatMap((activity) => activity.rewardPackNames || []).map(normalizedText).filter(Boolean),
+        ...result.families[family].packNames,
+      ]).slice(0, MAX_ACTIVITY_FAMILY_REWARD_IDENTITIES),
+    };
+  }
+  return result;
+}
+
+function mergeActivityFamilyRewardMetadata(target = {}, matches = [], rewardHistory = {}) {
+  const family = target?.activityBinding?.family;
+  if (!PERSISTED_ACTIVITY_FAMILY_REWARDS.has(family)) return target;
+  const history = rewardHistory?.families?.[family] || {};
+  return {
+    ...target,
+    activityFamilyRewardPackIds: unique([
+      ...matches.flatMap((activity) => activity.rewardPackIds || []).map(positiveInteger).filter(Boolean),
+      ...(history.packIds || []),
+    ]),
+    activityFamilyRewardPackNames: unique([
+      ...matches.flatMap((activity) => activity.rewardPackNames || []).map(normalizedText).filter(Boolean),
+      ...(history.packNames || []),
+    ]),
+  };
+}
+
+function materializeBoundTarget(target, activitiesByFamily, diagnostics, path, rewardHistory = {}) {
   if (!target?.activityBinding?.family) return clone(target);
   const family = target.activityBinding.family;
   const matches = activitiesByFamily.get(family) || [];
@@ -503,7 +562,11 @@ function materializeBoundTarget(target, activitiesByFamily, diagnostics, path) {
     ? matches.filter((activity) => activityAcceptsConfiguredConsumption(activity, target))
     : matches;
   if (compatibleMatches.length === 1) {
-    return mergeScannedActivityMetadata(target, compatibleMatches[0]);
+    return mergeActivityFamilyRewardMetadata(
+      mergeScannedActivityMetadata(target, compatibleMatches[0]),
+      matches,
+      rewardHistory,
+    );
   }
   if (compatibleMatches.length > 1) {
     diagnostics.push(`${path}: activity family ${family} is ambiguous (${compatibleMatches.map((entry) => `#${entry.setId} ${entry.setName}`).join(', ')})`);
@@ -513,8 +576,8 @@ function materializeBoundTarget(target, activitiesByFamily, diagnostics, path) {
   return clone(target);
 }
 
-function materializeLoop(loop, activitiesByFamily, diagnostics) {
-  let result = materializeBoundTarget(loop, activitiesByFamily, diagnostics, `Loop ${loop.id || loop.name || '?'}`);
+function materializeLoop(loop, activitiesByFamily, diagnostics, rewardHistory = {}) {
+  let result = materializeBoundTarget(loop, activitiesByFamily, diagnostics, `Loop ${loop.id || loop.name || '?'}`, rewardHistory);
   for (const field of ['stages', 'craftingUpgrades']) {
     if (!Array.isArray(result[field])) continue;
     result[field] = result[field].map((entry, index) => materializeBoundTarget(
@@ -522,6 +585,7 @@ function materializeLoop(loop, activitiesByFamily, diagnostics) {
       activitiesByFamily,
       diagnostics,
       `Loop ${loop.id || loop.name || '?'}.${field}[${index}]`,
+      rewardHistory,
     ));
   }
   for (const field of [
@@ -539,6 +603,7 @@ function materializeLoop(loop, activitiesByFamily, diagnostics) {
       activitiesByFamily,
       diagnostics,
       `Loop ${loop.id || loop.name || '?'}.${field}`,
+      rewardHistory,
     );
   }
   return result;
@@ -584,9 +649,18 @@ export function buildActivityBindingSession(input = {}) {
   }
 
   const diagnostics = [];
+  const activityFamilyRewardHistory = mergeActivityFamilyRewardHistory(
+    input.activityFamilyRewardHistory,
+    [...activitiesByFamily.values()].flat(),
+  );
   const loopOverrides = {};
   for (const loop of input.configuredLoops || []) {
-    const materialized = materializeLoop(loop, activitiesByFamily, diagnostics);
+    const materialized = materializeLoop(
+      loop,
+      activitiesByFamily,
+      diagnostics,
+      activityFamilyRewardHistory,
+    );
     if (JSON.stringify(materialized) !== JSON.stringify(loop)) loopOverrides[loop.id] = materialized;
   }
 
@@ -597,6 +671,7 @@ export function buildActivityBindingSession(input = {}) {
       activitiesByFamily,
       diagnostics,
       `Recovery ${recipe.id || recipe.name || '?'}`,
+      activityFamilyRewardHistory,
     );
     if (JSON.stringify(materialized) !== JSON.stringify(recipe)) recoveryRecipeOverrides[recipe.id] = materialized;
   }
@@ -606,6 +681,7 @@ export function buildActivityBindingSession(input = {}) {
     recoveryRecipeOverrides,
     results,
     diagnostics: unique(diagnostics),
+    activityFamilyRewardHistory,
     activities: [...activitiesByFamily.values()].flat().map((activity) => ({
       ...clone(activity),
       consumers: activityConsumers(activity, loopOverrides, recoveryRecipeOverrides),

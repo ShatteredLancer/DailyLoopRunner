@@ -4677,6 +4677,10 @@ function updateLoopControls() {
     return `${dynamicSbcCacheStorageKey()}:storage-sink-index`;
   }
 
+  function dynamicSbcFamilyRewardHistoryKey() {
+    return `${dynamicSbcCacheStorageKey()}:family-reward-history`;
+  }
+
   function createDynamicSbcRequestPacer() {
     const healthKey = dynamicSbcScanHealthStorageKey();
     const previous = normalizeDynamicSbcScanHealth(adapters.userscriptStorage.get(healthKey, null), Date.now());
@@ -4799,9 +4803,11 @@ function updateLoopControls() {
     ]);
     const cacheKey = dynamicSbcCacheStorageKey();
     const storageSinkCatalogKey = dynamicSbcStorageSinkCatalogKey();
+    const familyRewardHistoryKey = dynamicSbcFamilyRewardHistoryKey();
     if (clearCache) {
       adapters.userscriptStorage.remove(cacheKey);
       adapters.userscriptStorage.remove(storageSinkCatalogKey);
+      adapters.userscriptStorage.remove(familyRewardHistoryKey);
     }
     const cached = clearCache ? null : adapters.userscriptStorage.get(cacheKey, null);
     let storageSinkIndexes = clearCache
@@ -4980,7 +4986,14 @@ function updateLoopControls() {
       ],
       recoveryRecipes: getConfiguredRecoveryRecipes(),
       additionalActivities: collectScannedUpgradeActivities(upgradeSession.results),
+      activityFamilyRewardHistory: clearCache
+        ? null
+        : adapters.userscriptStorage.get(familyRewardHistoryKey, null),
     });
+    adapters.userscriptStorage.set(
+      familyRewardHistoryKey,
+      activitySession.activityFamilyRewardHistory,
+    );
     const configuredLoopIds = new Set(configuredLoops.map((loopDef) => String(loopDef?.id || '')).filter(Boolean));
     const configuredActivityOverrides = Object.fromEntries(
       Object.entries(activitySession.loopOverrides).filter(([loopId]) => configuredLoopIds.has(String(loopId))),
@@ -8418,9 +8431,46 @@ function updateLoopControls() {
     if (!pack && loopDef.rewardPackIds?.length) {
       pack = loopDef.rewardPackIds.map((id) => findById(id)).find(Boolean);
     }
-    if (!pack && loopDef.rewardPackNames?.length) pack = findByName(loopDef.rewardPackNames);
+    if (!pack && loopDef.activityFamilyRewardPackIds?.length) {
+      pack = loopDef.activityFamilyRewardPackIds.map((id) => findById(id)).find(Boolean);
+    }
+    const hasActivityFamilyRewardIdentity = Boolean(
+      loopDef.activityFamilyRewardPackIds?.length
+        || loopDef.activityFamilyRewardPackNames?.length,
+    );
+    const hasActivityFamilyRewardIds = Boolean(
+      loopDef.rewardPackIds?.length || loopDef.activityFamilyRewardPackIds?.length,
+    );
+    if (!pack && hasActivityFamilyRewardIdentity && !hasActivityFamilyRewardIds) {
+      const familyNames = new Set([
+        ...(loopDef.rewardPackNames || []),
+        ...(loopDef.activityFamilyRewardPackNames || []),
+      ]
+        .map((name) => String(name || '').trim().toLowerCase())
+        .filter(Boolean));
+      pack = packs.find((candidate) => familyNames.has(String(packName(candidate) || '').trim().toLowerCase())) || null;
+    }
+    if (!pack && !hasActivityFamilyRewardIdentity && loopDef.rewardPackNames?.length) {
+      pack = findByName(loopDef.rewardPackNames);
+    }
     if (!pack && options.fallbackPackMatcher) pack = findByPredicate(options.fallbackPackMatcher);
     return pack || null;
+  }
+
+  function rollingFamilyRewardInventorySummary(definition = {}) {
+    const candidateIds = [...new Set([
+      ...(definition.rewardPackIds || []),
+      ...(definition.activityFamilyRewardPackIds || []),
+    ].map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    const counts = new Map(candidateIds.map((id) => [id, 0]));
+    for (const pack of getAvailableRepositoryMyPacks()) {
+      const id = Number(packIdKey(pack) || 0);
+      if (counts.has(id)) counts.set(id, counts.get(id) + 1);
+    }
+    return {
+      candidateIds,
+      available: [...counts.entries()].filter(([, count]) => count > 0),
+    };
   }
 
   async function findRewardPack(loopDef, explicitPackId = null, options = {}) {
@@ -18600,13 +18650,23 @@ function updateLoopControls() {
         if (opened.status === 'opened') clearRollingPendingRequiredSpecialReward(runtime);
         return opened;
       },
-      processLeftoverRecoveryReward: async () => {
-        for (const field of ['rollingProvisionsUpgrade', 'rollingGoldSinkUpgrade']) {
+      processLeftoverRecoveryReward: async ({ context } = {}) => {
+        const requiredSpecialDependency = context?.trigger === 'required-special-fodder-shortage';
+        const fields = requiredSpecialDependency
+          ? ['rollingProvisionsUpgrade']
+          : ['rollingProvisionsUpgrade', 'rollingGoldSinkUpgrade'];
+        for (const field of fields) {
           const definition = rollingRecoveryDef(loopDef[field], loopDef, { inventoryFirst: true });
           if (!rollingCapabilityAvailable(definition)) continue;
+          if (definition.dynamicSbcFamily === 'provisions-upgrade') {
+            const inventory = rollingFamilyRewardInventorySummary(definition);
+            const candidates = inventory.candidateIds.map((id) => `#${id}`).join(', ') || 'none';
+            const available = inventory.available.map(([id, count]) => `#${id} x${count}`).join(', ') || 'none';
+            log(`${loopDef.name}: Provision family reward candidates ${candidates}; available in My Packs: ${available}`);
+          }
           const pack = findRewardPackInCache(definition, null, { repositoryOnly: true });
           if (!pack) continue;
-          log(`${loopDef.name}: primary fodder shortage; opening existing leftover ${definition.name} reward`);
+          log(`${loopDef.name}: ${requiredSpecialDependency ? 'Required Special recovery fodder shortage' : 'primary fodder shortage'}; opening existing leftover ${definition.name} reward #${packIdKey(pack) || '?'}`);
           const opened = await openRollingRecoveryReward(loopDef, runtime, definition, pack, {
             captureRecoveryDuplicates: definition.dynamicSbcFamily === 'provisions-upgrade',
           });
@@ -18808,6 +18868,12 @@ function updateLoopControls() {
         if (!rollingCapabilityAvailable(definition)) {
           return { status: 'unavailable', reason: 'dynamic 84+ TOTW Upgrade capability is unavailable' };
         }
+        const rewardInventory = rollingFamilyRewardInventorySummary(definition);
+        const rewardCandidates = rewardInventory.candidateIds.map((id) => `#${id}`).join(', ') || 'none';
+        const availableRewards = rewardInventory.available
+          .map(([id, count]) => `#${id} x${count}`)
+          .join(', ') || 'none';
+        log(`${loopDef.name}: Required Special family reward candidates ${rewardCandidates}; available in My Packs: ${availableRewards}`);
         const pack = await findRewardPack(definition, null, {
           attempts: 2,
           delayMs: 1000,
