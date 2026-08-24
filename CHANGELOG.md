@@ -3,6 +3,27 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.42] - 2026-08-24
+
+### Fixed
+
+- Reconcile the live Inventory Ledger when a persisted Required Special/TOTW
+  recovery journal points to a reward pack that is no longer visible. If an
+  eligible, unprotected Required Special is already confirmed in Storage or
+  Club, clear the stale journal and continue without crafting another recovery
+  SBC.
+- Keep the existing fail-closed stop when reconciliation fails or only
+  protected/locked material is present, and include the journal age plus the
+  missing eligible-material state in the diagnostic.
+
+### Verification
+
+- `vitest run`: 199 files / 1765 tests passed.
+- Syntax, undefined-symbol, config, profile, architecture, and FSU patch checks
+  passed.
+- Rebuilt and verified the root/distribution userscript at `0.8.42` and the FSU
+  Local release assets at `26.09.6`.
+
 ## [0.8.41] - 2026-08-23
 
 ### Fixed

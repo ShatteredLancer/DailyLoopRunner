@@ -200,6 +200,96 @@ describe('Rolling runtime recovery helpers', () => {
 
   });
 
+  it('clears a stale Required Special reward journal when reconciled Storage already has eligible material', async () => {
+    const requiredSpecial = makePlayer({
+      id: 8101,
+      definitionId: 98101,
+      rating: 87,
+      rareflag: 120,
+      groups: [44, 83],
+      name: 'Recovered TOTW',
+    });
+    requiredSpecial.pile = 'storage';
+    const { api, userscriptValues } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const loopDef = { id: 'rolling-upgrade-900-85', name: '10x85+ Rolling Loop' };
+    const definition = { name: '84+ TOTW Upgrade', dynamicSbcFamily: 'totw-upgrade' };
+    const reconcile = vi.fn(async () => ({ ok: true }));
+    const runtime = {
+      pendingRecoveryReward: null,
+      coordinator: {
+        reconcile,
+        getLedger: () => ({
+          classifiedEntries: () => [{
+            item: requiredSpecial,
+            pile: 'storage',
+            classification: { requiredSpecial: true, protected: false },
+          }],
+        }),
+      },
+    };
+    api.queueRollingPendingRequiredSpecialReward(
+      runtime,
+      loopDef,
+      definition,
+      { status: 'submitted', submitted: true, rewardPackId: 20707 },
+    );
+
+    await expect(api.reconcileMaterializedRollingPendingRequiredSpecialReward(
+      loopDef,
+      runtime,
+    )).resolves.toMatchObject({
+      status: 'skipped',
+      reasonCode: 'RECOVERY_REWARD_ALREADY_MATERIALIZED',
+      details: { eligibleRequiredSpecialCount: 1 },
+    });
+    expect(reconcile).toHaveBeenCalledWith(
+      '10x85+ Rolling Loop pending Required Special reward inventory check',
+      { refreshUnassigned: true },
+    );
+    expect(runtime.pendingRecoveryReward).toBeNull();
+    expect(userscriptValues.has(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY)).toBe(false);
+  });
+
+  it('keeps the Required Special reward journal when reconciliation finds only protected material', async () => {
+    const protectedSpecial = makePlayer({
+      id: 8102,
+      definitionId: 98102,
+      rating: 97,
+      rareflag: 120,
+      groups: [44, 83],
+    });
+    protectedSpecial.pile = 'storage';
+    const { api, userscriptValues } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const loopDef = { id: 'rolling-upgrade-900-85', name: '10x85+ Rolling Loop' };
+    const definition = { name: '84+ TOTW Upgrade', dynamicSbcFamily: 'totw-upgrade' };
+    const runtime = {
+      pendingRecoveryReward: null,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({
+          classifiedEntries: () => [{
+            item: protectedSpecial,
+            pile: 'storage',
+            classification: { requiredSpecial: true, protected: true },
+          }],
+        }),
+      },
+    };
+    api.queueRollingPendingRequiredSpecialReward(
+      runtime,
+      loopDef,
+      definition,
+      { status: 'submitted', submitted: true, rewardPackId: 20707 },
+    );
+
+    await expect(api.reconcileMaterializedRollingPendingRequiredSpecialReward(
+      loopDef,
+      runtime,
+    )).resolves.toBeNull();
+    expect(runtime.pendingRecoveryReward).toMatchObject({ rewardPackId: 20707 });
+    expect(userscriptValues.has(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY)).toBe(true);
+  });
+
   it('blocks an overlooked duplicate before any native move or journal when swaps are disabled', async () => {
     const signal = makePlayer({
       id: 91,

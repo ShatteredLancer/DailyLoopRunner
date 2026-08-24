@@ -124,6 +124,8 @@ export async function loadUserscript(options = {}) {
       clearRollingPendingRequiredSpecialReward,
       restoreRollingPendingRequiredSpecialReward,
       detectRollingPendingRequiredSpecialReward,
+      rollingMaterializedRequiredSpecialEntries,
+      reconcileMaterializedRollingPendingRequiredSpecialReward,
       persistMaterializedRollingDuplicateTransaction,
       completeRollingDuplicateTransaction,
       finalizeRollingDuplicateMaterialization,
