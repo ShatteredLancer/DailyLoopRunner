@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.8.45`
+- Userscript 版本：`0.8.46`
 - Git 基线：`main` Rolling Recap card-version guard + Manual Player Pick FUTBIN links
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
@@ -17,6 +17,10 @@ Storage-first 顺序。待处理 Unassigned 重复卡仍强制 Unassigned-first�
 pressure 与 maintenance 仍使用专用 Storage-first 及净释放校验。Provisions reserve
 上限可选 `88/89/90/91`，默认 `88`，已有较高保存值继续有效。该修正取代下方
 `0.8.20` 发布记录中的全局 Storage-first 和新安装默认 `91` 行为。
+
+`0.8.46` 发布记录：将远程 Manual Player Pick FUTBIN 候选链接和本地 Rolling Recap
+卡版本保护合并为同一份可更新 userscript，并同步生成 root/dist 产物。Runner 版本、
+CHANGELOG、里程碑和 Tampermonkey 元数据统一为 `0.8.46`。
 
 
 `0.8.45` 发布记录：Rolling Recap 的 Player Pick 临时卡不再按 `definitionId` 盲目回查

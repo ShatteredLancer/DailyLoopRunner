@@ -3,6 +3,21 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.46] - 2026-08-24
+
+### Changed
+
+- Consolidate the latest Manual Player Pick FUTBIN links and Rolling Recap
+  card-version protection into a new updateable userscript release.
+- Keep the merged release metadata and generated distribution artifacts at the
+  same Runner version so Tampermonkey can detect the update reliably.
+
+### Verification
+
+- Full `npm run verify` passed: `199` test files / `1776` tests, plus syntax,
+  ESLint, config/profile, architecture, FSU patch replay, userscript/FSU
+  builds, dist equality, metadata, and release-asset checks.
+
 ## [0.8.45] - 2026-08-24
 
 ### Added
