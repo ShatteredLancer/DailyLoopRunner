@@ -18,6 +18,7 @@ export const TRADE_REQUEST_PACING_KEY = 'fc-loop-runner-trade-request-pacing-v1'
 export const TRADE_RECOVERY_AUDIT_KEY = 'fc-loop-runner-trade-recovery-audit-v1';
 export const ROLLING_DUPLICATE_TRANSACTION_KEY = 'fc-loop-runner-rolling-duplicate-transaction-v1';
 export const ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY = 'fc-loop-runner-rolling-pending-required-special-reward-v1';
+export const ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export const CFG = Object.freeze({
   sourcePackIds: [105],

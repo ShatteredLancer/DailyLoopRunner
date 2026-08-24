@@ -764,6 +764,70 @@ describe('10x85+ Rolling workflow', () => {
     ]);
   });
 
+  it('replans after an expired persisted reward journal and performs a fresh Required Special recovery', async () => {
+    let inventoryVersion = 1;
+    let rewardState = 'stale-journal';
+    let specialReady = false;
+    const calls = [];
+    const options = harness({
+      findPrimaryPack: vi.fn(async () => {
+        calls.push('find-primary-reward');
+        return null;
+      }),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      hasPendingRecoveryReward: vi.fn(async () => rewardState === 'stale-journal'),
+      processPendingRecoveryReward: vi.fn(async () => {
+        if (rewardState === 'stale-journal') {
+          calls.push('expire-stale-journal');
+          rewardState = 'none';
+          return {
+            status: 'replan',
+            reasonCode: 'RECOVERY_REWARD_JOURNAL_EXPIRED',
+          };
+        }
+        if (rewardState === 'new-reward') {
+          calls.push('open-new-totw-reward');
+          rewardState = 'none';
+          specialReady = true;
+          inventoryVersion++;
+          return { status: 'opened' };
+        }
+        return { status: 'skipped' };
+      }),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push(specialReady ? 'plan-primary-ready' : 'plan-primary-shortage');
+        return specialReady
+          ? { ok: true, itemRefs: [{ id: 1 }] }
+          : { ok: false, missing: { code: 'REQUIRED_SPECIAL_SHORTAGE' } };
+      }),
+      recoverRequiredSpecial: vi.fn(async () => {
+        calls.push('submit-fresh-totw');
+        rewardState = 'new-reward';
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true, rewardPackId: 20707 };
+      }),
+      submitPrimary: vi.fn(async () => {
+        calls.push('submit-primary');
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      completions: 1,
+      recoveries: { requiredSpecial: 1, reward: 1 },
+    });
+    expect(calls).toEqual([
+      'expire-stale-journal',
+      'find-primary-reward',
+      'plan-primary-shortage',
+      'submit-fresh-totw',
+      'open-new-totw-reward',
+      'plan-primary-ready',
+      'submit-primary',
+    ]);
+  });
+
   it('uses the Storage pressure SBC when a pending Required Special reward cannot open', async () => {
     let inventoryVersion = 1;
     let storageReady = false;

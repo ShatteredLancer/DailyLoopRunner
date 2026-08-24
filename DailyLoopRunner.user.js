@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.42
+// @version      0.8.43
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.42",
+    version: "0.8.43",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -89,6 +89,7 @@
   var TRADE_RECOVERY_AUDIT_KEY = "fc-loop-runner-trade-recovery-audit-v1";
   var ROLLING_DUPLICATE_TRANSACTION_KEY = "fc-loop-runner-rolling-duplicate-transaction-v1";
   var ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY = "fc-loop-runner-rolling-pending-required-special-reward-v1";
+  var ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -51843,7 +51844,7 @@
       const pending = runtime?.pendingRecoveryReward;
       runtime.pendingRecoveryReward = null;
       if (pending && !persistRollingPendingRequiredSpecialReward(null)) {
-        log("Rolling Required Special reward journal could not be cleared after opening the reward");
+        log("Rolling Required Special reward journal could not be cleared");
       }
     }
     function rollingMaterializedRequiredSpecialEntries(runtime) {
@@ -51852,7 +51853,7 @@
         return ["storage", "club"].includes(pileName) && Number(item?.id || item?.ref?.id || 0) > 0 && Number(item?.definitionId || item?.ref?.definitionId || 0) > 0 && classification?.requiredSpecial === true && classification?.protected !== true;
       });
     }
-    async function reconcileMaterializedRollingPendingRequiredSpecialReward(loopDef, runtime) {
+    async function reconcileRollingPendingRequiredSpecialReward(loopDef, runtime) {
       const pending = runtime?.pendingRecoveryReward;
       if (!pending?.definition || !runtime?.coordinator) return null;
       try {
@@ -51868,20 +51869,37 @@
         log(`${loopDef.name}: pending ${pending.definition.name} reward inventory check failed (${error?.message || error}); keeping the reward journal`);
         return null;
       }
+      const queuedMs = Math.max(0, Date.now() - Number(pending.queuedAt || Date.now()));
+      const queuedSeconds = Math.round(queuedMs / 1e3);
       const entries = rollingMaterializedRequiredSpecialEntries(runtime);
-      if (!entries.length) return null;
-      const queuedSeconds = Math.max(0, Math.round((Date.now() - Number(pending.queuedAt || Date.now())) / 1e3));
-      const sample = entries.slice(0, 3).map(({ item, pile }) => `${item.name || item.definitionId || item.id} rating:${Number(item.rating || 0) || "?"} from:${normalizedRuntimePileName(pile || item?.pile || item?.ref?.pile) || "inventory"}`).join("; ");
-      clearRollingPendingRequiredSpecialReward(runtime);
-      log(`${loopDef.name}: ${pending.definition.name} pack is no longer visible, but ${entries.length} eligible Required Special card(s) are already available after inventory reconciliation${queuedSeconds ? ` (${queuedSeconds}s after submission)` : ""}; cleared the stale reward journal and will continue without crafting another recovery SBC${sample ? `: ${sample}` : ""}`);
-      return {
-        status: "skipped",
-        reasonCode: "RECOVERY_REWARD_ALREADY_MATERIALIZED",
-        details: {
-          eligibleRequiredSpecialCount: entries.length,
-          queuedSeconds
-        }
-      };
+      if (entries.length) {
+        const sample = entries.slice(0, 3).map(({ item, pile }) => `${item.name || item.definitionId || item.id} rating:${Number(item.rating || 0) || "?"} from:${normalizedRuntimePileName(pile || item?.pile || item?.ref?.pile) || "inventory"}`).join("; ");
+        clearRollingPendingRequiredSpecialReward(runtime);
+        log(`${loopDef.name}: ${pending.definition.name} pack is no longer visible, but ${entries.length} eligible Required Special card(s) are already available after inventory reconciliation${queuedSeconds ? ` (${queuedSeconds}s after submission)` : ""}; cleared the stale reward journal and will continue without crafting another recovery SBC${sample ? `: ${sample}` : ""}`);
+        return {
+          status: "skipped",
+          reasonCode: "RECOVERY_REWARD_ALREADY_MATERIALIZED",
+          details: {
+            eligibleRequiredSpecialCount: entries.length,
+            queuedSeconds
+          }
+        };
+      }
+      if (pending.persisted === true && queuedMs >= ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS) {
+        clearRollingPendingRequiredSpecialReward(runtime);
+        const maxAgeHours = Math.round(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS / 36e5);
+        log(`${loopDef.name}: ${pending.definition.name} pack and eligible Required Special material are still absent ${queuedSeconds}s after submission; cleared the persisted reward journal after its ${maxAgeHours}h safety window and will re-evaluate current recovery needs before any new SBC`);
+        return {
+          status: "replan",
+          reason: `${pending.definition.name} persisted reward journal expired after ${queuedSeconds}s without a visible pack or eligible material`,
+          reasonCode: "RECOVERY_REWARD_JOURNAL_EXPIRED",
+          details: {
+            queuedSeconds,
+            maxAgeSeconds: Math.round(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS / 1e3)
+          }
+        };
+      }
+      return null;
     }
     async function persistMaterializedRollingDuplicateTransaction(runtime, label, options = {}) {
       const transaction = runtime?.duplicateMaterializationTransaction || null;
@@ -55180,11 +55198,11 @@
               repositoryOnly: true
             });
             if (!pack) {
-              const materialized = await reconcileMaterializedRollingPendingRequiredSpecialReward(
+              const reconciled = await reconcileRollingPendingRequiredSpecialReward(
                 loopDef,
                 runtime
               );
-              if (materialized) return materialized;
+              if (reconciled) return reconciled;
               const queuedSeconds = Math.max(0, Math.round(
                 (Date.now() - Number(pending.queuedAt || Date.now())) / 1e3
               ));

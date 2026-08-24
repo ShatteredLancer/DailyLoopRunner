@@ -39,6 +39,7 @@ import {
   REWARD_ALERT_SETTINGS_KEY,
   ROLLING_DUPLICATE_TRANSACTION_KEY,
   ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY,
+  ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS,
   SBC_FODDER_OPTIONS_KEY,
   TRADE_CIRCUIT_KEY,
   TRADE_BUY_JOURNAL_KEY,
@@ -14749,7 +14750,7 @@ function updateLoopControls() {
     const pending = runtime?.pendingRecoveryReward;
     runtime.pendingRecoveryReward = null;
     if (pending && !persistRollingPendingRequiredSpecialReward(null)) {
-      log('Rolling Required Special reward journal could not be cleared after opening the reward');
+      log('Rolling Required Special reward journal could not be cleared');
     }
   }
 
@@ -14765,7 +14766,7 @@ function updateLoopControls() {
       });
   }
 
-  async function reconcileMaterializedRollingPendingRequiredSpecialReward(loopDef, runtime) {
+  async function reconcileRollingPendingRequiredSpecialReward(loopDef, runtime) {
     const pending = runtime?.pendingRecoveryReward;
     if (!pending?.definition || !runtime?.coordinator) return null;
     try {
@@ -14782,22 +14783,42 @@ function updateLoopControls() {
       return null;
     }
 
+    const queuedMs = Math.max(0, Date.now() - Number(pending.queuedAt || Date.now()));
+    const queuedSeconds = Math.round(queuedMs / 1000);
     const entries = rollingMaterializedRequiredSpecialEntries(runtime);
-    if (!entries.length) return null;
-    const queuedSeconds = Math.max(0, Math.round((Date.now() - Number(pending.queuedAt || Date.now())) / 1000));
-    const sample = entries.slice(0, 3).map(({ item, pile }) => (
-      `${item.name || item.definitionId || item.id} rating:${Number(item.rating || 0) || '?'} from:${normalizedRuntimePileName(pile || item?.pile || item?.ref?.pile) || 'inventory'}`
-    )).join('; ');
-    clearRollingPendingRequiredSpecialReward(runtime);
-    log(`${loopDef.name}: ${pending.definition.name} pack is no longer visible, but ${entries.length} eligible Required Special card(s) are already available after inventory reconciliation${queuedSeconds ? ` (${queuedSeconds}s after submission)` : ''}; cleared the stale reward journal and will continue without crafting another recovery SBC${sample ? `: ${sample}` : ''}`);
-    return {
-      status: 'skipped',
-      reasonCode: 'RECOVERY_REWARD_ALREADY_MATERIALIZED',
-      details: {
-        eligibleRequiredSpecialCount: entries.length,
-        queuedSeconds,
-      },
-    };
+    if (entries.length) {
+      const sample = entries.slice(0, 3).map(({ item, pile }) => (
+        `${item.name || item.definitionId || item.id} rating:${Number(item.rating || 0) || '?'} from:${normalizedRuntimePileName(pile || item?.pile || item?.ref?.pile) || 'inventory'}`
+      )).join('; ');
+      clearRollingPendingRequiredSpecialReward(runtime);
+      log(`${loopDef.name}: ${pending.definition.name} pack is no longer visible, but ${entries.length} eligible Required Special card(s) are already available after inventory reconciliation${queuedSeconds ? ` (${queuedSeconds}s after submission)` : ''}; cleared the stale reward journal and will continue without crafting another recovery SBC${sample ? `: ${sample}` : ''}`);
+      return {
+        status: 'skipped',
+        reasonCode: 'RECOVERY_REWARD_ALREADY_MATERIALIZED',
+        details: {
+          eligibleRequiredSpecialCount: entries.length,
+          queuedSeconds,
+        },
+      };
+    }
+
+    if (pending.persisted === true
+      && queuedMs >= ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS) {
+      clearRollingPendingRequiredSpecialReward(runtime);
+      const maxAgeHours = Math.round(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS / 3600000);
+      log(`${loopDef.name}: ${pending.definition.name} pack and eligible Required Special material are still absent ${queuedSeconds}s after submission; cleared the persisted reward journal after its ${maxAgeHours}h safety window and will re-evaluate current recovery needs before any new SBC`);
+      return {
+        status: 'replan',
+        reason: `${pending.definition.name} persisted reward journal expired after ${queuedSeconds}s without a visible pack or eligible material`,
+        reasonCode: 'RECOVERY_REWARD_JOURNAL_EXPIRED',
+        details: {
+          queuedSeconds,
+          maxAgeSeconds: Math.round(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS / 1000),
+        },
+      };
+    }
+
+    return null;
   }
 
   async function persistMaterializedRollingDuplicateTransaction(runtime, label, options = {}) {
@@ -18518,11 +18539,11 @@ function updateLoopControls() {
           repositoryOnly: true,
         });
         if (!pack) {
-          const materialized = await reconcileMaterializedRollingPendingRequiredSpecialReward(
+          const reconciled = await reconcileRollingPendingRequiredSpecialReward(
             loopDef,
             runtime,
           );
-          if (materialized) return materialized;
+          if (reconciled) return reconciled;
           const queuedSeconds = Math.max(0, Math.round(
             (Date.now() - Number(pending.queuedAt || Date.now())) / 1000,
           ));

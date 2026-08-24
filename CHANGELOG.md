@@ -3,6 +3,24 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.43] - 2026-08-24
+
+### Fixed
+
+- Expire a persisted Required Special/TOTW reward journal after 24 hours only
+  when its pack is absent, no eligible material is confirmed in Storage/Club,
+  and live Inventory Ledger reconciliation succeeds.
+- Replan from current inventory after expiration instead of blocking every
+  future Rolling run. Recent or unreconciled reward journals remain
+  fail-closed, and a fresh recovery SBC is still subject to the normal Settings
+  gate and submission guards.
+
+### Verification
+
+- `199` test files / `1769` tests passed; syntax, ESLint, config/profile,
+  architecture, FSU patch replay, userscript/FSU builds, dist equality, metadata,
+  and release-asset checks passed.
+
 ## [0.8.42] - 2026-08-24
 
 ### Fixed

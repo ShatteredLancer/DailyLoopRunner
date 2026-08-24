@@ -11,6 +11,7 @@ import { submitSbcAttempt } from '../../src/sbc/submit-attempt.js';
 import {
   ROLLING_DUPLICATE_TRANSACTION_KEY,
   ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY,
+  ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS,
 } from '../../src/config/runtime.js';
 
 function materializedDuplicateTransaction() {
@@ -234,7 +235,7 @@ describe('Rolling runtime recovery helpers', () => {
       { status: 'submitted', submitted: true, rewardPackId: 20707 },
     );
 
-    await expect(api.reconcileMaterializedRollingPendingRequiredSpecialReward(
+    await expect(api.reconcileRollingPendingRequiredSpecialReward(
       loopDef,
       runtime,
     )).resolves.toMatchObject({
@@ -250,7 +251,7 @@ describe('Rolling runtime recovery helpers', () => {
     expect(userscriptValues.has(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY)).toBe(false);
   });
 
-  it('keeps the Required Special reward journal when reconciliation finds only protected material', async () => {
+  it('keeps a recent Required Special reward journal when reconciliation finds only protected material', async () => {
     const protectedSpecial = makePlayer({
       id: 8102,
       definitionId: 98102,
@@ -282,11 +283,116 @@ describe('Rolling runtime recovery helpers', () => {
       { status: 'submitted', submitted: true, rewardPackId: 20707 },
     );
 
-    await expect(api.reconcileMaterializedRollingPendingRequiredSpecialReward(
+    await expect(api.reconcileRollingPendingRequiredSpecialReward(
       loopDef,
       runtime,
     )).resolves.toBeNull();
     expect(runtime.pendingRecoveryReward).toMatchObject({ rewardPackId: 20707 });
+    expect(userscriptValues.has(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY)).toBe(true);
+  });
+
+  it('expires a persisted Required Special reward journal after 24 hours with no pack or eligible material', async () => {
+    const { api, userscriptValues } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const loopDef = { id: 'rolling-upgrade-900-85', name: '10x85+ Rolling Loop' };
+    const definition = { name: '84+ TOTW Upgrade', dynamicSbcFamily: 'totw-upgrade' };
+    const queuedAt = Date.now() - ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS - 1000;
+    const runtime = {
+      pendingRecoveryReward: {
+        definition,
+        rewardPackId: 20707,
+        loopId: loopDef.id,
+        queuedAt,
+        persisted: true,
+      },
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ classifiedEntries: () => [] }),
+      },
+    };
+    userscriptValues.set(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY, {
+      version: 1,
+      loopId: loopDef.id,
+      rewardPackId: 20707,
+      queuedAt,
+    });
+
+    await expect(api.reconcileRollingPendingRequiredSpecialReward(
+      loopDef,
+      runtime,
+    )).resolves.toMatchObject({
+      status: 'replan',
+      reasonCode: 'RECOVERY_REWARD_JOURNAL_EXPIRED',
+      details: {
+        maxAgeSeconds: ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS / 1000,
+      },
+    });
+    expect(runtime.pendingRecoveryReward).toBeNull();
+    expect(userscriptValues.has(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY)).toBe(false);
+  });
+
+  it('keeps a recent persisted Required Special reward journal when the pack and material are not visible yet', async () => {
+    const { api, userscriptValues } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const loopDef = { id: 'rolling-upgrade-900-85', name: '10x85+ Rolling Loop' };
+    const definition = { name: '84+ TOTW Upgrade', dynamicSbcFamily: 'totw-upgrade' };
+    const queuedAt = Date.now() - ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS + 1000;
+    const runtime = {
+      pendingRecoveryReward: {
+        definition,
+        rewardPackId: 20707,
+        loopId: loopDef.id,
+        queuedAt,
+        persisted: true,
+      },
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ classifiedEntries: () => [] }),
+      },
+    };
+    userscriptValues.set(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY, {
+      version: 1,
+      loopId: loopDef.id,
+      rewardPackId: 20707,
+      queuedAt,
+    });
+
+    await expect(api.reconcileRollingPendingRequiredSpecialReward(
+      loopDef,
+      runtime,
+    )).resolves.toBeNull();
+    expect(runtime.pendingRecoveryReward).toMatchObject({ queuedAt, persisted: true });
+    expect(userscriptValues.has(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY)).toBe(true);
+  });
+
+  it('keeps an expired Required Special reward journal when live inventory reconciliation fails', async () => {
+    const { api, userscriptValues } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const loopDef = { id: 'rolling-upgrade-900-85', name: '10x85+ Rolling Loop' };
+    const definition = { name: '84+ TOTW Upgrade', dynamicSbcFamily: 'totw-upgrade' };
+    const queuedAt = Date.now() - ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS - 1000;
+    const runtime = {
+      pendingRecoveryReward: {
+        definition,
+        rewardPackId: 20707,
+        loopId: loopDef.id,
+        queuedAt,
+        persisted: true,
+      },
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: false, reason: 'inventory unavailable' })),
+        getLedger: () => ({ classifiedEntries: () => [] }),
+      },
+    };
+    userscriptValues.set(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY, {
+      version: 1,
+      loopId: loopDef.id,
+      rewardPackId: 20707,
+      queuedAt,
+    });
+
+    await expect(api.reconcileRollingPendingRequiredSpecialReward(
+      loopDef,
+      runtime,
+    )).resolves.toBeNull();
+    expect(runtime.pendingRecoveryReward).toMatchObject({ queuedAt, persisted: true });
     expect(userscriptValues.has(ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY)).toBe(true);
   });
 

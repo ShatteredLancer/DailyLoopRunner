@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.8.40`
-- Git 基线：`main` Manual Pick price-visible layout
+- Userscript 版本：`0.8.43`
+- Git 基线：`main` Rolling Required Special reward-journal recovery
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -17,6 +17,12 @@ Storage-first 顺序。待处理 Unassigned 重复卡仍强制 Unassigned-first�
 pressure 与 maintenance 仍使用专用 Storage-first 及净释放校验。Provisions reserve
 上限可选 `88/89/90/91`，默认 `88`，已有较高保存值继续有效。该修正取代下方
 `0.8.20` 发布记录中的全局 Storage-first 和新安装默认 `91` 行为。
+
+`0.8.43` 发布记录：持久化的 Required Special/TOTW 奖励 journal 在奖励包不可见、
+Storage/Club 没有可用 Requirement Special、且 Inventory Ledger 实时核对成功时，
+超过 24 小时后自动过期并从当前库存重新规划。24 小时内或库存核对失败时继续
+fail closed；受保护材料仍不计为可用材料且不会被消费。过期本身不提交 SBC，新恢复
+仍受用户 Settings 和全部提交保护约束。
 
 `0.8.32` 开发记录：持久 duplicate materialization journal 只用于新启动时恢复
 原 Club item ID 的安全不变量，不再用于续跑上一次提交。启动按每个 protected ID
