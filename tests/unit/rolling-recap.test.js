@@ -3,6 +3,7 @@ import {
   createRollingRecapAggregator,
   createRollingRecapModel,
 } from '../../src/reward/rolling-recap.js';
+import { loadUserscript, makePlayer } from '../helpers/load-userscript.js';
 
 function card(overrides = {}) {
   return {
@@ -18,6 +19,69 @@ function card(overrides = {}) {
 }
 
 describe('Rolling recap aggregation', () => {
+  it('does not replace a temporary Player Pick card with an evolved Club version', async () => {
+    const evolvedLukaku = makePlayer({
+      id: 926027598527,
+      definitionId: 84078585,
+      name: 'Romelu Lukaku',
+      rating: 98,
+      rareflag: 109,
+      evolutionId: 1,
+      upgrades: { chemistry: true },
+    });
+    const { api } = await loadUserscript({ club: [evolvedLukaku] });
+    const candidate = makePlayer({
+      id: 2,
+      definitionId: 84078585,
+      name: 'Romelu Lukaku',
+      rating: 95,
+      rareflag: 109,
+    });
+
+    const hydrateItem = api.createRecapItemHydrator();
+    const hydrated = hydrateItem(candidate);
+
+    expect(hydrated).toBe(candidate);
+    expect(hydrated).toMatchObject({ id: 2, definitionId: 84078585, rating: 95 });
+
+    const aggregator = createRollingRecapAggregator();
+    aggregator.recordItems([candidate], {
+      sourceLabel: '1 of 3 95+ FOF or FUTTIES Player Pick',
+      hydrateItem,
+      destination: 'club',
+    });
+    const model = createRollingRecapModel({
+      snapshot: aggregator.getSnapshot(),
+      hydrateItem,
+    });
+    expect(model.rows[0]).toMatchObject({
+      name: 'Romelu Lukaku',
+      rating: 95,
+      sourceLabel: '1/3 95+ Pick',
+      destination: 'club',
+    });
+  });
+
+  it('hydrates a temporary Player Pick id from an identical final Club version', async () => {
+    const finalLukaku = makePlayer({
+      id: 929574885638,
+      definitionId: 84078585,
+      name: 'Romelu Lukaku',
+      rating: 95,
+      rareflag: 109,
+    });
+    const { api } = await loadUserscript({ club: [finalLukaku] });
+    const candidate = makePlayer({
+      id: 2,
+      definitionId: 84078585,
+      name: '84078585',
+      rating: 95,
+      rareflag: 109,
+    });
+
+    expect(api.createRecapItemHydrator()(candidate)).toBe(finalLukaku);
+  });
+
   it('keeps long runs bounded and stores summaries instead of source items', () => {
     const aggregator = createRollingRecapAggregator({ alertMinimumRating: 94 });
     const source = card({ id: 1, definitionId: 101, rating: 99, special: true, rareflag: 8 });

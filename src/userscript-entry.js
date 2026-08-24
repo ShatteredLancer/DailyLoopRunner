@@ -12035,7 +12035,9 @@ function updateLoopControls() {
           destinationByItemId.set(itemId, pileName);
         }
         if (definitionId) {
-          if (!byDefinitionId.has(definitionId)) byDefinitionId.set(definitionId, item);
+          const candidates = byDefinitionId.get(definitionId) || [];
+          candidates.push(item);
+          byDefinitionId.set(definitionId, candidates);
           const destinations = destinationsByDefinitionId.get(definitionId) || new Set();
           destinations.add(pileName);
           destinationsByDefinitionId.set(definitionId, destinations);
@@ -12045,7 +12047,11 @@ function updateLoopControls() {
     const hydrateItem = (item) => {
       const itemId = Number(item?.id || 0);
       if (Number.isInteger(itemId) && itemId > 0 && byItemId.has(itemId)) return byItemId.get(itemId);
-      return byDefinitionId.get(recapDefinitionId(item)) || item;
+      const candidates = byDefinitionId.get(recapDefinitionId(item)) || [];
+      // A temporary Player Pick id can share a definition with an evolved Club card.
+      // Only hydrate from an inventory entity when its card version is identical;
+      // otherwise the original response card remains authoritative for the recap.
+      return candidates.find((candidate) => isSamePlayerCardVersion(item, candidate)) || item;
     };
     hydrateItem.resolveDestination = (item) => {
       const itemId = Number(item?.id || 0);

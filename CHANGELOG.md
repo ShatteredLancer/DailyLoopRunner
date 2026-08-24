@@ -3,6 +3,23 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.45] - 2026-08-24
+
+### Fixed
+
+- Prevent Rolling Recap from replacing a temporary Player Pick card with a
+  different card version that shares its `definitionId`, such as an evolved
+  Club card with a different rating or upgraded/cosmetic state.
+- Keep the original Player Pick response authoritative when no same-version
+  inventory entity can be found, while still hydrating metadata from an exact
+  same-version Club entity when available.
+
+### Verification
+
+- Full `npm run verify` passed: `199` test files / `1776` tests, plus syntax,
+  ESLint, config/profile, architecture, FSU patch replay, userscript/FSU
+  builds, dist equality, metadata, and release-asset checks.
+
 ## [0.8.44] - 2026-08-24
 
 ### Added

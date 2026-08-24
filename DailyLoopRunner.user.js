@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.44
+// @version      0.8.45
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.44",
+    version: "0.8.45",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -49569,7 +49569,9 @@
             destinationByItemId.set(itemId6, pileName);
           }
           if (definitionId3) {
-            if (!byDefinitionId.has(definitionId3)) byDefinitionId.set(definitionId3, item);
+            const candidates = byDefinitionId.get(definitionId3) || [];
+            candidates.push(item);
+            byDefinitionId.set(definitionId3, candidates);
             const destinations = destinationsByDefinitionId.get(definitionId3) || /* @__PURE__ */ new Set();
             destinations.add(pileName);
             destinationsByDefinitionId.set(definitionId3, destinations);
@@ -49579,7 +49581,8 @@
       const hydrateItem = (item) => {
         const itemId6 = Number(item?.id || 0);
         if (Number.isInteger(itemId6) && itemId6 > 0 && byItemId.has(itemId6)) return byItemId.get(itemId6);
-        return byDefinitionId.get(recapDefinitionId2(item)) || item;
+        const candidates = byDefinitionId.get(recapDefinitionId2(item)) || [];
+        return candidates.find((candidate) => isSamePlayerCardVersion(item, candidate)) || item;
       };
       hydrateItem.resolveDestination = (item) => {
         const itemId6 = Number(item?.id || 0);
