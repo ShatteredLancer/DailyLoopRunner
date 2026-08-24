@@ -1,3 +1,4 @@
+import { createFutbinPlayerUrl } from '../reward/recap.js';
 import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 function applyStyles(element, styles) {
@@ -21,6 +22,15 @@ function candidatePrice(candidate, formatPrice) {
   const value = candidate?.price;
   if (!Number.isFinite(Number(value))) return 'price:?';
   return `price:${formatPrice?.(Number(value)) || Number(value)}`;
+}
+
+function candidateFutbinUrl(candidate, resolveFutbinPlayerId) {
+  if (typeof resolveFutbinPlayerId !== 'function') return null;
+  try {
+    return createFutbinPlayerUrl(resolveFutbinPlayerId(candidate?.item));
+  } catch {
+    return null;
+  }
 }
 
 export function waitForManualPlayerPickSelection(options = {}) {
@@ -77,8 +87,9 @@ export function waitForManualPlayerPickSelection(options = {}) {
     };
 
     ranked.forEach((candidate) => {
-      const card = options.dom.create('button');
-      card.type = 'button';
+      const card = options.dom.create('div');
+      card.role = 'button';
+      card.tabIndex = 0;
       const description = String(options.describeCandidate(candidate) || '');
       card.title = description;
       applyStyles(card, {
@@ -86,11 +97,20 @@ export function waitForManualPlayerPickSelection(options = {}) {
         padding: '9px', cursor: 'pointer', lineHeight: '1.35', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto',
         gridTemplateRows: 'auto auto', gap: '4px 8px', alignItems: 'center',
       });
-      const name = options.dom.create('span');
+      const futbinUrl = candidateFutbinUrl(candidate, options.resolveFutbinPlayerId);
+      const name = options.dom.create(futbinUrl ? 'a' : 'span');
       name.textContent = candidateName(candidate, description, options.itemDisplayName);
-      name.title = name.textContent;
+      name.title = futbinUrl ? `Open ${name.textContent} on FUTBIN` : name.textContent;
+      if (futbinUrl) {
+        name.href = futbinUrl;
+        name.target = '_blank';
+        name.rel = 'noopener noreferrer';
+        name.addEventListener('click', (event) => event?.stopPropagation?.());
+        name.addEventListener('keydown', (event) => event?.stopPropagation?.());
+      }
       applyStyles(name, {
-        gridColumn: '1', gridRow: '1', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: '700',
+        gridColumn: '1', gridRow: '1', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        fontWeight: '700', color: futbinUrl ? '#9EC5FF' : '#F3F5F7', textDecoration: futbinUrl ? 'underline' : 'none',
       });
       const details = options.dom.create('span');
       details.textContent = candidateDetails(candidate);
@@ -105,10 +125,16 @@ export function waitForManualPlayerPickSelection(options = {}) {
         gridColumn: '2', gridRow: '1 / span 2', alignSelf: 'center', whiteSpace: 'nowrap', color: '#FFD27A', fontWeight: '700', fontSize: '12px',
       });
       card.append(name, details, price);
-      card.addEventListener('click', () => {
+      const toggle = () => {
         if (selected.has(candidate)) selected.delete(candidate);
         else if (selected.size < pickCount) selected.add(candidate);
         refresh();
+      };
+      card.addEventListener('click', toggle);
+      card.addEventListener('keydown', (event) => {
+        if (!['Enter', ' '].includes(event?.key)) return;
+        event.preventDefault?.();
+        toggle();
       });
       cards.push({ card, candidate });
       list.appendChild(card);

@@ -5,7 +5,7 @@
 当前基线：
 
 - Userscript 版本：`0.8.45`
-- Git 基线：`main` Rolling Recap card-version hydration guard
+- Git 基线：`main` Rolling Recap card-version guard + Manual Player Pick FUTBIN links
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -18,10 +18,16 @@ pressure 与 maintenance 仍使用专用 Storage-first 及净释放校验。Prov
 上限可选 `88/89/90/91`，默认 `88`，已有较高保存值继续有效。该修正取代下方
 `0.8.20` 发布记录中的全局 Storage-first 和新安装默认 `91` 行为。
 
+
 `0.8.45` 发布记录：Rolling Recap 的 Player Pick 临时卡不再按 `definitionId` 盲目回查
 Club 实体；只有评分、稀有度、Evolution、upgrades 和 cosmetics 状态一致时才允许库存
 实体补全。找不到同版本实体时保留原始 Player Pick 卡，避免同 definition 的 EVO 卡覆盖
 真实 Pick 评分。新增 95 Lukaku 与 98 EVO Lukaku 回归测试；完整 release gate 已通过。
+
+`0.8.45` 发布记录：Manual Player Pick review 使用既有 FSU/FUTBIN 精确 ID 解析与缓存，
+将可解析候选人的名字显示为 FUTBIN 直达链接；新标签页打开链接不会同时选中候选卡，
+无法可靠解析 ID 时继续显示普通文本，不生成名称搜索链接。
+
 
 `0.8.44` 发布记录：FUT.GG 价格请求支持可选 HTTPS forwarding proxy；Auto 价格源在
 FUT.GG 返回 403、Cloudflare 或 forbidden 错误后进入会话级熔断并回退 FUTNext，

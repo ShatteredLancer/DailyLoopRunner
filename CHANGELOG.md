@@ -5,6 +5,12 @@ All notable user-facing changes are documented here. This project follows
 
 ## [0.8.45] - 2026-08-24
 
+### Added
+
+- Make each resolvable candidate name in the Manual Player Pick review a direct
+  FUTBIN card link using the existing exact-ID resolver and cache. Links open in
+  a new tab without selecting the candidate; unresolved names remain plain text.
+
 ### Fixed
 
 - Prevent Rolling Recap from replacing a temporary Player Pick card with a

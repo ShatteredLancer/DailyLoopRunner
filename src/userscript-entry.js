@@ -11363,6 +11363,18 @@ function updateLoopControls() {
     const ranked = selectionPlan.ranked;
     ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
     const manualReason = selectionPlan.manualReason;
+    let resolveManualPickFutbinPlayerId = () => null;
+    if (manualReason) {
+      try {
+        resolveManualPickFutbinPlayerId = await resolveRecapFutbinPlayerIds(
+          ranked.map((candidate) => candidate.item),
+          `${loopDef.name} Pick review`,
+          createRecapItemHydrator(),
+        );
+      } catch (error) {
+        log(`${loopDef.name}: Pick review FUTBIN link lookup failed (${error?.message || error}); candidate names remain plain text`);
+      }
+    }
     const selected = manualReason
       ? await waitForManualPlayerPickSelection({
           dom: adapters.dom,
@@ -11372,6 +11384,7 @@ function updateLoopControls() {
           describeCandidate: describePlayerPickCandidate,
           itemDisplayName,
           formatPrice: formatCompactPrice,
+          resolveFutbinPlayerId: resolveManualPickFutbinPlayerId,
           scheduleStopCheck: setInterval,
           cancelStopCheck: clearInterval,
           isStopping: () => state.stopping,
