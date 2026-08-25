@@ -208,11 +208,19 @@ export function prepareGenericStorageSinkCandidates(entries = [], options = {}) 
 }
 
 export function selectStorageSinkClubFallbackEntries(entries = [], options = {}) {
+  const maxCount = Math.max(0, Math.floor(Number(
+    options.maxCount ?? STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
+  ) || 0));
   const count = Math.max(0, Math.min(
-    STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
+    maxCount,
     Math.floor(Number(options.count || 0)),
   ));
   const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
+  const ordinaryMinRating = Math.max(1, Number(options.ordinaryMinRating || 1) || 1);
+  const ordinaryMaxRating = Math.max(
+    ordinaryMinRating,
+    Number(options.ordinaryMaxRating || maxRating) || maxRating,
+  );
   const requiredConstraintIndexes = new Set((options.requiredConstraintIndexes || [])
     .map(Number)
     .filter((index) => Number.isInteger(index) && index >= 0));
@@ -220,15 +228,21 @@ export function selectStorageSinkClubFallbackEntries(entries = [], options = {})
   const matchesRequiredSpecial = (entry) => [...requiredConstraintIndexes]
     .some((index) => entry.requirementMatches?.[index] === true);
   return entries
-    .filter((entry) => (
-      entry.pileName === 'club'
-        && Number(entry.item?.rating || 0) <= maxRating
+    .filter((entry) => {
+      const rating = Number(entry.item?.rating || 0);
+      const requiredSpecial = matchesRequiredSpecial(entry);
+      return entry.pileName === 'club'
+        && rating <= maxRating
         && !protectedItems.some((ref) => matchesRef(entry.item, ref))
         && (
-          matchesRequiredSpecial(entry)
-            || entry.special !== true
-        )
-    ))
+          requiredSpecial
+            || (
+              entry.special !== true
+                && rating >= ordinaryMinRating
+                && rating <= ordinaryMaxRating
+            )
+        );
+    })
     .sort((left, right) => (
       Number(matchesRequiredSpecial(right)) - Number(matchesRequiredSpecial(left))
         || Number(right.item?.rating || 0) - Number(left.item?.rating || 0)

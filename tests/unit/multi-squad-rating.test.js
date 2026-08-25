@@ -101,6 +101,25 @@ describe('multi-squad rating planner', () => {
     expect(prepared.entries.map((entry) => entry.item.id)).toEqual([1, 3, 4, 5]);
   });
 
+  it('expands only ordinary Club boosters inside the configured rating range', () => {
+    const entries = [
+      { item: player(1, 101, 91, 'club'), pileName: 'club', special: false, requirementMatches: [] },
+      { item: player(2, 102, 90, 'club'), pileName: 'club', special: false, requirementMatches: [] },
+      { item: player(3, 103, 87, 'club'), pileName: 'club', special: false, requirementMatches: [] },
+      { item: player(4, 104, 86, 'club'), pileName: 'club', special: false, requirementMatches: [] },
+      { item: player(5, 105, 92, 'club'), pileName: 'club', special: false, requirementMatches: [] },
+      { item: player(6, 106, 90, 'club'), pileName: 'club', special: true, requirementMatches: [] },
+    ];
+
+    expect(selectStorageSinkClubFallbackEntries(entries, {
+      count: 8,
+      maxCount: 8,
+      maxRating: 95,
+      ordinaryMinRating: 87,
+      ordinaryMaxRating: 91,
+    }).map((entry) => entry.item.id)).toEqual([1, 2, 3]);
+  });
+
   it('admits only threshold-safe pending Unassigned cards as Storage pressure', () => {
     const entries = [
       { item: player(1, 101, 93), signal: player(901, 101, 93, 'unassigned'), pileName: 'unassigned' },

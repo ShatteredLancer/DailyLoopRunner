@@ -116,6 +116,11 @@ function pickOptionOverrides(input = {}) {
     input.rollingAllowClubCurrentPoolSpecialsForProvisions,
   );
   assign(
+    'rollingStoragePressureClubBoostersEnabled',
+    nested.rollingStoragePressureClubBoostersEnabled,
+    input.rollingStoragePressureClubBoostersEnabled,
+  );
+  assign(
     'rollingDuplicateSwapEnabled',
     nested.rollingDuplicateSwapEnabled,
     input.rollingDuplicateSwapEnabled,
@@ -220,6 +225,8 @@ export function normalizePickRuntimeOptions(input = {}) {
       input.rollingProtectAllClubNonTotwSpecials === true,
     rollingAllowClubCurrentPoolSpecialsForProvisions:
       input.rollingAllowClubCurrentPoolSpecialsForProvisions === true,
+    rollingStoragePressureClubBoostersEnabled:
+      input.rollingStoragePressureClubBoostersEnabled === true,
     rollingDuplicateSwapEnabled: rollingDuplicateSwapMode !== 'off',
     rollingDuplicateSwapMode,
     rollingProvisionsMaxRating: normalizeRollingProvisionsMaxRating(
@@ -434,6 +441,8 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
       resolvedPickOptions.rollingProtectAllClubNonTotwSpecials;
     loopDef.rollingAllowClubCurrentPoolSpecialsForProvisions =
       resolvedPickOptions.rollingAllowClubCurrentPoolSpecialsForProvisions;
+    loopDef.rollingStoragePressureClubBoostersEnabled =
+      resolvedPickOptions.rollingStoragePressureClubBoostersEnabled;
     loopDef.rollingDuplicateSwapEnabled = resolvedPickOptions.rollingDuplicateSwapEnabled;
     loopDef.rollingDuplicateSwapMode = resolvedPickOptions.rollingDuplicateSwapMode;
     loopDef.runtimeProvisionsMaxRating = resolvedPickOptions.rollingProvisionsMaxRating;

@@ -336,6 +336,7 @@ function validatePickOptions(value, path, errors) {
     'rollingRequiredSpecialRecoveryEnabled',
     'rollingProtectAllClubNonTotwSpecials',
     'rollingAllowClubCurrentPoolSpecialsForProvisions',
+    'rollingStoragePressureClubBoostersEnabled',
     'rollingDuplicateSwapEnabled',
     'rollingDuplicateSwapMode',
     'rollingProvisionsMaxRating',
@@ -347,7 +348,7 @@ function validatePickOptions(value, path, errors) {
   Object.keys(value).forEach((field) => {
     if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
   });
-  ['protectHighGold', 'autoSelect', 'autoSelectBelow90', 'openAtEnd', 'openPicksAtEnd', 'preferScannedMetadata', 'rollingStorageSinkEnabled', 'rollingSurplusCraftingEnabled', 'rollingProvisionsShortageRecoveryEnabled', 'rollingRequiredSpecialRecoveryEnabled', 'rollingProtectAllClubNonTotwSpecials', 'rollingAllowClubCurrentPoolSpecialsForProvisions', 'rollingDuplicateSwapEnabled', 'rollingRecoveryStorageFirst', 'rollingOpenDuplicateProvisionsRewards']
+  ['protectHighGold', 'autoSelect', 'autoSelectBelow90', 'openAtEnd', 'openPicksAtEnd', 'preferScannedMetadata', 'rollingStorageSinkEnabled', 'rollingSurplusCraftingEnabled', 'rollingProvisionsShortageRecoveryEnabled', 'rollingRequiredSpecialRecoveryEnabled', 'rollingProtectAllClubNonTotwSpecials', 'rollingAllowClubCurrentPoolSpecialsForProvisions', 'rollingStoragePressureClubBoostersEnabled', 'rollingDuplicateSwapEnabled', 'rollingRecoveryStorageFirst', 'rollingOpenDuplicateProvisionsRewards']
     .forEach((field) => {
       if (value[field] !== undefined && typeof value[field] !== 'boolean') {
         errors.push(`${path}.${field} must be boolean`);

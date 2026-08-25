@@ -1020,6 +1020,72 @@ describe('dynamic EA player-group policy', () => {
     });
   });
 
+  it('uses extra safe Club normal-gold boosters only when Storage-pressure expansion is enabled', async () => {
+    const storage = Array.from({ length: 3 }, (_, index) => makePlayer({
+      id: 1200 + index,
+      definitionId: 2200 + index,
+      rating: 78,
+      pile: 'storage',
+      name: `Low Storage ${index + 1}`,
+    }));
+    const club = Array.from({ length: 8 }, (_, index) => makePlayer({
+      id: 1300 + index,
+      definitionId: 2300 + index,
+      rating: 90,
+      pile: 'club',
+      name: `Normal Club booster ${index + 1}`,
+    }));
+    const baseLoopDef = {
+      name: 'Generic 89 Storage Sink',
+      expectedPlayerCount: 11,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'TEAM_RATING', values: [89], count: 1 },
+      ],
+      runtimePickOptions: { protectionRating: 96, rollingProvisionsMaxRating: 91 },
+      runtimeProvisionsMaxRating: 91,
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 96 },
+      ratingSbcFill: { priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+    };
+    const { api } = await loadUserscript({ storage, club });
+    const sinkModel = api.parseRatingSbcChallenge(baseLoopDef, {
+      requiredPlayerCount: 11,
+      squad: { getNumOfRequiredPlayers: () => 11 },
+      eligibilityRequirements: [requirement('TEAM_RATING', [89])],
+    });
+    const snapshot = createInventorySnapshot({ piles: { storage, club } });
+    const runtime = {
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      coordinator: { getLedger: () => null },
+    };
+
+    const disabled = await api.selectRollingGenericStorageSinkSquad(
+      baseLoopDef,
+      runtime,
+      { targetRating: 89, model: sinkModel, activeLoopDef: baseLoopDef },
+      snapshot,
+      { minimumPressureConsumption: 3 },
+    );
+    expect(disabled).toMatchObject({
+      ok: false,
+      reasonCode: 'RECOVERY_STORAGE_PRESSURE_INFEASIBLE',
+    });
+
+    const enabled = await api.selectRollingGenericStorageSinkSquad(
+      { ...baseLoopDef, rollingStoragePressureClubBoostersEnabled: true },
+      runtime,
+      { targetRating: 89, model: sinkModel, activeLoopDef: baseLoopDef },
+      snapshot,
+      { minimumPressureConsumption: 3 },
+    );
+    expect(enabled).toMatchObject({
+      ok: true,
+      rating: 89,
+      storagePressureConsumed: 3,
+      pileCounts: { storage: 3, club: 8 },
+    });
+  });
+
   it('preserves a Required Special shortage while reporting the Storage pressure gap', async () => {
     const storage = Array.from({ length: 11 }, (_, index) => makePlayer({
       id: 600 + index,

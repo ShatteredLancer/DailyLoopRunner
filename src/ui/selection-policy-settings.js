@@ -252,6 +252,13 @@ export function showSelectionPolicySettings(options = {}) {
     pickOptions.rollingAllowClubCurrentPoolSpecialsForProvisions === true,
     'As a last resort for normal Provisions shortage recovery, allow exact live-matcher-approved Club non-TOTW specials within the configured Provisions rating range; FSU locks, Evolution, Active Squad and all other protection guards still apply',
   );
+  const rollingStoragePressureClubBoosters = checkbox(
+    dom,
+    'bronze-loop-policy-rolling-storage-pressure-club-boosters',
+    'Allow Club normal-Gold boosters for Storage Pressure',
+    pickOptions.rollingStoragePressureClubBoostersEnabled === true,
+    'When a Storage Pressure squad must consume real Storage cards, allow more than the legacy three Club fillers using only ordinary 87-to-Provisions-max Gold cards; FSU filters, locks, Evolution, Active Squad and protection rating still apply',
+  );
   const updateClubCurrentPoolProvisionsAvailability = () => {
     const disabled = rollingProtectAllClubNonTotwSpecials.input.checked === true;
     rollingAllowClubCurrentPoolSpecialsForProvisions.input.disabled = disabled;
@@ -351,6 +358,7 @@ export function showSelectionPolicySettings(options = {}) {
     rollingRequiredSpecialRecovery.label,
     rollingProtectAllClubNonTotwSpecials.label,
     rollingAllowClubCurrentPoolSpecialsForProvisions.label,
+    rollingStoragePressureClubBoosters.label,
     rollingDuplicateSwap.label,
     wideField(dom, 'Duplicate swap scope', rollingDuplicateSwapMode, mode, 'Controlled modes require both entities to be untradeable and have identical value fingerprints; all eligible is retained only for legacy experiments'),
     rollingOpenDuplicateProvisionsRewards.label,
@@ -420,6 +428,8 @@ export function showSelectionPolicySettings(options = {}) {
       rollingAllowClubCurrentPoolSpecialsForProvisions:
         rollingProtectAllClubNonTotwSpecials.input.checked !== true
           && rollingAllowClubCurrentPoolSpecialsForProvisions.input.checked,
+      rollingStoragePressureClubBoostersEnabled:
+        rollingStoragePressureClubBoosters.input.checked,
       rollingDuplicateSwapEnabled: rollingDuplicateSwap.input.checked,
       rollingDuplicateSwapMode: rollingDuplicateSwap.input.checked
         ? rollingDuplicateSwapMode.value === 'off'
@@ -475,6 +485,7 @@ export function showSelectionPolicySettings(options = {}) {
       rollingRequiredSpecialRecovery.input,
       rollingProtectAllClubNonTotwSpecials.input,
       rollingAllowClubCurrentPoolSpecialsForProvisions.input,
+      rollingStoragePressureClubBoosters.input,
       rollingDuplicateSwap.input,
       rollingDuplicateSwapMode,
       rollingOpenDuplicateProvisionsRewards.input,
