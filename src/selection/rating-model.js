@@ -1,5 +1,11 @@
 import { calculateEaSquadRating } from '../domain/rating.js';
 import { readPlayerDatabaseId, readPlayerRareFlag } from '../domain/player-rarity.js';
+import {
+  REQUIRED_SPECIAL_ALLOWANCE_MODES,
+  isAllSpecialEligibilityRequirement,
+  isRequiredSpecialEligibilityRequirement,
+  requiredSpecialAllowanceMode,
+} from '../domain/required-special.js';
 
 const PLAYER_REQUIREMENT_KEYS = new Set([
   'PLAYER_QUALITY',
@@ -64,23 +70,33 @@ export function readEligibilityRequirements(challenge, options = {}) {
 }
 
 function matchesDynamicRequirement(item, requirement, keyName, rawValues, matchers) {
+  // PLAYER_RARITY_GROUP is represented directly by the live item's groups.
+  // Keep that identity authoritative even if one EA model happens to expose a
+  // broader meetsRequirements() helper: a card outside the encoded group must
+  // never inherit permission from the expanded-group quantity policy.
+  if (keyName === 'PLAYER_RARITY_GROUP') {
+    // The production runtime adapter supplies exact EA item-group membership.
+    try {
+      const result = matchers.matchesPlayerRarityGroup?.(item, rawValues);
+      if (typeof result === 'boolean') return result;
+    } catch { }
+    // Some isolated EA models do not expose their normalized item groups to
+    // the parser. In that case retain the native requirement as the only
+    // available matcher; the production userscript always supplies the live
+    // item-group matcher above.
+    try {
+      const result = requirement?.meetsRequirements?.(item);
+      if (typeof result === 'boolean') return result;
+    } catch { }
+    return false;
+  }
+
   try {
     if (typeof requirement?.meetsRequirements === 'function') {
       const result = requirement.meetsRequirements(item);
       if (typeof result === 'boolean') return result;
     }
   } catch { }
-
-  // The current EA Challenge model does not expose meetsRequirements() on
-  // every DAO response. The runtime adapter supplies the same exact group
-  // membership check used by the EA/FSU item payload for this case.
-  if (keyName === 'PLAYER_RARITY_GROUP') {
-    try {
-      const result = matchers.matchesPlayerRarityGroup?.(item, rawValues);
-      if (typeof result === 'boolean') return result;
-    } catch { }
-    return false;
-  }
 
   const values = rawValues.map(Number).filter(Number.isFinite);
   const rating = Number(item?.rating || 0);
@@ -134,6 +150,8 @@ export function parseRatingSbcChallenge(input = {}) {
   };
   const constraints = [];
   const unsupported = [];
+  const liveRequiredSpecialAllowanceModes = [];
+  const requiredSpecialAllowanceSources = [];
   let targetRating = Number(loopDef.ratingSbcFill?.targetRating || 0) || 0;
 
   for (const entry of readEligibilityRequirements(challenge, { requiredPlayerCount, eligibilityKeyName })) {
@@ -161,6 +179,43 @@ export function parseRatingSbcChallenge(input = {}) {
       unsupported.push(`${keyName}(live EA matcher unavailable)`);
       continue;
     }
+    const requiredSpecialRole = isRequiredSpecialEligibilityRequirement({ keyName, values });
+    let liveRequiredSpecialAllowanceMode = null;
+    let liveRequiredSpecialAllowanceEvidence = null;
+    let liveRequiredSpecialAllowanceSource = null;
+    let liveRequiredSpecialMatcher = null;
+    let liveRequiredSpecialMatcherSource = null;
+    if (requiredSpecialRole && typeof input.detectRequiredSpecialAllowanceMode === 'function') {
+      try {
+        const detection = input.detectRequiredSpecialAllowanceMode({
+          requirement,
+          keyName,
+          values: [...values],
+          count,
+        });
+        liveRequiredSpecialAllowanceMode = typeof detection === 'string'
+          ? detection
+          : detection?.mode || null;
+        liveRequiredSpecialAllowanceEvidence = typeof detection === 'object'
+          ? detection?.evidence || null
+          : null;
+        liveRequiredSpecialAllowanceSource = typeof detection === 'object'
+          ? detection?.source || null
+          : null;
+        liveRequiredSpecialMatcher = typeof detection?.matches === 'function'
+          ? detection.matches
+          : null;
+        liveRequiredSpecialMatcherSource = typeof detection === 'object'
+          ? detection?.matcherSource || null
+          : null;
+      } catch { }
+      if (liveRequiredSpecialAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS) {
+        liveRequiredSpecialAllowanceModes.push(liveRequiredSpecialAllowanceMode);
+      }
+      if (liveRequiredSpecialAllowanceSource) {
+        requiredSpecialAllowanceSources.push(liveRequiredSpecialAllowanceSource);
+      }
+    }
     constraints.push({
       id: `challenge-${constraints.length}`,
       label: `${keyName} ${values.join('/')} x${count}`,
@@ -168,20 +223,26 @@ export function parseRatingSbcChallenge(input = {}) {
       keyName,
       values: [...values],
       count,
+      requiredSpecialRole,
+      requiredSpecialAllowanceMode: liveRequiredSpecialAllowanceMode,
+      requiredSpecialAllowanceEvidence: liveRequiredSpecialAllowanceEvidence,
+      requiredSpecialAllowanceSource: liveRequiredSpecialAllowanceSource,
       ...(keyName === 'PLAYER_RARITY_GROUP' ? {
-        matcherSource: typeof requirement?.meetsRequirements === 'function'
-          ? 'ea-requirement'
-          : 'runtime-item-groups',
+        matcherSource: liveRequiredSpecialMatcherSource || (
+          typeof requirement?.meetsRequirements === 'function'
+            ? 'ea-requirement'
+            : 'runtime-item-groups'
+        ),
       } : {}),
-      matches: (item) => matchesDynamicRequirement(item, requirement, keyName, values, matchers),
+      matches: liveRequiredSpecialMatcher
+        || ((item) => matchesDynamicRequirement(item, requirement, keyName, values, matchers)),
     });
   }
 
   const configuredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
-  const hasDynamicPlayerGroup = (loopDef.dynamicActiveEligibilityRequirements || []).some((requirement) => (
-    String(requirement?.key || '') === 'PLAYER_RARITY_GROUP'
-  ));
-  if (configuredSpecialCount && !hasDynamicPlayerGroup) {
+  const dynamicRequiredSpecial = (loopDef.dynamicActiveEligibilityRequirements || [])
+    .filter(isRequiredSpecialEligibilityRequirement);
+  if (configuredSpecialCount && !dynamicRequiredSpecial.length) {
     const minimumRating = Math.max(0, Number(loopDef.requiredSpecialMinRating || 0) || 0);
     const label = input.requiredSpecialLabel?.(loopDef) || 'special';
     constraints.push({
@@ -195,9 +256,27 @@ export function parseRatingSbcChallenge(input = {}) {
   const configuredAllowedSpecial = loopDef.allowedSpecialCount !== undefined
     ? Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0)
     : null;
-  const dynamicPlayerGroupSpecialLimit = hasDynamicPlayerGroup
+  const requiredSpecialConstraints = constraints.filter((constraint) => (
+    constraint.requiredSpecialRole === true
+  ));
+  const detectedAllowanceMode = requiredSpecialConstraints.length > 0
+    && liveRequiredSpecialAllowanceModes.length === requiredSpecialConstraints.length
+    ? REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+    : requiredSpecialAllowanceMode(dynamicRequiredSpecial);
+  // A cached loop definition must not be able to widen a PLAYER_RARITY_GROUP
+  // requirement. Only the live matcher probe (or the explicit PLAYER_QUALITY /
+  // PLAYER_LEVEL=4 contract) can authorize all matching specials. This keeps
+  // stale Set 1356 metadata from turning group 83 into an all-special guess.
+  const explicitAllMatchingSpecials = loopDef.requiredSpecialAllowanceMode
+    === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+    && dynamicRequiredSpecial.length > 0
+    && dynamicRequiredSpecial.every(isAllSpecialEligibilityRequirement);
+  const allowanceMode = explicitAllMatchingSpecials
+    ? REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+    : detectedAllowanceMode;
+  const dynamicRequiredSpecialLimit = dynamicRequiredSpecial.length
     ? constraints
-      .filter((constraint) => constraint.keyName === 'PLAYER_RARITY_GROUP')
+      .filter((constraint) => constraint.requiredSpecialRole === true)
       .reduce((total, constraint) => total + Math.max(0, Number(constraint.count || 0) || 0), 0)
     : null;
   return {
@@ -205,8 +284,19 @@ export function parseRatingSbcChallenge(input = {}) {
     targetRating,
     constraints,
     unsupported: [...new Set(unsupported)],
-    maxSpecialCount: dynamicPlayerGroupSpecialLimit !== null
-      ? dynamicPlayerGroupSpecialLimit
+    requiredSpecialAllowanceMode: allowanceMode,
+    requiredSpecialAllowanceDecisionSource: requiredSpecialAllowanceSources[0]
+      || (allowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+        ? loopDef.requiredSpecialAllowanceDecisionSource
+        : null)
+      || 'fail-closed',
+    requiredSpecialAllowanceEvidence: requiredSpecialConstraints
+      .map((constraint) => constraint.requiredSpecialAllowanceEvidence)
+      .filter(Boolean),
+    maxSpecialCount: dynamicRequiredSpecialLimit !== null
+      ? allowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+        ? requiredPlayerCount
+        : dynamicRequiredSpecialLimit
       : configuredAllowedSpecial === null
         ? (loopDef.blockSpecial === false ? requiredPlayerCount : 0)
         : configuredAllowedSpecial,

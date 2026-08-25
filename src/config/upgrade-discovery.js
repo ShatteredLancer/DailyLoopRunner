@@ -1,4 +1,10 @@
 import { cloneLoopDef } from '../domain/objects.js';
+import {
+  REQUIRED_SPECIAL_ALLOWANCE_MODES,
+  REQUIRED_SPECIAL_ALLOWANCE_SOURCES,
+  isRequiredSpecialEligibilityRequirement,
+  requiredSpecialAllowanceMode,
+} from '../domain/required-special.js';
 import { readEligibilityRequirements } from '../selection/rating-model.js';
 import { parseBasicUpgradeChallenge } from './activity-discovery.js';
 import { createDynamicUpgradePolicy } from './upgrade-policies.js';
@@ -189,7 +195,7 @@ function parseUpgradeChallenge(challenge, family) {
       diagnostics.push(`unsupported eligibility condition ${requirementSummary(entry)}`);
       continue;
     }
-    if (entry.keyName === 'PLAYER_RARITY_GROUP') {
+    if (isRequiredSpecialEligibilityRequirement(entry)) {
       specialCount += entry.count;
     }
   }
@@ -198,12 +204,17 @@ function parseUpgradeChallenge(challenge, family) {
   if (family.id === 'totw-upgrade' && specialCount) {
     diagnostics.push('TOTW Upgrade unexpectedly requires a special card');
   }
+  const staticAllowanceMode = requiredSpecialAllowanceMode(entries);
   return {
     ok: diagnostics.length === 0,
     diagnostics: unique(diagnostics),
     requiredPlayerCount,
     targetRating: teamRatings[0] || null,
     specialCount,
+    requiredSpecialAllowanceMode: staticAllowanceMode,
+    requiredSpecialAllowanceDecisionSource: staticAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+        ? REQUIRED_SPECIAL_ALLOWANCE_SOURCES.EXPLICIT_METADATA
+        : REQUIRED_SPECIAL_ALLOWANCE_SOURCES.FAIL_CLOSED,
     eligibilityRequirements: entries.map(eligibilityRequirementSnapshot),
   };
 }
@@ -238,7 +249,12 @@ export function materializeDynamicUpgradeChallengeLoopDef(loopDef = {}, challeng
   const result = clone(loopDef);
   result.expectedPlayerCount = positiveInteger(metadata.requiredPlayerCount) || result.expectedPlayerCount;
   result.requiredSpecialCount = Math.max(0, Number(metadata.specialCount || 0) || 0);
-  result.allowedSpecialCount = result.requiredSpecialCount;
+  result.requiredSpecialAllowanceMode = metadata.requiredSpecialAllowanceMode;
+  result.requiredSpecialAllowanceDecisionSource = metadata.requiredSpecialAllowanceDecisionSource;
+  result.allowedSpecialCount = metadata.requiredSpecialAllowanceMode
+    === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+    ? result.expectedPlayerCount
+    : result.requiredSpecialCount;
   result.dynamicActiveEligibilityRequirements = clone(metadata.eligibilityRequirements || []);
   result.ratingSbcFill = { ...(clone(result.ratingSbcFill) || {}) };
   if (positiveInteger(metadata.targetRating)) result.ratingSbcFill.targetRating = Number(metadata.targetRating);
@@ -283,6 +299,8 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
       requiredPlayerCount: parsed.requiredPlayerCount,
       targetRating: parsed.targetRating,
       specialCount: parsed.specialCount,
+      requiredSpecialAllowanceMode: parsed.requiredSpecialAllowanceMode,
+      requiredSpecialAllowanceDecisionSource: parsed.requiredSpecialAllowanceDecisionSource,
       requirements: parsed.requirements || [],
       eligibilityRequirements: parsed.eligibilityRequirements || [],
     };
@@ -343,6 +361,8 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
       requiredPlayerCount: challenge.requiredPlayerCount,
       targetRating: challenge.targetRating,
       specialCount: challenge.specialCount,
+      requiredSpecialAllowanceMode: challenge.requiredSpecialAllowanceMode,
+      requiredSpecialAllowanceDecisionSource: challenge.requiredSpecialAllowanceDecisionSource,
       eligibilityRequirements: clone(challenge.eligibilityRequirements || []),
     })),
   };
@@ -354,8 +374,16 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
     }));
   }
   if (isHighRatedUpgradeFamily(family)) {
+    const allSafeSpecials = parsedChallenges.length > 0
+      && parsedChallenges.every((challenge) => (
+        challenge.specialCount > 0
+          && challenge.requiredSpecialAllowanceMode
+            === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+      ));
     loop.requiredSpecialCount = maximumSpecialCount;
-    loop.allowedSpecialCount = maximumSpecialCount;
+    loop.allowedSpecialCount = allSafeSpecials
+      ? Math.max(...parsedChallenges.map((challenge) => Number(challenge.requiredPlayerCount || 0)))
+      : maximumSpecialCount;
     delete loop.requiredSpecialKind;
     delete loop.requiredSpecialMinRating;
     delete loop.specialRequirementAdd;
@@ -423,10 +451,10 @@ export function mergeScannedUpgradeMetadata(configuredLoop, discoveredLoop) {
   if (discoveredLoop.ratingSbcFill?.targetRating === undefined) {
     delete merged.ratingSbcFill.targetRating;
   }
-  const hasDynamicPlayerGroup = (discoveredLoop.dynamicChallenges || []).some((challenge) => (
-    (challenge.eligibilityRequirements || []).some((requirement) => requirement.key === 'PLAYER_RARITY_GROUP')
+  const hasDynamicRequiredSpecial = (discoveredLoop.dynamicChallenges || []).some((challenge) => (
+    (challenge.eligibilityRequirements || []).some(isRequiredSpecialEligibilityRequirement)
   ));
-  if (discoveredLoop.requiredSpecialCount && !hasDynamicPlayerGroup) {
+  if (discoveredLoop.requiredSpecialCount && !hasDynamicRequiredSpecial) {
     merged.requiredSpecialKind = discoveredLoop.requiredSpecialKind || configuredLoop.requiredSpecialKind;
     merged.requiredSpecialMinRating = discoveredLoop.requiredSpecialMinRating || configuredLoop.requiredSpecialMinRating;
   } else {

@@ -1,4 +1,8 @@
 import { inventorySelectionRefs, removeInventorySelection } from '../inventory/snapshot-selection.js';
+import {
+  isRequiredSpecialConstraint,
+  requiredSpecialRoleMaximum,
+} from '../domain/required-special.js';
 
 export const STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD = 3;
 
@@ -55,15 +59,14 @@ export function storageSinkRequiredSpecialRoles(model = {}) {
   return (model.constraints || [])
     .map((constraint, constraintIndex) => ({ constraint, constraintIndex }))
     .filter(({ constraint }) => (
-      (constraint.source === 'ea' && constraint.keyName === 'PLAYER_RARITY_GROUP')
-        || constraint.id === 'runner-required-special'
+      isRequiredSpecialConstraint(constraint)
     ))
     .map(({ constraint, constraintIndex }, roleIndex) => ({
       id: roleIndex === 0 ? 'storage-sink-required-special' : `storage-sink-required-special-${roleIndex + 1}`,
       label: constraint.label || 'Required Special',
       constraintIndex,
       minCount: Math.max(1, Number(constraint.count || 1) || 1),
-      maxCount: Math.max(1, Number(constraint.count || 1) || 1),
+      maxCount: requiredSpecialRoleMaximum(model, constraint),
     }));
 }
 

@@ -85,6 +85,39 @@ describe('dynamic Upgrade discovery', () => {
     ]);
   });
 
+  it('keeps Set 1356 Challenge 3874 on the group-83 contract until live expansion is proven', () => {
+    const current = parseDynamicUpgradeSbcSnapshot({
+      set: set({
+        id: 1356,
+        challenges: [{ ...set().challenges[0], id: 3874 }],
+      }),
+    });
+    const unrelated = parseDynamicUpgradeSbcSnapshot({
+      set: set({
+        id: 1356,
+        challenges: [{ ...set().challenges[0], id: 9999 }],
+      }),
+    });
+
+    expect(current.loop).toMatchObject({
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      dynamicChallenges: [expect.objectContaining({
+        challengeId: 3874,
+        requiredSpecialAllowanceMode: 'required-only',
+        requiredSpecialAllowanceDecisionSource: 'fail-closed',
+      })],
+    });
+    expect(unrelated.loop).toMatchObject({
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      dynamicChallenges: [expect.objectContaining({
+        requiredSpecialAllowanceMode: 'required-only',
+        requiredSpecialAllowanceDecisionSource: 'fail-closed',
+      })],
+    });
+  });
+
   it('stages a separate selectable Rolling Loop without changing the generic x10 Loop', () => {
     const session = buildUpgradeDiscoverySession({ configuredLoops: [], sets: [set()] });
     expect(session.discoveredLoops).toHaveLength(1);

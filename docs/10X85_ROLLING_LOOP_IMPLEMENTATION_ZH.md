@@ -66,7 +66,7 @@
 - 球员数量来自 Challenge。
 - 目标评分来自 Challenge。
 - 特殊卡数量、group id 和 values 来自 Challenge。
-- 特殊卡资格优先使用 live `meetsRequirements(item)` 判断；当前 DAO 未提供该方法时，使用运行时注入的 EA item-group membership matcher。
+- `PLAYER_RARITY_GROUP` 特殊卡资格使用运行时 EA item-group membership matcher；即使个别 DAO 对象暴露更宽的 `meetsRequirements(item)`，也不能让不含目标 group 的卡继承授权。其它动态条件仍优先使用 live matcher。
 - 两种 live matcher 都缺失或失效时 fail closed。
 
 ### 3.2 Required Special
@@ -77,10 +77,10 @@
 
 - `Unassigned -> Storage -> Transfer` 中命中 live eligibility matcher 的 TOTW/TOTS/FOF/FUTTIES 可以作为主 `10x85+` 的特殊卡槽；Transfer 仍是 duplicate signal，提交时解析为 Club/Storage 中真实可提交的对应副本。
 - Club 只扫描 TOTW 作为 Required Special。Club 中 TOTS/FOF/FUTTIES 以及其它命中 live matcher 的非 TOTW 卡必须保留，不得进入主特殊槽、普通槽或恢复 SBC。
-- 每套主 SBC 必须且只能使用一张 Required Special。
+- 当前 live `PLAYER_RARITY_GROUP=83` 是 EA 扩展后的特殊卡合同，存在可用 group-83 候选时最多可使用整队数量的 matcher-approved 特殊卡。这里只放宽数量，每张卡仍必须包含 group 83；其它 player group 仍保持原 count 上限。
 - 不得作为主 SBC 的普通评分填料。
 - 不得投入 TOTW Upgrade、Provisions、Rare Gold Pick 或 5x80+。
-- Required Special 即使评分落在当前 Provisions Reserve 范围内，也不进入储备池。
+- Required Special 即使评分落在当前 Provisions Reserve 范围内，也不进入普通储备池；Storage pressure 下只对 Storage 中实时 matcher 精确批准的实体开放该例外，并允许多张按批次释放。
 - 选择时遵循来源顺序，并在同一来源中优先重复、低评分和低保护成本球员。
 - 高于 Protection rating 的重复 Required Special 必须进入 Storage，不能因为能够满足特殊卡槽而提交。
 - Club TOTW 可以作为特殊卡槽使用；Club TOTS/FOF/FUTTIES 是硬保护，不存在最后回退。
@@ -143,7 +143,7 @@ Player Pick 通过 `pickSelectionMode` 统一表达选择策略，并兼容旧 `
 
 | 材料 | Unassigned | Storage | Transfer | Club |
 | --- | --- | --- | --- | --- |
-| Required Special | 仅主 SBC 特殊槽，每套最多一张 | 仅主 SBC 特殊槽，每套最多一张 | 仅主 SBC 特殊槽，每套最多一张；按 duplicate signal 解析 | 仅 TOTW 可进入主 SBC 特殊槽；TOTS/FOF/FUTTIES 硬保护 |
+| Required Special | 未扩展时每套最多一张；扩展时可多张但必须命中同一 live matcher | 未扩展时每套最多一张；Storage pressure 扩展时可多张且必须是精确批准实体 | 未扩展时每套最多一张；按 duplicate signal 解析并重新执行 matcher | 仅 TOTW 可进入主 SBC 特殊槽；其它 Club 非 TOTW 特殊卡硬保护 |
 | Other Special `<= Protection rating` | 可作普通材料 | 可作普通材料 | 可作普通材料 | 默认普通 Other Special 软保护、TOTS/FOF/FUTTIES 硬保护；严格 Club 色卡保护开启后全部非 TOTW 硬保护 |
 | Regular `<= Protection rating` | 优先处理重复 | 可作普通材料 | 可作普通材料 | 可作普通材料，仍遵守 FSU 过滤 |
 | 非 Required Special 且评分位于可配置 Reserve 范围 | 默认与其它 `<= Protection rating` 材料相同并优先回填主阵；开启余量制作后，完整四张组做 Provisions、余数进 Storage | 默认可作主阵材料；开启余量制作后，87/88 完整组做 Provisions，`<=86` 和 89 可进入 TOTW 维护 | 默认可作主阵材料；开启余量制作后保留为 Provisions 储备 | 默认可作主阵材料但 Other Special 仍遵守 Club 软保护；开启余量制作后保留 Reserve |

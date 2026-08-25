@@ -331,6 +331,20 @@ describe('multi-squad rating planner', () => {
     }]);
   });
 
+  it('widens an all-matching-specials Storage Sink role to the squad size', () => {
+    expect(storageSinkRequiredSpecialRoles({
+      requiredPlayerCount: 11,
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+      constraints: [{
+        source: 'ea',
+        keyName: 'PLAYER_RARITY_GROUP',
+        requiredSpecialRole: true,
+        label: 'Any Special x1',
+        count: 1,
+      }],
+    })[0]).toMatchObject({ minCount: 1, maxCount: 11 });
+  });
+
   it('fills the logged 88 squad with all eight Unassigned cards plus exactly one Required Special', async () => {
     const requiredRatings = [92, 89, 88, 87, 86, 86, 85, 85];
     const unassigned = requiredRatings.map((rating, index) => ({

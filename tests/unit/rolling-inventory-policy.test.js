@@ -128,6 +128,26 @@ describe('Rolling inventory policy', () => {
     expect(filter(entry('club', { matches: false }))).toBe(true);
   });
 
+  it('admits only matcher-approved specials when the any-special contract is active', () => {
+    const filter = createRollingRequiredSpecialSourceFilter({
+      constraintIndexes: [0],
+      allowClubRequiredSpecial: true,
+      requireSpecialRoleMatch: true,
+      isSpecial: (candidate) => candidate.special === true,
+    });
+    const entry = (special, matches, pileName = 'storage') => ({
+      pileName,
+      item: { id: 1, special },
+      special,
+      requirementMatches: [matches],
+    });
+
+    expect(filter(entry(true, true))).toBe(true);
+    expect(filter(entry(true, true, 'club'))).toBe(true);
+    expect(filter(entry(true, false))).toBe(false);
+    expect(filter(entry(false, false))).toBe(true);
+  });
+
   it('uses the actual submission pile when filtering a resolved duplicate signal', () => {
     const filter = createRollingRequiredSpecialSourceFilter({
       constraintIndexes: [0],
@@ -211,6 +231,40 @@ describe('Rolling inventory policy', () => {
     expect(plan.storageItems.map((value) => value.id).sort()).toEqual([1, 3, 4, 5]);
     expect(plan.directClubItems.map((value) => value.id)).toEqual([7]);
     expect(plan.counts).toMatchObject({ requiredSpecial: 3, keptRequiredSpecial: 1, storageRequired: 4 });
+  });
+
+  it('retains multiple Required Special duplicates only when the expanded reserve limit is explicit', () => {
+    const players = [
+      item(1, 87, { special: true }),
+      item(2, 88, { special: true }),
+      item(3, 89, { special: true }),
+    ];
+    const expanded = planRollingOpenedItemRouting(players, {
+      protectionRating: 95,
+      storageFree: 3,
+      requiredSpecialReserveLimit: 3,
+      isRequiredSpecial: () => true,
+    });
+    const legacy = planRollingOpenedItemRouting(players, {
+      protectionRating: 95,
+      storageFree: 3,
+      isRequiredSpecial: () => true,
+    });
+
+    expect(expanded.reservedItems.map((value) => value.id)).toEqual([1, 2, 3]);
+    expect(expanded.storageItems).toEqual([]);
+    expect(expanded.counts).toMatchObject({
+      requiredSpecialReserveLimit: 3,
+      keptRequiredSpecial: 3,
+      extraRequiredSpecial: 0,
+    });
+    expect(legacy.reservedItems.map((value) => value.id)).toEqual([1]);
+    expect(legacy.storageItems.map((value) => value.id)).toEqual([2, 3]);
+    expect(legacy.counts).toMatchObject({
+      requiredSpecialReserveLimit: 1,
+      keptRequiredSpecial: 1,
+      extraRequiredSpecial: 2,
+    });
   });
 
   it('stores non-required special duplicates when the primary special slots are exclusive', () => {
@@ -473,6 +527,37 @@ describe('Rolling inventory policy', () => {
       softProtectSpecialPiles: ['club'],
       liveRequirementsAvailable: true,
     });
+  });
+
+  it('widens only an all-matching-specials primary role to the squad size', () => {
+    const constraint = {
+      id: 'challenge-0',
+      source: 'ea',
+      keyName: 'PLAYER_RARITY_GROUP',
+      requiredSpecialRole: true,
+      count: 1,
+    };
+    const expanded = createRollingPrimarySelectionPolicy({
+      entries: [],
+      model: {
+        requiredPlayerCount: 11,
+        requiredSpecialAllowanceMode: 'all-matching-specials',
+        constraints: [constraint],
+      },
+    });
+    const legacy = createRollingPrimarySelectionPolicy({
+      entries: [],
+      model: {
+        requiredPlayerCount: 11,
+        requiredSpecialAllowanceMode: 'required-only',
+        constraints: [constraint],
+      },
+    });
+
+    expect(expanded.exclusiveRoles[0]).toMatchObject({ minCount: 1, maxCount: 11 });
+    expect(expanded.protectionPolicy.allowOtherSpecialAsOrdinary).toBe(true);
+    expect(legacy.exclusiveRoles[0]).toMatchObject({ minCount: 1, maxCount: 1 });
+    expect(legacy.protectionPolicy.allowOtherSpecialAsOrdinary).toBe(false);
   });
 
   it('does not inherit unrouted Unassigned duplicates into a recovery SBC policy', () => {
@@ -915,6 +1000,27 @@ describe('Rolling inventory policy', () => {
     expect(ordinaryRecovery.protectedItems).toEqual([requiredSpecial.ref]);
     expect(storageSink.protectedItems).toEqual([]);
     expect(storageSink.exclusiveRoles).toHaveLength(1);
+  });
+
+  it('keeps Required Special authorization bound to one exact item identity', () => {
+    const approvedStorage = item(1, 90, { special: true, pile: 'storage' });
+    const sameDefinitionClub = item(2, 90, {
+      special: true,
+      pile: 'club',
+      definitionId: approvedStorage.definitionId,
+    });
+    const entries = [approvedStorage, sameDefinitionClub].map((value) => ({
+      item: value,
+      pile: value.pile,
+      classification: { requiredSpecial: true, otherSpecial: false, protected: false },
+    }));
+    const policy = createRollingRatingRecoverySelectionPolicy({
+      entries,
+      allowedRequiredSpecialItems: [approvedStorage.ref],
+    });
+
+    expect(policy.protectedItems).toEqual([sameDefinitionClub.ref]);
+    expect(policy.protectedItems).not.toContainEqual(approvedStorage.ref);
   });
 
   it('routes every duplicate to Storage when native duplicate swaps are disabled', () => {

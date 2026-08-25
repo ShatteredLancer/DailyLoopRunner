@@ -100,8 +100,8 @@ Required Special 是主 SBC 要求的 `TOTW/TOTS/FOF/FUTTIES` 角色，规则如
 
 - Unassigned、Storage、Transfer 中由实时 matcher 识别的四类卡可作为 Required Special。
 - Club 中只允许 TOTW 进入这个角色；Club 中的 TOTS、FOF、FUTTIES 始终保留。
-- 每套主 SBC 恰好使用一张 Required Special。
-- Required Special 不能作为普通评分材料，也不能为了降评分再补入第二张。
+- `PLAYER_RARITY_GROUP=83` 的成员范围由 EA live item groups 决定。实时 group 83 已覆盖旧 TOTW/TOTS/FOF/FUTTIES 分类之外的特殊卡时，允许使用多张逐卡命中 group 83 的安全特殊卡；不含 group 83 的特殊卡不会被放行。
+- 扩展模式只放宽数量，不把 matcher 改成“任意特殊卡”；Evo、cosmetics、超保护评分和 Club 非 TOTW 特殊卡仍受保护。
 - 高于 `Automatic-use max rating`、Evolution、交易中或身份不确定的卡仍受保护；开启 `Protect FSU locked players` 后，FSU Lock 卡也会被排除。
 
 ### 4.3 普通材料和其它 Special
@@ -221,7 +221,7 @@ Rare Gold Pick 不绑定固定奖励评分或固定成本。动态扫描只接�
 
 Storage 满或无法容纳待保护的高分重复卡时：
 
-1. 先尝试紧急 Provisions，但提交计划必须实际消耗足够数量的 Storage 卡并释放当前所需位置。
+1. 先尝试紧急 Provisions，但提交计划必须实际消耗足够数量的 Storage 卡并释放当前所需位置；扩展 group 83 时，85x10 和 Provisions 都可以在同一批次使用多张实时 matcher 精确批准的 Storage 特殊卡。
 2. 如果只能从 Club 补出 Provisions、无法改善 Storage，判定该路径无效；不会连续制作 Provisions。
 3. 紧急 Provisions 的奖励留在 My Packs，不在高压状态下打开。
 4. 若仍无法释放空间且启用了 `Storage pressure recovery`，进入已解析的 Storage pressure SBC。

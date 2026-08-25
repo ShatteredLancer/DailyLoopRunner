@@ -1,3 +1,8 @@
+import {
+  isRequiredSpecialConstraint,
+  requiredSpecialRoleMaximum,
+} from '../domain/required-special.js';
+
 function normalizedRating(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -171,6 +176,9 @@ export function createRollingRequiredSpecialSourceFilter(input = {}) {
   const isClubTotw = typeof input.isClubTotw === 'function'
     ? input.isClubTotw
     : () => false;
+  const isSpecial = typeof input.isSpecial === 'function'
+    ? input.isSpecial
+    : (item) => item?.special === true;
   const resolveSubmissionPile = typeof input.resolveSubmissionPile === 'function'
     ? input.resolveSubmissionPile
     : (entry = {}) => {
@@ -185,11 +193,16 @@ export function createRollingRequiredSpecialSourceFilter(input = {}) {
   return (entry = {}) => {
     const submissionPile = String(resolveSubmissionPile(entry) || 'unknown');
     if (submissionPile === 'unknown') return false;
-    if (submissionPile !== 'club') return true;
     const matchesRequiredSpecial = constraintIndexes.some((index) => (
       entry.requirementMatches?.[index] === true
     ));
-    if (!matchesRequiredSpecial) return true;
+    if (input.requireSpecialRoleMatch === true) {
+      let special = entry.special === true;
+      try { special = special || isSpecial(entry.item) === true; } catch { return false; }
+      if (special && !matchesRequiredSpecial) return false;
+    }
+    if (submissionPile !== 'club') return true;
+    if (!matchesRequiredSpecial || input.allowClubRequiredSpecial === true) return true;
     try { return isClubTotw(entry.item) === true; } catch { return false; }
   };
 }
@@ -210,10 +223,22 @@ export function createRollingStorageSinkCandidateFilter(input = {}) {
   const isPrimaryRequiredSpecial = typeof input.isPrimaryRequiredSpecial === 'function'
     ? input.isPrimaryRequiredSpecial
     : () => false;
+  const isSpecial = typeof input.isSpecial === 'function'
+    ? input.isSpecial
+    : (item) => item?.special === true;
+  const isClubTotw = typeof input.isClubTotw === 'function'
+    ? input.isClubTotw
+    : () => false;
+  const resolveSubmissionPile = typeof input.resolveSubmissionPile === 'function'
+    ? input.resolveSubmissionPile
+    : (entry) => entry?.submissionPileName || entry?.pileName || 'unknown';
   const requiredSpecialSourceFilter = createRollingRequiredSpecialSourceFilter({
     constraintIndexes,
-    isClubTotw: input.isClubTotw,
-    resolveSubmissionPile: input.resolveSubmissionPile,
+    isClubTotw,
+    isSpecial,
+    requireSpecialRoleMatch: input.requireSpecialRoleMatch === true,
+    allowClubRequiredSpecial: input.allowClubRequiredSpecial === true,
+    resolveSubmissionPile,
   });
   return (entry = {}) => {
     if (exactConsumeMatch(entry.item)) return true;
@@ -225,7 +250,19 @@ export function createRollingStorageSinkCandidateFilter(input = {}) {
     const matchesStorageSinkRole = constraintIndexes.some((index) => (
       entry.requirementMatches?.[index] === true
     ));
-    if (matchesPrimaryRequiredSpecial && !matchesStorageSinkRole) return false;
+    let special = entry.special === true;
+    try { special = special || isSpecial(entry.item) === true; } catch { return false; }
+    if (matchesPrimaryRequiredSpecial
+      && !matchesStorageSinkRole
+      && input.allowPrimaryRequiredSpecialAsOrdinary !== true) return false;
+    if (matchesPrimaryRequiredSpecial
+      && String(resolveSubmissionPile(entry) || 'unknown') === 'club') {
+      try { if (isClubTotw(entry.item) !== true) return false; } catch { return false; }
+    }
+    if (special
+      && constraintIndexes.length === 0
+      && input.requirePrimaryRequiredSpecialMatch === true
+      && !matchesPrimaryRequiredSpecial) return false;
     return requiredSpecialSourceFilter(entry);
   };
 }
@@ -355,10 +392,19 @@ export function planRollingOpenedItemRouting(items = [], options = {}) {
     .sort((left, right) => sortByRatingAndIdentity(left.item, right.item));
   const usableRequiredSpecial = requiredSpecialDuplicates
     .filter(({ classification }) => !classification.protected);
+  const requiredSpecialReserveLimit = Math.max(
+    1,
+    Math.floor(Number(options.requiredSpecialReserveLimit || 1) || 1),
+  );
   const keptRequiredSpecial = duplicateSwapEnabled
-    ? usableRequiredSpecial.filter((entry) => swapEligibleEntries.has(entry)).slice(0, 1)
+    ? usableRequiredSpecial
+      .filter((entry) => swapEligibleEntries.has(entry))
+      .slice(0, requiredSpecialReserveLimit)
     : [];
-  const extraRequiredSpecial = usableRequiredSpecial.slice(1);
+  const keptRequiredSpecialSet = new Set(keptRequiredSpecial);
+  const extraRequiredSpecial = usableRequiredSpecial.filter((entry) => (
+    !keptRequiredSpecialSet.has(entry)
+  ));
   const protectedDuplicates = duplicates.filter(({ classification }) => classification.protected);
   const provisionsReserve = duplicates.filter((entry) => (
     entry.classification.provisionsReserve
@@ -425,6 +471,7 @@ export function planRollingOpenedItemRouting(items = [], options = {}) {
       directClub: directClubEntries.length,
       requiredSpecial: requiredSpecialDuplicates.length,
       keptRequiredSpecial: keptRequiredSpecial.length,
+      requiredSpecialReserveLimit,
       extraRequiredSpecial: extraRequiredSpecial.length,
       provisionsReserve: provisionsReserve.length,
       provisionsImmediate: provisionRecoveryEntries.length,
@@ -515,15 +562,16 @@ export function createRollingPrimarySelectionPolicy(input = {}) {
   const specialConstraints = (input.model?.constraints || [])
     .map((constraint, index) => ({ constraint, index }))
     .filter(({ constraint }) => (
-      (constraint.source === 'ea' && constraint.keyName === 'PLAYER_RARITY_GROUP')
-        || constraint.id === 'runner-required-special'
+      isRequiredSpecialConstraint(constraint)
     ));
+  const allowOtherSpecialAsOrdinary = specialConstraints.length === 0
+    || input.model?.requiredSpecialAllowanceMode === 'all-matching-specials';
   const exclusiveRoles = specialConstraints.map(({ constraint, index }, roleIndex) => ({
     id: roleIndex === 0 ? 'required-special' : `required-special-${roleIndex + 1}`,
     label: constraint.label || 'Required Special',
     constraintIndex: index,
     minCount: Number(constraint.count || 0),
-    maxCount: Number(constraint.count || 0),
+    maxCount: requiredSpecialRoleMaximum(input.model, constraint),
   }));
 
   return {
@@ -542,9 +590,9 @@ export function createRollingPrimarySelectionPolicy(input = {}) {
       reserveRatings,
       softProtectSpecialPiles: ['club'],
       allowSoftProtectedFallback: true,
-      allowOtherSpecialAsOrdinary: true,
+      allowOtherSpecialAsOrdinary,
       liveRequirementsAvailable: exclusiveRoles.length > 0
-        && exclusiveRoles.every((role) => role.minCount === 1 && role.maxCount === 1),
+        && exclusiveRoles.every((role) => role.minCount >= 1 && role.maxCount >= role.minCount),
     },
   };
 }
@@ -653,6 +701,7 @@ export function releaseRollingRoutingItemsAfterConsumption(routing = null, consu
 export function createRollingRecoveryProtection(input = {}) {
   const entries = input.ledger?.classifiedEntries?.() || input.entries || [];
   const additionalProtected = uniqueRefs(input.protectedItems || []);
+  const allowedRequiredSpecialItems = uniqueRefs(input.allowedRequiredSpecialItems || []);
   const transientCounterparts = uniqueRefs(entries
     .filter(({ item }) => additionalProtected.some((ref) => refMatchesItem(ref, item)))
     .flatMap(({ item }) => {
@@ -662,9 +711,11 @@ export function createRollingRecoveryProtection(input = {}) {
         : [];
     }));
   const hardProtected = entries
-    .filter(({ classification }) => (
+    .filter(({ item, classification }) => (
       !classification
-        || (classification.requiredSpecial === true && input.allowRequiredSpecial !== true)
+        || (classification.requiredSpecial === true
+          && input.allowRequiredSpecial !== true
+          && !allowedRequiredSpecialItems.some((ref) => refMatchesItem(ref, item)))
         || classification?.protected === true
     ))
     .map(({ item }) => itemRef(item));
@@ -695,6 +746,11 @@ export function createRollingRecoveryProtection(input = {}) {
 
 export function createRollingRatingRecoverySelectionPolicy(input = {}) {
   const protection = createRollingRecoveryProtection(input);
+  const allowOtherSpecialAsOrdinary = input.allowOtherSpecialAsOrdinary !== undefined
+    ? input.allowOtherSpecialAsOrdinary === true
+    : input.model
+      ? input.model.requiredSpecialAllowanceMode === 'all-matching-specials'
+      : true;
   return {
     requiredItems: uniqueRefs(input.requiredItems || []),
     preferredItems: uniqueRefs(input.preferredItems || []),
@@ -708,7 +764,10 @@ export function createRollingRatingRecoverySelectionPolicy(input = {}) {
       reserveRatings: normalizedReserveRatings(input.reserveRatings),
       softProtectSpecialPiles: ['club'],
       allowSoftProtectedFallback: input.allowSoftProtectedFallback !== false,
-      allowOtherSpecialAsOrdinary: true,
+      // Recovery definitions without a live Required Special model retain
+      // their historical behavior. Storage Pressure may explicitly opt in
+      // when the live SBC has no special constraint of its own.
+      allowOtherSpecialAsOrdinary,
       liveRequirementsAvailable: true,
     },
   };

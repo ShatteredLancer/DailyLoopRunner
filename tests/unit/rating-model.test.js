@@ -88,6 +88,40 @@ describe('rating SBC model parsing and validation', () => {
     expect(model.constraints[0].matches({ name: 'Unrelated special', groups: [83] })).toBe(false);
   });
 
+  it('widens a Required Special role only when live allowance detection proves the new contract', () => {
+    const model = parseRatingSbcChallenge({
+      loopDef: {
+        dynamicActiveEligibilityRequirements: [
+          { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+        ],
+        requiredSpecialCount: 1,
+        allowedSpecialCount: 1,
+      },
+      challenge: {
+        eligibilityRequirements: [
+          requirement('TEAM_RATING', [84]),
+          requirement('PLAYER_RARITY_GROUP', [83], 1),
+        ],
+      },
+      requiredPlayerCount: 11,
+      eligibilityKeyName: (key) => key,
+      matchesPlayerRarityGroup: (item) => item.groups?.includes(83) === true,
+      detectRequiredSpecialAllowanceMode: () => ({
+        mode: 'all-matching-specials',
+        source: 'live-matcher',
+        matcherSource: 'ea-requirement',
+        evidence: { acceptedOutsideLegacyCategoryCount: 1 },
+      }),
+    });
+
+    expect(model).toMatchObject({
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+      requiredSpecialAllowanceDecisionSource: 'live-matcher',
+      maxSpecialCount: 11,
+      requiredSpecialAllowanceEvidence: [{ acceptedOutsideLegacyCategoryCount: 1 }],
+    });
+  });
+
   it('uses the runtime EA item-group matcher when DAO requirements lack a method', () => {
     const model = parseRatingSbcChallenge({
       loopDef: {

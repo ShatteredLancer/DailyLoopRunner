@@ -1,5 +1,9 @@
 import { isPlainObject } from '../domain/objects.js';
 import {
+  REQUIRED_SPECIAL_ALLOWANCE_MODES,
+  resolvedRequiredSpecialAllowanceMode,
+} from '../domain/required-special.js';
+import {
   GOLD_CONSUMPTION_MODES,
   goldConsumptionCompatible,
 } from '../domain/gold-consumption.js';
@@ -621,8 +625,20 @@ function validateRollingUpgrade(loopDef, errors) {
   validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
   validateNumberArray(loopDef.sbcSetIds, 'sbcSetIds', errors);
   validateNumberArray(loopDef.rewardPackIds, 'rewardPackIds', errors);
-  if (Number(loopDef.requiredSpecialCount) !== 1 || Number(loopDef.allowedSpecialCount) !== 1) {
-    errors.push('rollingUpgrade requires exactly one scanned Required Special slot');
+  const dynamicAllowanceModes = (loopDef.dynamicChallenges || [])
+    .map(resolvedRequiredSpecialAllowanceMode);
+  const allowsAllSafeSpecials = dynamicAllowanceModes.length > 0
+    && dynamicAllowanceModes.every((mode) => (
+      mode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+    ));
+  const expectedAllowedSpecialCount = allowsAllSafeSpecials
+    ? Number(loopDef.expectedPlayerCount || 0)
+    : 1;
+  if (Number(loopDef.requiredSpecialCount) !== 1
+    || Number(loopDef.allowedSpecialCount) !== expectedAllowedSpecialCount) {
+    errors.push(allowsAllSafeSpecials
+      ? `rollingUpgrade requires one Required Special slot and allows up to ${expectedAllowedSpecialCount} safe special cards`
+      : 'rollingUpgrade requires exactly one scanned Required Special slot');
   }
   const capabilities = [
     ['rollingTotwUpgrade', 'totw-upgrade'],

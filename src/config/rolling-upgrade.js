@@ -1,5 +1,9 @@
 import { cloneLoopDef, isPlainObject } from '../domain/objects.js';
 import {
+  REQUIRED_SPECIAL_ALLOWANCE_MODES,
+  resolvedRequiredSpecialAllowanceMode,
+} from '../domain/required-special.js';
+import {
   createProvisionsUpgradePolicy,
   createTotwUpgradePolicy,
 } from './upgrade-policies.js';
@@ -601,11 +605,20 @@ export function resolveRollingPlayerPickCapability(
 }
 
 export function createRollingUpgradeLoopDef(primaryLoop = {}) {
+  const specialAllowanceModes = (primaryLoop.dynamicChallenges || [])
+    .map(resolvedRequiredSpecialAllowanceMode);
+  const allowsAllSafeSpecials = specialAllowanceModes.length > 0
+    && specialAllowanceModes.every((mode) => (
+      mode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+    ));
+  const expectedAllowedSpecialCount = allowsAllSafeSpecials
+    ? Number(primaryLoop.expectedPlayerCount || 0)
+    : 1;
   if (primaryLoop.dynamicSbcFamily !== 'high-rated-x10'
     || Number(primaryLoop.dynamicRewardCount || 0) !== 10
     || Number(primaryLoop.dynamicRewardMinRating || 0) !== 85
     || Number(primaryLoop.requiredSpecialCount || 0) !== 1
-    || Number(primaryLoop.allowedSpecialCount || 0) !== 1) return null;
+    || Number(primaryLoop.allowedSpecialCount || 0) !== expectedAllowedSpecialCount) return null;
   const setId = positiveInteger(primaryLoop.sbcSetIds?.[0]);
   if (!setId) return null;
   const result = {

@@ -12,6 +12,26 @@ function requirement(key, values, count = -1, matcher = null) {
 }
 
 describe('dynamic EA player-group policy', () => {
+  it('uses the Rolling protection rating for Storage Pressure candidates', async () => {
+    const { api } = await loadUserscript();
+    const active = api.rollingStorageSinkLoopDefForPiles({
+      activeLoopDef: {
+        sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 88 },
+        runtimeSbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 88 },
+        ratingSbcFill: { priorityPiles: ['club'] },
+      },
+    }, ['storage'], {
+      runtimePickOptions: { protectionRating: 97 },
+    });
+
+    expect(active).toMatchObject({
+      priorityPiles: ['storage'],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 97 },
+      runtimeSbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 97 },
+      ratingSbcFill: { priorityPiles: ['storage'] },
+    });
+  });
+
   it('keeps explicit FC26 rarity authoritative over overlapping player groups and subtype methods', async () => {
     const { api } = await loadUserscript();
     const totw = makePlayer({
@@ -60,6 +80,307 @@ describe('dynamic EA player-group policy', () => {
       rollingProtectAllClubNonTotwSpecials: true,
       expectedPlayerCount: 11,
     })).toContain('rolling-club-non-totw-special-strict');
+  });
+
+  it('widens the safe quantity when live group 83 contains a special outside the legacy categories', async () => {
+    const outsideLegacy = makePlayer({
+      id: 9001,
+      definitionId: 19001,
+      rating: 88,
+      rareflag: 150,
+      groups: [19, 83],
+      name: 'Outside legacy category',
+    });
+    const { api } = await loadUserscript({ storage: [outsideLegacy] });
+    const loopDef = {
+      name: 'Live matcher expanded 85x10',
+      expectedPlayerCount: 11,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 95 },
+      ratingSbcFill: { priorityPiles: ['storage'] },
+    };
+    const model = api.parseRatingSbcChallenge(loopDef, {
+      id: 9999,
+      requiredPlayerCount: 11,
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [84]),
+        requirement('PLAYER_RARITY_GROUP', [83], 1),
+      ],
+    });
+
+    expect(api.isTotwItem(outsideLegacy)).toBe(false);
+    expect(api.isTotsItem(outsideLegacy)).toBe(false);
+    expect(api.isFofItem(outsideLegacy)).toBe(false);
+    expect(api.isFuttiesItem(outsideLegacy)).toBe(false);
+    expect(model).toMatchObject({
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+      requiredSpecialAllowanceDecisionSource: 'live-matcher',
+      maxSpecialCount: 11,
+    });
+    expect(model.constraints[0].requiredSpecialAllowanceEvidence)
+      .toMatchObject({
+        acceptedOutsideLegacyCategoryCount: 1,
+        expandedGroup83MembershipCount: 1,
+        matcherExpansionProof: 'live-group-83-expanded-contract',
+      });
+    expect(model.constraints[0].matches(outsideLegacy)).toBe(true);
+    expect(model.constraints[0].matches(makePlayer({ rareflag: 150, groups: [19] }))).toBe(false);
+    const expandedSnapshotLoop = {
+      ...loopDef,
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+    };
+    expect(api.rollingSnapshotRequiredSpecial({
+      ...outsideLegacy,
+      pile: 'storage',
+      special: true,
+    }, expandedSnapshotLoop)).toBe(true);
+    expect(api.rollingSnapshotRequiredSpecial({
+      ...outsideLegacy,
+      id: 9007,
+      definitionId: 19007,
+      groups: [19],
+      pile: 'storage',
+      special: true,
+    }, expandedSnapshotLoop)).toBe(false);
+  });
+
+  it('keeps the one-card rule when no live group-83 candidate is available', async () => {
+    const legacyTotw = makePlayer({
+      id: 9005,
+      definitionId: 19005,
+      rating: 88,
+      rareflag: 3,
+      groups: [44],
+      name: 'TOTW outside current group 83',
+    });
+    const { api } = await loadUserscript({ storage: [legacyTotw] });
+    const loopDef = {
+      name: 'Native matcher expanded contract',
+      expectedPlayerCount: 11,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 95 },
+      ratingSbcFill: { priorityPiles: ['storage'] },
+    };
+    const model = api.parseRatingSbcChallenge(loopDef, {
+      id: 9999,
+      requiredPlayerCount: 11,
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [84]),
+        requirement('PLAYER_RARITY_GROUP', [83], 1),
+      ],
+    });
+
+    expect(model).toMatchObject({
+      requiredSpecialAllowanceMode: 'required-only',
+      requiredSpecialAllowanceDecisionSource: 'fail-closed',
+      maxSpecialCount: 1,
+    });
+    expect(model.constraints[0].requiredSpecialAllowanceEvidence)
+      .toMatchObject({
+        acceptedOutsideLegacyCategoryCount: 0,
+        expandedGroup83MembershipCount: 0,
+        matcherExpansionProof: null,
+      });
+    expect(model.constraints[0].matches(legacyTotw)).toBe(false);
+    expect(model.constraints[0].matches(makePlayer({ rareflag: 150, groups: [19] }))).toBe(false);
+  });
+
+  it('expands live group 83 through item membership when the DAO requirement method is unavailable', async () => {
+    const arbitrarySpecial = makePlayer({
+      id: 9002,
+      definitionId: 19002,
+      rating: 88,
+      rareflag: 150,
+      groups: [19],
+      name: 'Arbitrary Special',
+    });
+    const legacyGroup83Special = makePlayer({
+      id: 9006,
+      definitionId: 19006,
+      rating: 88,
+      rareflag: 3,
+      groups: [83],
+      name: 'Legacy group 83 TOTW',
+    });
+    const { api } = await loadUserscript({ storage: [arbitrarySpecial, legacyGroup83Special] });
+    const loopDef = {
+      name: 'Confirmed current 85x10',
+      sbcSetIds: [1356],
+      dynamicActiveChallengeId: 3874,
+      expectedPlayerCount: 11,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 95 },
+      ratingSbcFill: { priorityPiles: ['storage'] },
+    };
+    const model = api.parseRatingSbcChallenge(loopDef, {
+      id: 3874,
+      requiredPlayerCount: 11,
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [84]),
+        requirement('PLAYER_RARITY_GROUP', [83], 1),
+      ],
+    });
+
+    expect(model).toMatchObject({
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+      requiredSpecialAllowanceDecisionSource: 'live-matcher',
+      maxSpecialCount: 11,
+    });
+    expect(model.constraints[0].matcherSource).toBe('runtime-item-groups');
+    expect(model.constraints[0].matches(arbitrarySpecial)).toBe(false);
+    expect(model.constraints[0].matches(legacyGroup83Special)).toBe(true);
+    expect(model.constraints[0].matches(makePlayer({ rareflag: 1 }))).toBe(false);
+  });
+
+  it('hard-protects evolved and cosmetic specials only after the any-special contract expands', async () => {
+    const evolved = makePlayer({ id: 9003, rating: 88, rareflag: 150 });
+    evolved.upgrades = { evolutionId: 42 };
+    const cosmetic = makePlayer({ id: 9004, rating: 88, rareflag: 151 });
+    cosmetic.cosmetics = [{ id: 7 }];
+    const { api } = await loadUserscript();
+    const expanded = { requiredSpecialAllowanceMode: 'all-matching-specials' };
+
+    expect(api.rollingBaseProtectionReasons(evolved, expanded))
+      .toContain('rolling-any-special-evolution');
+    expect(api.rollingBaseProtectionReasons(cosmetic, expanded))
+      .toContain('rolling-any-special-cosmetics');
+    expect(api.rollingBaseProtectionReasons(evolved, {}))
+      .not.toContain('rolling-any-special-evolution');
+    expect(api.rollingBaseProtectionReasons(cosmetic, {}))
+      .not.toContain('rolling-any-special-cosmetics');
+  });
+
+  it('selects only one Required Special for a non-83 player group', async () => {
+    const players = [
+      makePlayer({ id: 9010, definitionId: 19010, rating: 84, rareflag: 3, groups: [44] }),
+      makePlayer({ id: 9011, definitionId: 19011, rating: 84, rareflag: 151, groups: [22] }),
+      makePlayer({ id: 9012, definitionId: 19012, rating: 84, rareflag: 1, groups: [4] }),
+      makePlayer({ id: 9013, definitionId: 19013, rating: 84, rareflag: 1, groups: [4] }),
+    ];
+    const { api } = await loadUserscript({ storage: players });
+    const loopDef = {
+      name: 'Confirmed current 85x10 selection',
+      sbcSetIds: [1356],
+      dynamicActiveChallengeId: 3874,
+      expectedPlayerCount: 3,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'PLAYER_RARITY_GROUP', values: [44], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 84 },
+      ratingSbcFill: { priorityPiles: ['storage'] },
+    };
+    const model = api.parseRatingSbcChallenge(loopDef, {
+      id: 3874,
+      requiredPlayerCount: 3,
+      squad: { getNumOfRequiredPlayers: () => 3 },
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [84]),
+        requirement('PLAYER_RARITY_GROUP', [44], 1),
+      ],
+    });
+    const exclusiveRoles = [{
+      id: 'required-special',
+      constraintIndex: 0,
+      minCount: 1,
+      maxCount: 1,
+    }];
+    const candidates = api.buildRatingSbcCandidateEntries(loopDef, model, { exclusiveRoles });
+    const selection = await api.findOptimalRatingSbcSelection(
+      candidates.entries,
+      model,
+      candidates.piles,
+      { selectionPolicy: { exclusiveRoles, maxPlayerRating: 84, maxOrdinaryRating: 84 } },
+    );
+
+    expect(selection).toMatchObject({ ok: true });
+    expect(selection.selected.filter((item) => api.isSbcSpecialItem(item))).toHaveLength(1);
+    expect(api.validateRatingSbcModelAgainstItems(model, selection.selected, null, {
+      exclusiveRoles,
+      allowOtherSpecialAsOrdinary: false,
+    }).ok).toBe(true);
+  });
+
+  it('selects multiple matcher-approved specials when EA proves group 83 expansion', async () => {
+    const specials = [1, 2, 3].map((id) => makePlayer({
+      id: 9020 + id,
+      definitionId: 19020 + id,
+      rating: 84,
+      rareflag: 150 + id,
+      groups: [19, 83],
+      name: `Expanded Special ${id}`,
+    }));
+    const { api } = await loadUserscript({ storage: specials });
+    const loopDef = {
+      name: 'Expanded 85x10 selection',
+      expectedPlayerCount: 3,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 84 },
+      ratingSbcFill: { priorityPiles: ['storage'] },
+    };
+    const challenge = {
+      requiredPlayerCount: 3,
+      squad: { getNumOfRequiredPlayers: () => 3 },
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [84]),
+        requirement('PLAYER_RARITY_GROUP', [83], 1, (item) => (
+          specials.some((candidate) => candidate.id === item.id)
+        )),
+      ],
+    };
+    const model = api.parseRatingSbcChallenge(loopDef, challenge);
+    const exclusiveRoles = model.constraints
+      .map((constraint, constraintIndex) => ({ constraint, constraintIndex }))
+      .filter(({ constraint }) => constraint.requiredSpecialRole === true)
+      .map(({ constraint, constraintIndex }) => ({
+        id: 'required-special',
+        constraintIndex,
+        minCount: constraint.count,
+        maxCount: model.requiredPlayerCount,
+      }));
+    const candidates = api.buildRatingSbcCandidateEntries(loopDef, model, { exclusiveRoles });
+    const selection = await api.findOptimalRatingSbcSelection(
+      candidates.entries,
+      model,
+      candidates.piles,
+      {
+        selectionPolicy: {
+          exclusiveRoles,
+          maxPlayerRating: 84,
+          maxOrdinaryRating: 84,
+          protectionPolicy: { allowOtherSpecialAsOrdinary: true },
+        },
+      },
+    );
+
+    expect(model).toMatchObject({
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+      maxSpecialCount: 3,
+    });
+    expect(selection).toMatchObject({ ok: true });
+    expect(selection.selected.map((item) => item.id).sort()).toEqual(specials.map((item) => item.id).sort());
+    expect(selection.selected.filter((item) => api.isSbcSpecialItem(item))).toHaveLength(3);
+    expect(api.validateRatingSbcModelAgainstItems(model, selection.selected, null, {
+      exclusiveRoles,
+      allowOtherSpecialAsOrdinary: true,
+    }).ok).toBe(true);
   });
 
   it('does not let a Club rareflag-109 card satisfy the primary Required Special role through group 45', async () => {
@@ -156,7 +477,7 @@ describe('dynamic EA player-group policy', () => {
     const candidates = api.buildRatingSbcCandidateEntries(loopDef, model, {
       candidateFilter: api.createRollingRequiredSpecialSourceFilter({
         constraintIndexes: requiredSpecialIndexes,
-        isClubTotw: (item) => item.groups.includes(45),
+        isClubTotw: api.isTotwItem,
       }),
     }, inventorySnapshot);
 
@@ -204,6 +525,260 @@ describe('dynamic EA player-group policy', () => {
       ok: true,
       selected: [expect.objectContaining({ id: 77 })],
     });
+  });
+
+  it('allows multiple exact matcher-approved Storage specials in a generic Storage Sink', async () => {
+    const approved = [1, 2].map((id) => makePlayer({
+      id: 9100 + id,
+      definitionId: 19100 + id,
+      rating: 84,
+      rareflag: 120 + id,
+      groups: [19, 83],
+      name: `Approved Storage Special ${id}`,
+    }));
+    const unrelatedSpecial = makePlayer({
+      id: 9103,
+      definitionId: 19103,
+      rating: 84,
+      rareflag: 140,
+      groups: [19],
+      name: 'Unrelated Storage Special',
+    });
+    const ordinary = makePlayer({
+      id: 9104,
+      definitionId: 19104,
+      rating: 84,
+      rareflag: 0,
+      groups: [4],
+      name: 'Storage Gold',
+    });
+    const { api } = await loadUserscript({ storage: [...approved, unrelatedSpecial, ordinary] });
+    const primaryLoopDef = {
+      name: 'Expanded primary context',
+      expectedPlayerCount: 3,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 3,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 84 },
+      ratingSbcFill: { priorityPiles: ['storage'] },
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+    };
+    const primaryModel = api.parseRatingSbcChallenge(primaryLoopDef, {
+      requiredPlayerCount: 3,
+      squad: { getNumOfRequiredPlayers: () => 3 },
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [84]),
+        requirement('PLAYER_RARITY_GROUP', [83], 1, (item) => (
+          approved.some((candidate) => candidate.id === item.id)
+        )),
+      ],
+    });
+    const sinkLoopDef = {
+      name: 'Generic Storage Sink',
+      runtimeProtectionRating: 95,
+      expectedPlayerCount: 3,
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 95 },
+      ratingSbcFill: { priorityPiles: ['storage'] },
+    };
+    const sinkModel = api.parseRatingSbcChallenge(sinkLoopDef, {
+      requiredPlayerCount: 3,
+      squad: { getNumOfRequiredPlayers: () => 3 },
+      eligibilityRequirements: [requirement('TEAM_RATING', [84])],
+    });
+    const snapshot = createInventorySnapshot({
+      piles: { storage: [...approved, unrelatedSpecial, ordinary] },
+    });
+    const entries = snapshot.piles.storage.map((item) => ({
+      item,
+      pile: 'storage',
+      classification: {
+        requiredSpecial: approved.some((candidate) => candidate.id === item.id),
+        otherSpecial: item.special === true && !approved.some((candidate) => candidate.id === item.id),
+        protected: false,
+      },
+    }));
+    const runtime = {
+      primaryContext: { model: primaryModel, activeLoopDef: primaryLoopDef },
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      openRouting: null,
+      coordinator: { getLedger: () => ({ classifiedEntries: () => entries }) },
+    };
+    const policy = api.rollingStorageSinkSelectionPolicy(sinkLoopDef, runtime, {
+      model: sinkModel,
+    });
+    const candidates = api.buildRatingSbcCandidateEntries(
+      sinkLoopDef,
+      sinkModel,
+      policy,
+      snapshot,
+    );
+    const selection = await api.findOptimalRatingSbcSelection(
+      candidates.entries,
+      sinkModel,
+      candidates.piles,
+      { selectionPolicy: policy },
+    );
+
+    expect(api.rollingStoragePressureRequiredSpecialEntries(runtime, sinkLoopDef)
+      .map(({ item }) => item.id).sort()).toEqual(approved.map((item) => item.id).sort());
+    expect(candidates.entries.map((entry) => entry.item.id).sort()).toEqual(
+      [...approved, ordinary].map((item) => item.id).sort(),
+    );
+    expect(selection).toMatchObject({ ok: true });
+    expect(selection.selected.map((item) => item.id).sort()).toEqual(
+      [...approved, ordinary].map((item) => item.id).sort(),
+    );
+  });
+
+  it('authorizes multiple exact Storage specials for Provisions and rejects an unapproved special', async () => {
+    const approved = [1, 2].map((id) => makePlayer({
+      id: 9200 + id,
+      definitionId: 19200 + id,
+      rating: id === 1 ? 88 : 90,
+      rareflag: 120 + id,
+      groups: [19, 83],
+      name: `Provision Special ${id}`,
+    }));
+    const unrelated = makePlayer({
+      id: 9203,
+      definitionId: 19203,
+      rating: 88,
+      rareflag: 140,
+      groups: [19],
+      name: 'Unapproved Provision Special',
+    });
+    const cosmetic = makePlayer({
+      id: 9204,
+      definitionId: 19204,
+      rating: 88,
+      rareflag: 150,
+      groups: [19, 83],
+      cosmetics: [{ id: 7 }],
+      name: 'Cosmetic Provision Special',
+    });
+    const evolved = makePlayer({
+      id: 9205,
+      definitionId: 19205,
+      rating: 88,
+      rareflag: 151,
+      groups: [19, 83],
+      upgrades: { evolutionId: 42 },
+      name: 'Evolved Provision Special',
+    });
+    const overProtection = makePlayer({
+      id: 9206,
+      definitionId: 19206,
+      rating: 96,
+      rareflag: 152,
+      groups: [19, 83],
+      name: 'Over-protection Provision Special',
+    });
+    const ordinary89 = makePlayer({
+      id: 9207,
+      definitionId: 19207,
+      rating: 89,
+      rareflag: 0,
+      groups: [4],
+      name: 'Ordinary Gold 89',
+    });
+    const { api } = await loadUserscript({
+      storage: [...approved, unrelated, cosmetic, evolved, overProtection, ordinary89],
+    });
+    const primaryLoopDef = {
+      name: 'Expanded primary context',
+      expectedPlayerCount: 3,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 3,
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+      dynamicActiveEligibilityRequirements: [
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+    };
+    const primaryModel = api.parseRatingSbcChallenge(primaryLoopDef, {
+      requiredPlayerCount: 3,
+      squad: { getNumOfRequiredPlayers: () => 3 },
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [84]),
+        requirement('PLAYER_RARITY_GROUP', [83], 1, (item) => (
+          approved.some((candidate) => candidate.id === item.id)
+        )),
+      ],
+    });
+    const loopDef = { name: 'Storage Pressure', runtimeProtectionRating: 95 };
+    const snapshot = createInventorySnapshot({
+      piles: { storage: [...approved, unrelated, cosmetic, evolved, overProtection, ordinary89] },
+    });
+    const entries = snapshot.piles.storage.map((item) => ({
+      item,
+      pile: 'storage',
+      classification: { requiredSpecial: true, protected: false },
+    }));
+    const runtime = {
+      primaryContext: { model: primaryModel, activeLoopDef: primaryLoopDef },
+      coordinator: { getLedger: () => ({ classifiedEntries: () => entries }) },
+    };
+    const reserveEntries = api.rollingStoragePressureProvisionsReserveEntries(runtime, loopDef);
+    const allowedRefs = reserveEntries.map(({ item }) => ({
+      id: item.id,
+      definitionId: item.definitionId,
+      pile: 'storage',
+    }));
+
+    expect(reserveEntries.map(({ item }) => item.id).sort()).toEqual(approved.map((item) => item.id).sort());
+    const provisionsSelection = api.selectInventoryPlayers({
+      name: 'Emergency Provisions selection',
+      requirements: [{
+        tier: 'gold',
+        count: 4,
+        minRating: 87,
+        maxRating: 95,
+        playerOnly: true,
+        allowSpecial: true,
+      }],
+      priorityPiles: ['storage'],
+      protectedItemIds: [
+        unrelated.id,
+        cosmetic.id,
+        evolved.id,
+        overProtection.id,
+        ordinary89.id,
+      ],
+      runtimeSbcFodderPolicy: {
+        mode: 'rating-constrained',
+        ratingSbcMaxCardRating: 95,
+      },
+    }, ['storage']);
+    expect(provisionsSelection).toMatchObject({ ok: false });
+    expect(provisionsSelection.selected || []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: ordinary89.id }),
+    ]));
+    expect(() => api.assertRollingRecoveryItems(
+      loopDef,
+      runtime,
+      approved,
+      {
+        allowSpecial: true,
+        allowProvisionsReserve: true,
+        allowedRequiredSpecialItems: allowedRefs,
+        minRating: 87,
+        maxRating: 95,
+      },
+    )).not.toThrow();
+    expect(() => api.assertRollingRecoveryItems(
+      loopDef,
+      runtime,
+      [unrelated],
+      {
+        allowSpecial: true,
+        allowProvisionsReserve: true,
+        allowedRequiredSpecialItems: allowedRefs,
+        minRating: 87,
+        maxRating: 95,
+      },
+    )).toThrow(/Required Special|protected card/);
   });
 
   it('filters a primary Required Special duplicate out of a generic Storage Sink plan while keeping ordinary swaps', async () => {
@@ -725,6 +1300,7 @@ describe('dynamic EA player-group policy', () => {
       definitionId: 200,
       rating: 84,
       rareflag: 2,
+      groups: [83],
       name: 'FUTTIES Club Item',
     });
     const duplicateSignal = makePlayer({
@@ -732,6 +1308,7 @@ describe('dynamic EA player-group policy', () => {
       definitionId: 200,
       rating: 84,
       rareflag: 2,
+      groups: [83],
       duplicate: true,
       duplicateId: 20,
       name: 'FUTTIES Unassigned Signal',
@@ -741,6 +1318,7 @@ describe('dynamic EA player-group policy', () => {
       definitionId: 300,
       rating: 84,
       rareflag: 2,
+      groups: [83],
       name: 'FUTTIES Storage Item',
     });
     const { api } = await loadUserscript({
@@ -799,6 +1377,7 @@ describe('dynamic EA player-group policy', () => {
       definitionId: 400,
       rating: 84,
       rareflag: 2,
+      groups: [83],
       name: 'Eligible FUTTIES',
     });
     const unrelatedSpecial = makePlayer({
@@ -882,8 +1461,8 @@ describe('dynamic EA player-group policy', () => {
 
   it('bridges the live matcher into an exact-one role without consuming a Club Other Special', async () => {
     const players = [
-      makePlayer({ id: 60, definitionId: 600, rating: 84, rareflag: 2, name: 'FUTTIES A' }),
-      makePlayer({ id: 61, definitionId: 601, rating: 84, rareflag: 2, name: 'FUTTIES B' }),
+      makePlayer({ id: 60, definitionId: 600, rating: 84, rareflag: 2, groups: [83], name: 'FUTTIES A' }),
+      makePlayer({ id: 61, definitionId: 601, rating: 84, rareflag: 2, groups: [83], name: 'FUTTIES B' }),
       makePlayer({ id: 62, definitionId: 602, rating: 84, rareflag: 0, name: 'Regular A' }),
       makePlayer({ id: 63, definitionId: 603, rating: 84, rareflag: 0, name: 'Regular B' }),
       makePlayer({ id: 64, definitionId: 604, rating: 84, rareflag: 2, name: 'Other Special' }),

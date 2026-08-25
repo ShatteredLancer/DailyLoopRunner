@@ -25,9 +25,19 @@ export function createInventoryCapabilityCalculator(options = {}) {
       const unknownRequiredSpecial = entries.some(({ item, classification }) => (
         item.special === true && classification.requiredSpecial === null
       ));
+      const protectionRating = Math.max(1, Number(input.protectionRating || 95) || 95);
+      const requiredSpecialOverRating = entries.filter(({ item, classification }) => (
+        !classification.protected
+          && classification.requiredSpecial === true
+          && Number(item?.rating || 0) > protectionRating
+      )).length;
       const specialSlots = unknownRequiredSpecial
         ? null
-        : readinessValue(entries, (classification) => classification.requiredSpecial === true);
+        : entries.filter(({ item, classification }) => (
+            !classification.protected
+              && classification.requiredSpecial === true
+              && Number(item?.rating || 0) <= protectionRating
+          )).length;
       const provisionsRequiredCount = Math.max(1, Number(input.provisionsRequiredCount || 4) || 4);
       const provisionsEligible = readinessValue(entries, (classification) => classification.provisionsReserve === true);
       const storage = summary.capacities.storage || {};
@@ -49,6 +59,8 @@ export function createInventoryCapabilityCalculator(options = {}) {
           totwLimited: false,
           provisionsEligible,
           requiredSpecialUnknown: unknownRequiredSpecial,
+          requiredSpecialOverRating,
+          protectionRating,
         }),
       });
     })();

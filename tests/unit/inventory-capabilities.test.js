@@ -93,4 +93,30 @@ describe('inventory capability calculation', () => {
     expect(result.diagnostics.requiredSpecialUnknown).toBe(true);
   });
 
+  it('does not report specials above the Rolling protection rating as ready', async () => {
+    const ledger = createInventoryLedger({
+      snapshot: createInventorySnapshot({
+        piles: {
+          storage: [
+            player(1, 95, 'storage', { special: true, groups: [4] }),
+            player(2, 96, 'storage', { special: true, groups: [4] }),
+          ],
+        },
+      }),
+      classifyItem: (value) => ({ requiredSpecial: value.special === true, protected: false }),
+    });
+
+    const result = await createInventoryCapabilityCalculator().calculate({
+      ledger,
+      policyKey: 'rolling:95',
+      protectionRating: 95,
+    });
+
+    expect(result).toMatchObject({ specialSlots: 1 });
+    expect(result.diagnostics).toMatchObject({
+      protectionRating: 95,
+      requiredSpecialOverRating: 1,
+    });
+  });
+
 });

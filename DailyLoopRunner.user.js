@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.46
+// @version      0.8.47
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.46",
+    version: "0.8.47",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -894,6 +894,56 @@
     };
   }
 
+  // src/domain/required-special.js
+  var REQUIRED_SPECIAL_ALLOWANCE_MODES = Object.freeze({
+    REQUIRED_ONLY: "required-only",
+    ALL_MATCHING_SPECIALS: "all-matching-specials"
+  });
+  var REQUIRED_SPECIAL_ALLOWANCE_SOURCES = Object.freeze({
+    LIVE_MATCHER: "live-matcher",
+    EXPLICIT_METADATA: "explicit-metadata",
+    FAIL_CLOSED: "fail-closed"
+  });
+  function requirementKey(requirement2 = {}) {
+    return String(requirement2.keyName ?? requirement2.key ?? "");
+  }
+  function numericValues(requirement2 = {}) {
+    return (requirement2.values || []).map(Number).filter(Number.isFinite);
+  }
+  function isAllSpecialEligibilityRequirement(requirement2 = {}) {
+    const key = requirementKey(requirement2);
+    const values = numericValues(requirement2);
+    return ["PLAYER_QUALITY", "PLAYER_LEVEL"].includes(key) && values.length === 1 && values[0] === 4;
+  }
+  function isRequiredSpecialEligibilityRequirement(requirement2 = {}) {
+    return requirementKey(requirement2) === "PLAYER_RARITY_GROUP" || isAllSpecialEligibilityRequirement(requirement2);
+  }
+  function requiredSpecialAllowanceMode(requirements = []) {
+    const requiredSpecial = (requirements || []).filter(isRequiredSpecialEligibilityRequirement);
+    return requiredSpecial.length > 0 && requiredSpecial.every(isAllSpecialEligibilityRequirement) ? REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS : REQUIRED_SPECIAL_ALLOWANCE_MODES.REQUIRED_ONLY;
+  }
+  function resolvedRequiredSpecialAllowanceMode(value = {}) {
+    const explicit = String(value?.requiredSpecialAllowanceMode || "");
+    if (Object.values(REQUIRED_SPECIAL_ALLOWANCE_MODES).includes(explicit)) return explicit;
+    return requiredSpecialAllowanceMode(value?.eligibilityRequirements || []);
+  }
+  function isRequiredSpecialConstraint(constraint = {}) {
+    return constraint.id === "runner-required-special" || constraint.source === "ea" && isRequiredSpecialEligibilityRequirement(constraint);
+  }
+  function allowsAllMatchingSpecials(value = {}) {
+    if (value.requiredSpecialAllowanceMode) {
+      return value.requiredSpecialAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS;
+    }
+    return requiredSpecialAllowanceMode(value.dynamicActiveEligibilityRequirements || []) === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS;
+  }
+  function requiredSpecialRoleMaximum(model = {}, constraint = {}) {
+    const minimum = Math.max(0, Number(constraint.count || 0) || 0);
+    if (model.requiredSpecialAllowanceMode !== REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS) {
+      return minimum;
+    }
+    return Math.max(minimum, Number(model.requiredPlayerCount || 0) || 0);
+  }
+
   // src/domain/gold-consumption.js
   var GOLD_CONSUMPTION_MODES = Object.freeze([
     "eligibility",
@@ -1347,20 +1397,25 @@
     });
   }
   function matchesDynamicRequirement(item, requirement2, keyName, rawValues, matchers) {
-    try {
-      if (typeof requirement2?.meetsRequirements === "function") {
-        const result = requirement2.meetsRequirements(item);
-        if (typeof result === "boolean") return result;
-      }
-    } catch {
-    }
     if (keyName === "PLAYER_RARITY_GROUP") {
       try {
         const result = matchers.matchesPlayerRarityGroup?.(item, rawValues);
         if (typeof result === "boolean") return result;
       } catch {
       }
+      try {
+        const result = requirement2?.meetsRequirements?.(item);
+        if (typeof result === "boolean") return result;
+      } catch {
+      }
       return false;
+    }
+    try {
+      if (typeof requirement2?.meetsRequirements === "function") {
+        const result = requirement2.meetsRequirements(item);
+        if (typeof result === "boolean") return result;
+      }
+    } catch {
     }
     const values = rawValues.map(Number).filter(Number.isFinite);
     const rating = Number(item?.rating || 0);
@@ -1406,6 +1461,8 @@
     };
     const constraints = [];
     const unsupported = [];
+    const liveRequiredSpecialAllowanceModes = [];
+    const requiredSpecialAllowanceSources = [];
     let targetRating2 = Number(loopDef.ratingSbcFill?.targetRating || 0) || 0;
     for (const entry of readEligibilityRequirements(challenge, { requiredPlayerCount, eligibilityKeyName })) {
       const { requirement: requirement2, keyName, values, count } = entry;
@@ -1430,6 +1487,34 @@
         unsupported.push(`${keyName}(live EA matcher unavailable)`);
         continue;
       }
+      const requiredSpecialRole = isRequiredSpecialEligibilityRequirement({ keyName, values });
+      let liveRequiredSpecialAllowanceMode = null;
+      let liveRequiredSpecialAllowanceEvidence = null;
+      let liveRequiredSpecialAllowanceSource = null;
+      let liveRequiredSpecialMatcher = null;
+      let liveRequiredSpecialMatcherSource = null;
+      if (requiredSpecialRole && typeof input2.detectRequiredSpecialAllowanceMode === "function") {
+        try {
+          const detection = input2.detectRequiredSpecialAllowanceMode({
+            requirement: requirement2,
+            keyName,
+            values: [...values],
+            count
+          });
+          liveRequiredSpecialAllowanceMode = typeof detection === "string" ? detection : detection?.mode || null;
+          liveRequiredSpecialAllowanceEvidence = typeof detection === "object" ? detection?.evidence || null : null;
+          liveRequiredSpecialAllowanceSource = typeof detection === "object" ? detection?.source || null : null;
+          liveRequiredSpecialMatcher = typeof detection?.matches === "function" ? detection.matches : null;
+          liveRequiredSpecialMatcherSource = typeof detection === "object" ? detection?.matcherSource || null : null;
+        } catch {
+        }
+        if (liveRequiredSpecialAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS) {
+          liveRequiredSpecialAllowanceModes.push(liveRequiredSpecialAllowanceMode);
+        }
+        if (liveRequiredSpecialAllowanceSource) {
+          requiredSpecialAllowanceSources.push(liveRequiredSpecialAllowanceSource);
+        }
+      }
       constraints.push({
         id: `challenge-${constraints.length}`,
         label: `${keyName} ${values.join("/")} x${count}`,
@@ -1437,15 +1522,19 @@
         keyName,
         values: [...values],
         count,
+        requiredSpecialRole,
+        requiredSpecialAllowanceMode: liveRequiredSpecialAllowanceMode,
+        requiredSpecialAllowanceEvidence: liveRequiredSpecialAllowanceEvidence,
+        requiredSpecialAllowanceSource: liveRequiredSpecialAllowanceSource,
         ...keyName === "PLAYER_RARITY_GROUP" ? {
-          matcherSource: typeof requirement2?.meetsRequirements === "function" ? "ea-requirement" : "runtime-item-groups"
+          matcherSource: liveRequiredSpecialMatcherSource || (typeof requirement2?.meetsRequirements === "function" ? "ea-requirement" : "runtime-item-groups")
         } : {},
-        matches: (item) => matchesDynamicRequirement(item, requirement2, keyName, values, matchers)
+        matches: liveRequiredSpecialMatcher || ((item) => matchesDynamicRequirement(item, requirement2, keyName, values, matchers))
       });
     }
     const configuredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
-    const hasDynamicPlayerGroup = (loopDef.dynamicActiveEligibilityRequirements || []).some((requirement2) => String(requirement2?.key || "") === "PLAYER_RARITY_GROUP");
-    if (configuredSpecialCount && !hasDynamicPlayerGroup) {
+    const dynamicRequiredSpecial = (loopDef.dynamicActiveEligibilityRequirements || []).filter(isRequiredSpecialEligibilityRequirement);
+    if (configuredSpecialCount && !dynamicRequiredSpecial.length) {
       const minimumRating2 = Math.max(0, Number(loopDef.requiredSpecialMinRating || 0) || 0);
       const label = input2.requiredSpecialLabel?.(loopDef) || "special";
       constraints.push({
@@ -1456,13 +1545,20 @@
       });
     }
     const configuredAllowedSpecial = loopDef.allowedSpecialCount !== void 0 ? Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0) : null;
-    const dynamicPlayerGroupSpecialLimit = hasDynamicPlayerGroup ? constraints.filter((constraint) => constraint.keyName === "PLAYER_RARITY_GROUP").reduce((total, constraint) => total + Math.max(0, Number(constraint.count || 0) || 0), 0) : null;
+    const requiredSpecialConstraints = constraints.filter((constraint) => constraint.requiredSpecialRole === true);
+    const detectedAllowanceMode = requiredSpecialConstraints.length > 0 && liveRequiredSpecialAllowanceModes.length === requiredSpecialConstraints.length ? REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS : requiredSpecialAllowanceMode(dynamicRequiredSpecial);
+    const explicitAllMatchingSpecials = loopDef.requiredSpecialAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS && dynamicRequiredSpecial.length > 0 && dynamicRequiredSpecial.every(isAllSpecialEligibilityRequirement);
+    const allowanceMode = explicitAllMatchingSpecials ? REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS : detectedAllowanceMode;
+    const dynamicRequiredSpecialLimit = dynamicRequiredSpecial.length ? constraints.filter((constraint) => constraint.requiredSpecialRole === true).reduce((total, constraint) => total + Math.max(0, Number(constraint.count || 0) || 0), 0) : null;
     return {
       requiredPlayerCount,
       targetRating: targetRating2,
       constraints,
       unsupported: [...new Set(unsupported)],
-      maxSpecialCount: dynamicPlayerGroupSpecialLimit !== null ? dynamicPlayerGroupSpecialLimit : configuredAllowedSpecial === null ? loopDef.blockSpecial === false ? requiredPlayerCount : 0 : configuredAllowedSpecial
+      requiredSpecialAllowanceMode: allowanceMode,
+      requiredSpecialAllowanceDecisionSource: requiredSpecialAllowanceSources[0] || (allowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS ? loopDef.requiredSpecialAllowanceDecisionSource : null) || "fail-closed",
+      requiredSpecialAllowanceEvidence: requiredSpecialConstraints.map((constraint) => constraint.requiredSpecialAllowanceEvidence).filter(Boolean),
+      maxSpecialCount: dynamicRequiredSpecialLimit !== null ? allowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS ? requiredPlayerCount : dynamicRequiredSpecialLimit : configuredAllowedSpecial === null ? loopDef.blockSpecial === false ? requiredPlayerCount : 0 : configuredAllowedSpecial
     };
   }
   function validateRatingSbcModelAgainstItems(model, items = [], challenge = null, options = {}) {
@@ -2515,7 +2611,10 @@
     };
   }
   function createRollingUpgradeLoopDef(primaryLoop = {}) {
-    if (primaryLoop.dynamicSbcFamily !== "high-rated-x10" || Number(primaryLoop.dynamicRewardCount || 0) !== 10 || Number(primaryLoop.dynamicRewardMinRating || 0) !== 85 || Number(primaryLoop.requiredSpecialCount || 0) !== 1 || Number(primaryLoop.allowedSpecialCount || 0) !== 1) return null;
+    const specialAllowanceModes = (primaryLoop.dynamicChallenges || []).map(resolvedRequiredSpecialAllowanceMode);
+    const allowsAllSafeSpecials = specialAllowanceModes.length > 0 && specialAllowanceModes.every((mode) => mode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS);
+    const expectedAllowedSpecialCount = allowsAllSafeSpecials ? Number(primaryLoop.expectedPlayerCount || 0) : 1;
+    if (primaryLoop.dynamicSbcFamily !== "high-rated-x10" || Number(primaryLoop.dynamicRewardCount || 0) !== 10 || Number(primaryLoop.dynamicRewardMinRating || 0) !== 85 || Number(primaryLoop.requiredSpecialCount || 0) !== 1 || Number(primaryLoop.allowedSpecialCount || 0) !== expectedAllowedSpecialCount) return null;
     const setId = positiveInteger2(primaryLoop.sbcSetIds?.[0]);
     if (!setId) return null;
     const result = {
@@ -4520,7 +4619,7 @@
     if (["1", "RARE"].includes(text)) return "rare";
     return null;
   }
-  function requirementKey(requirement2 = {}) {
+  function requirementKey2(requirement2 = {}) {
     return `${requirement2.tier}:${requirement2.rarity || "*"}:${Number(requirement2.count || 0)}`;
   }
   function normalizedRequirements(requirements = []) {
@@ -4528,12 +4627,12 @@
       tier: requirement2.tier,
       ...requirement2.rarity ? { rarity: requirement2.rarity } : {},
       count: Number(requirement2.count || 0)
-    })).sort((left, right) => requirementKey(left).localeCompare(requirementKey(right)));
+    })).sort((left, right) => requirementKey2(left).localeCompare(requirementKey2(right)));
   }
   function requirementsEqual(left = [], right = []) {
     const a = normalizedRequirements(left);
     const b = normalizedRequirements(right);
-    return a.length === b.length && a.every((entry, index) => requirementKey(entry) === requirementKey(b[index]));
+    return a.length === b.length && a.every((entry, index) => requirementKey2(entry) === requirementKey2(b[index]));
   }
   function requirementSummary2(entry = {}) {
     return `${entry.keyName || "?"}(count:${entry.count || "?"}, values:${entry.values?.join("/") || "?"})`;
@@ -4685,7 +4784,7 @@
       return {
         status: "ignored",
         setId,
-        diagnostics: [`no supported basic Upgrade family matches ${parsedChallenge.requirements.map(requirementKey).join(", ")}`]
+        diagnostics: [`no supported basic Upgrade family matches ${parsedChallenge.requirements.map(requirementKey2).join(", ")}`]
       };
     }
     const remaining = remainingCompletions2(set);
@@ -5550,8 +5649,11 @@
     validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
     validateNumberArray(loopDef.sbcSetIds, "sbcSetIds", errors);
     validateNumberArray(loopDef.rewardPackIds, "rewardPackIds", errors);
-    if (Number(loopDef.requiredSpecialCount) !== 1 || Number(loopDef.allowedSpecialCount) !== 1) {
-      errors.push("rollingUpgrade requires exactly one scanned Required Special slot");
+    const dynamicAllowanceModes = (loopDef.dynamicChallenges || []).map(resolvedRequiredSpecialAllowanceMode);
+    const allowsAllSafeSpecials = dynamicAllowanceModes.length > 0 && dynamicAllowanceModes.every((mode) => mode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS);
+    const expectedAllowedSpecialCount = allowsAllSafeSpecials ? Number(loopDef.expectedPlayerCount || 0) : 1;
+    if (Number(loopDef.requiredSpecialCount) !== 1 || Number(loopDef.allowedSpecialCount) !== expectedAllowedSpecialCount) {
+      errors.push(allowsAllSafeSpecials ? `rollingUpgrade requires one Required Special slot and allows up to ${expectedAllowedSpecialCount} safe special cards` : "rollingUpgrade requires exactly one scanned Required Special slot");
     }
     const capabilities = [
       ["rollingTotwUpgrade", "totw-upgrade"],
@@ -6713,7 +6815,7 @@
         diagnostics.push(`unsupported eligibility condition ${requirementSummary3(entry)}`);
         continue;
       }
-      if (entry.keyName === "PLAYER_RARITY_GROUP") {
+      if (isRequiredSpecialEligibilityRequirement(entry)) {
         specialCount += entry.count;
       }
     }
@@ -6721,12 +6823,15 @@
     if (family.id === "totw-upgrade" && specialCount) {
       diagnostics.push("TOTW Upgrade unexpectedly requires a special card");
     }
+    const staticAllowanceMode = requiredSpecialAllowanceMode(entries);
     return {
       ok: diagnostics.length === 0,
       diagnostics: unique3(diagnostics),
       requiredPlayerCount,
       targetRating: teamRatings[0] || null,
       specialCount,
+      requiredSpecialAllowanceMode: staticAllowanceMode,
+      requiredSpecialAllowanceDecisionSource: staticAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS ? REQUIRED_SPECIAL_ALLOWANCE_SOURCES.EXPLICIT_METADATA : REQUIRED_SPECIAL_ALLOWANCE_SOURCES.FAIL_CLOSED,
       eligibilityRequirements: entries.map(eligibilityRequirementSnapshot)
     };
   }
@@ -6756,7 +6861,9 @@
     const result = clone4(loopDef);
     result.expectedPlayerCount = positiveInteger5(metadata.requiredPlayerCount) || result.expectedPlayerCount;
     result.requiredSpecialCount = Math.max(0, Number(metadata.specialCount || 0) || 0);
-    result.allowedSpecialCount = result.requiredSpecialCount;
+    result.requiredSpecialAllowanceMode = metadata.requiredSpecialAllowanceMode;
+    result.requiredSpecialAllowanceDecisionSource = metadata.requiredSpecialAllowanceDecisionSource;
+    result.allowedSpecialCount = metadata.requiredSpecialAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS ? result.expectedPlayerCount : result.requiredSpecialCount;
     result.dynamicActiveEligibilityRequirements = clone4(metadata.eligibilityRequirements || []);
     result.ratingSbcFill = { ...clone4(result.ratingSbcFill) || {} };
     if (positiveInteger5(metadata.targetRating)) result.ratingSbcFill.targetRating = Number(metadata.targetRating);
@@ -6792,6 +6899,8 @@
         requiredPlayerCount: parsed.requiredPlayerCount,
         targetRating: parsed.targetRating,
         specialCount: parsed.specialCount,
+        requiredSpecialAllowanceMode: parsed.requiredSpecialAllowanceMode,
+        requiredSpecialAllowanceDecisionSource: parsed.requiredSpecialAllowanceDecisionSource,
         requirements: parsed.requirements || [],
         eligibilityRequirements: parsed.eligibilityRequirements || []
       };
@@ -6850,6 +6959,8 @@
         requiredPlayerCount: challenge.requiredPlayerCount,
         targetRating: challenge.targetRating,
         specialCount: challenge.specialCount,
+        requiredSpecialAllowanceMode: challenge.requiredSpecialAllowanceMode,
+        requiredSpecialAllowanceDecisionSource: challenge.requiredSpecialAllowanceDecisionSource,
         eligibilityRequirements: clone4(challenge.eligibilityRequirements || [])
       }))
     };
@@ -6861,8 +6972,9 @@
       }));
     }
     if (isHighRatedUpgradeFamily(family)) {
+      const allSafeSpecials = parsedChallenges.length > 0 && parsedChallenges.every((challenge) => challenge.specialCount > 0 && challenge.requiredSpecialAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS);
       loop.requiredSpecialCount = maximumSpecialCount;
-      loop.allowedSpecialCount = maximumSpecialCount;
+      loop.allowedSpecialCount = allSafeSpecials ? Math.max(...parsedChallenges.map((challenge) => Number(challenge.requiredPlayerCount || 0))) : maximumSpecialCount;
       delete loop.requiredSpecialKind;
       delete loop.requiredSpecialMinRating;
       delete loop.specialRequirementAdd;
@@ -6928,8 +7040,8 @@
     if (discoveredLoop.ratingSbcFill?.targetRating === void 0) {
       delete merged.ratingSbcFill.targetRating;
     }
-    const hasDynamicPlayerGroup = (discoveredLoop.dynamicChallenges || []).some((challenge) => (challenge.eligibilityRequirements || []).some((requirement2) => requirement2.key === "PLAYER_RARITY_GROUP"));
-    if (discoveredLoop.requiredSpecialCount && !hasDynamicPlayerGroup) {
+    const hasDynamicRequiredSpecial = (discoveredLoop.dynamicChallenges || []).some((challenge) => (challenge.eligibilityRequirements || []).some(isRequiredSpecialEligibilityRequirement));
+    if (discoveredLoop.requiredSpecialCount && !hasDynamicRequiredSpecial) {
       merged.requiredSpecialKind = discoveredLoop.requiredSpecialKind || configuredLoop.requiredSpecialKind;
       merged.requiredSpecialMinRating = discoveredLoop.requiredSpecialMinRating || configuredLoop.requiredSpecialMinRating;
     } else {
@@ -12336,7 +12448,9 @@
         const startedAt = measureTime();
         const entries = ledger.classifiedEntries();
         const unknownRequiredSpecial = entries.some(({ item, classification }) => item.special === true && classification.requiredSpecial === null);
-        const specialSlots = unknownRequiredSpecial ? null : readinessValue(entries, (classification) => classification.requiredSpecial === true);
+        const protectionRating = Math.max(1, Number(input2.protectionRating || 95) || 95);
+        const requiredSpecialOverRating = entries.filter(({ item, classification }) => !classification.protected && classification.requiredSpecial === true && Number(item?.rating || 0) > protectionRating).length;
+        const specialSlots = unknownRequiredSpecial ? null : entries.filter(({ item, classification }) => !classification.protected && classification.requiredSpecial === true && Number(item?.rating || 0) <= protectionRating).length;
         const provisionsRequiredCount = Math.max(1, Number(input2.provisionsRequiredCount || 4) || 4);
         const provisionsEligible = readinessValue(entries, (classification) => classification.provisionsReserve === true);
         const storage = summary.capacities.storage || {};
@@ -12355,7 +12469,9 @@
             totwReason: "exact recovery count is disabled in live telemetry to avoid running the full rating solver",
             totwLimited: false,
             provisionsEligible,
-            requiredSpecialUnknown: unknownRequiredSpecial
+            requiredSpecialUnknown: unknownRequiredSpecial,
+            requiredSpecialOverRating,
+            protectionRating
           })
         });
       })();
@@ -12508,6 +12624,7 @@
   function createRollingRequiredSpecialSourceFilter(input2 = {}) {
     const constraintIndexes = [...new Set((input2.constraintIndexes || []).map(Number).filter((index) => Number.isInteger(index) && index >= 0))];
     const isClubTotw = typeof input2.isClubTotw === "function" ? input2.isClubTotw : () => false;
+    const isSpecial = typeof input2.isSpecial === "function" ? input2.isSpecial : (item) => item?.special === true;
     const resolveSubmissionPile = typeof input2.resolveSubmissionPile === "function" ? input2.resolveSubmissionPile : (entry = {}) => {
       const knownPiles = /* @__PURE__ */ new Set(["unassigned", "storage", "transfer", "club"]);
       return [
@@ -12520,9 +12637,18 @@
     return (entry = {}) => {
       const submissionPile = String(resolveSubmissionPile(entry) || "unknown");
       if (submissionPile === "unknown") return false;
-      if (submissionPile !== "club") return true;
       const matchesRequiredSpecial = constraintIndexes.some((index) => entry.requirementMatches?.[index] === true);
-      if (!matchesRequiredSpecial) return true;
+      if (input2.requireSpecialRoleMatch === true) {
+        let special = entry.special === true;
+        try {
+          special = special || isSpecial(entry.item) === true;
+        } catch {
+          return false;
+        }
+        if (special && !matchesRequiredSpecial) return false;
+      }
+      if (submissionPile !== "club") return true;
+      if (!matchesRequiredSpecial || input2.allowClubRequiredSpecial === true) return true;
       try {
         return isClubTotw(entry.item) === true;
       } catch {
@@ -12537,10 +12663,16 @@
     ));
     const constraintIndexes = [...new Set((input2.constraintIndexes || []).map(Number).filter((index) => Number.isInteger(index) && index >= 0))];
     const isPrimaryRequiredSpecial = typeof input2.isPrimaryRequiredSpecial === "function" ? input2.isPrimaryRequiredSpecial : () => false;
+    const isSpecial = typeof input2.isSpecial === "function" ? input2.isSpecial : (item) => item?.special === true;
+    const isClubTotw = typeof input2.isClubTotw === "function" ? input2.isClubTotw : () => false;
+    const resolveSubmissionPile = typeof input2.resolveSubmissionPile === "function" ? input2.resolveSubmissionPile : (entry) => entry?.submissionPileName || entry?.pileName || "unknown";
     const requiredSpecialSourceFilter = createRollingRequiredSpecialSourceFilter({
       constraintIndexes,
-      isClubTotw: input2.isClubTotw,
-      resolveSubmissionPile: input2.resolveSubmissionPile
+      isClubTotw,
+      isSpecial,
+      requireSpecialRoleMatch: input2.requireSpecialRoleMatch === true,
+      allowClubRequiredSpecial: input2.allowClubRequiredSpecial === true,
+      resolveSubmissionPile
     });
     return (entry = {}) => {
       if (exactConsumeMatch(entry.item)) return true;
@@ -12552,7 +12684,21 @@
         }
       });
       const matchesStorageSinkRole = constraintIndexes.some((index) => entry.requirementMatches?.[index] === true);
-      if (matchesPrimaryRequiredSpecial && !matchesStorageSinkRole) return false;
+      let special = entry.special === true;
+      try {
+        special = special || isSpecial(entry.item) === true;
+      } catch {
+        return false;
+      }
+      if (matchesPrimaryRequiredSpecial && !matchesStorageSinkRole && input2.allowPrimaryRequiredSpecialAsOrdinary !== true) return false;
+      if (matchesPrimaryRequiredSpecial && String(resolveSubmissionPile(entry) || "unknown") === "club") {
+        try {
+          if (isClubTotw(entry.item) !== true) return false;
+        } catch {
+          return false;
+        }
+      }
+      if (special && constraintIndexes.length === 0 && input2.requirePrimaryRequiredSpecialMatch === true && !matchesPrimaryRequiredSpecial) return false;
       return requiredSpecialSourceFilter(entry);
     };
   }
@@ -12650,8 +12796,13 @@
     const swapIneligibleDuplicates = duplicates.filter((entry) => !swapEligibleEntries.has(entry));
     const requiredSpecialDuplicates = duplicates.filter(({ classification }) => classification.requiredSpecial === true).sort((left, right) => sortByRatingAndIdentity(left.item, right.item));
     const usableRequiredSpecial = requiredSpecialDuplicates.filter(({ classification }) => !classification.protected);
-    const keptRequiredSpecial = duplicateSwapEnabled ? usableRequiredSpecial.filter((entry) => swapEligibleEntries.has(entry)).slice(0, 1) : [];
-    const extraRequiredSpecial = usableRequiredSpecial.slice(1);
+    const requiredSpecialReserveLimit = Math.max(
+      1,
+      Math.floor(Number(options.requiredSpecialReserveLimit || 1) || 1)
+    );
+    const keptRequiredSpecial = duplicateSwapEnabled ? usableRequiredSpecial.filter((entry) => swapEligibleEntries.has(entry)).slice(0, requiredSpecialReserveLimit) : [];
+    const keptRequiredSpecialSet = new Set(keptRequiredSpecial);
+    const extraRequiredSpecial = usableRequiredSpecial.filter((entry) => !keptRequiredSpecialSet.has(entry));
     const protectedDuplicates = duplicates.filter(({ classification }) => classification.protected);
     const provisionsReserve = duplicates.filter((entry) => entry.classification.provisionsReserve && !entry.classification.protected && (!duplicateSwapEnabled || swapEligibleEntries.has(entry)));
     const immediateProvisionCount = duplicateSwapEnabled && provisionsRecoveryAvailable && proactiveProvisionsEnabled ? Math.floor(provisionsReserve.length / provisionsRequiredCount) * provisionsRequiredCount : 0;
@@ -12688,6 +12839,7 @@
         directClub: directClubEntries.length,
         requiredSpecial: requiredSpecialDuplicates.length,
         keptRequiredSpecial: keptRequiredSpecial.length,
+        requiredSpecialReserveLimit,
         extraRequiredSpecial: extraRequiredSpecial.length,
         provisionsReserve: provisionsReserve.length,
         provisionsImmediate: provisionRecoveryEntries.length,
@@ -12736,13 +12888,14 @@
     const preferredItems = primaryDuplicates.filter(({ item }) => !isRelaxedPrimaryDuplicate(item)).map(({ item }) => primaryDuplicateRefs.some((ref) => refMatchesItem(ref, item)) ? primarySelectionRef(item) : submissionRef(item));
     const relaxedPrimaryItems = primaryDuplicates.filter(({ item }) => isRelaxedPrimaryDuplicate(item)).map(({ item }) => primarySelectionRef(item));
     const protectedItems = entries.filter(({ item, classification }) => classification.protected === true && !isAuthorizedTransientEntity(item)).map(({ item }) => itemRef2(item));
-    const specialConstraints = (input2.model?.constraints || []).map((constraint, index) => ({ constraint, index })).filter(({ constraint }) => constraint.source === "ea" && constraint.keyName === "PLAYER_RARITY_GROUP" || constraint.id === "runner-required-special");
+    const specialConstraints = (input2.model?.constraints || []).map((constraint, index) => ({ constraint, index })).filter(({ constraint }) => isRequiredSpecialConstraint(constraint));
+    const allowOtherSpecialAsOrdinary = specialConstraints.length === 0 || input2.model?.requiredSpecialAllowanceMode === "all-matching-specials";
     const exclusiveRoles = specialConstraints.map(({ constraint, index }, roleIndex) => ({
       id: roleIndex === 0 ? "required-special" : `required-special-${roleIndex + 1}`,
       label: constraint.label || "Required Special",
       constraintIndex: index,
       minCount: Number(constraint.count || 0),
-      maxCount: Number(constraint.count || 0)
+      maxCount: requiredSpecialRoleMaximum(input2.model, constraint)
     }));
     return {
       requiredItems: uniqueRefs(requiredItems),
@@ -12760,8 +12913,8 @@
         reserveRatings,
         softProtectSpecialPiles: ["club"],
         allowSoftProtectedFallback: true,
-        allowOtherSpecialAsOrdinary: true,
-        liveRequirementsAvailable: exclusiveRoles.length > 0 && exclusiveRoles.every((role) => role.minCount === 1 && role.maxCount === 1)
+        allowOtherSpecialAsOrdinary,
+        liveRequirementsAvailable: exclusiveRoles.length > 0 && exclusiveRoles.every((role) => role.minCount >= 1 && role.maxCount >= role.minCount)
       }
     };
   }
@@ -12845,11 +12998,12 @@
   function createRollingRecoveryProtection(input2 = {}) {
     const entries = input2.ledger?.classifiedEntries?.() || input2.entries || [];
     const additionalProtected = uniqueRefs(input2.protectedItems || []);
+    const allowedRequiredSpecialItems = uniqueRefs(input2.allowedRequiredSpecialItems || []);
     const transientCounterparts = uniqueRefs(entries.filter(({ item }) => additionalProtected.some((ref) => refMatchesItem(ref, item))).flatMap(({ item }) => {
       const duplicateId = Number(item?.duplicateId || 0);
       return duplicateId > 0 ? [{ id: duplicateId, definitionId: Number(item?.definitionId || 0), pile: "unknown" }] : [];
     }));
-    const hardProtected = entries.filter(({ classification }) => !classification || classification.requiredSpecial === true && input2.allowRequiredSpecial !== true || classification?.protected === true).map(({ item }) => itemRef2(item));
+    const hardProtected = entries.filter(({ item, classification }) => !classification || classification.requiredSpecial === true && input2.allowRequiredSpecial !== true && !allowedRequiredSpecialItems.some((ref) => refMatchesItem(ref, item)) || classification?.protected === true).map(({ item }) => itemRef2(item));
     const clubOtherSpecial = entries.filter(({ item, pile, classification }) => String(pile || item?.pile || item?.ref?.pile || "") === "club" && classification?.otherSpecial === true && classification?.requiredSpecial !== true && classification?.protected !== true).map(({ item }) => itemRef2(item));
     const protectedItems = uniqueRefs([
       ...hardProtected,
@@ -12865,6 +13019,7 @@
   }
   function createRollingRatingRecoverySelectionPolicy(input2 = {}) {
     const protection = createRollingRecoveryProtection(input2);
+    const allowOtherSpecialAsOrdinary = input2.allowOtherSpecialAsOrdinary !== void 0 ? input2.allowOtherSpecialAsOrdinary === true : input2.model ? input2.model.requiredSpecialAllowanceMode === "all-matching-specials" : true;
     return {
       requiredItems: uniqueRefs(input2.requiredItems || []),
       preferredItems: uniqueRefs(input2.preferredItems || []),
@@ -12878,7 +13033,10 @@
         reserveRatings: normalizedReserveRatings(input2.reserveRatings),
         softProtectSpecialPiles: ["club"],
         allowSoftProtectedFallback: input2.allowSoftProtectedFallback !== false,
-        allowOtherSpecialAsOrdinary: true,
+        // Recovery definitions without a live Required Special model retain
+        // their historical behavior. Storage Pressure may explicitly opt in
+        // when the live SBC has no special constraint of its own.
+        allowOtherSpecialAsOrdinary,
         liveRequirementsAvailable: true
       }
     };
@@ -14612,12 +14770,12 @@
     )) || null;
   }
   function storageSinkRequiredSpecialRoles(model = {}) {
-    return (model.constraints || []).map((constraint, constraintIndex) => ({ constraint, constraintIndex })).filter(({ constraint }) => constraint.source === "ea" && constraint.keyName === "PLAYER_RARITY_GROUP" || constraint.id === "runner-required-special").map(({ constraint, constraintIndex }, roleIndex) => ({
+    return (model.constraints || []).map((constraint, constraintIndex) => ({ constraint, constraintIndex })).filter(({ constraint }) => isRequiredSpecialConstraint(constraint)).map(({ constraint, constraintIndex }, roleIndex) => ({
       id: roleIndex === 0 ? "storage-sink-required-special" : `storage-sink-required-special-${roleIndex + 1}`,
       label: constraint.label || "Required Special",
       constraintIndex,
       minCount: Math.max(1, Number(constraint.count || 1) || 1),
-      maxCount: Math.max(1, Number(constraint.count || 1) || 1)
+      maxCount: requiredSpecialRoleMaximum(model, constraint)
     }));
   }
   function storagePressureRequirement(input2 = {}) {
@@ -44071,6 +44229,93 @@
       });
       return resolveSelectionPlanToRuntime(plan, inventoryAdapter, transientUnassignedSignals);
     }
+    function requiredSpecialProbeItem(item, pileName, matched, outsideLegacyCategory) {
+      return {
+        id: Number(item?.id || 0) || null,
+        definitionId: Number(item?.definitionId || 0) || null,
+        name: itemDisplayName(item),
+        rating: Number(item?.rating || 0) || null,
+        pile: pileName,
+        rareflag: itemRareFlag(item),
+        groups: itemGroupNumbers(item),
+        matched,
+        outsideLegacyCategory
+      };
+    }
+    function probeRequiredSpecialAllowanceMode(loopDef, challenge, entry = {}) {
+      const pileOrder = ["unassigned", "storage", "transfer", "club"];
+      const seen = /* @__PURE__ */ new Set();
+      const candidates = [];
+      for (const pileName of pileOrder) {
+        for (const item of getPileItemsByName(pileName)) {
+          const id = Number(item?.id || 0);
+          const identity = id ? `id:${id}` : `${pileName}:def:${Number(item?.definitionId || 0)}`;
+          if (seen.has(identity) || !isPlayer2(item) || !isSbcSpecialItem(item)) continue;
+          seen.add(identity);
+          if (!isRatingSbcCandidateSafe(item, loopDef)) continue;
+          candidates.push({ item, pileName });
+        }
+      }
+      const rawMatcher = (item) => {
+        if (entry.keyName === "PLAYER_RARITY_GROUP") {
+          const groups = new Set(itemGroupNumbers(item));
+          return (entry.values || []).some((value) => groups.has(Number(value)));
+        }
+        try {
+          if (typeof entry.requirement?.meetsRequirements === "function") {
+            const result = entry.requirement.meetsRequirements(item);
+            if (typeof result === "boolean") return result;
+          }
+        } catch {
+        }
+        if (["PLAYER_QUALITY", "PLAYER_LEVEL"].includes(entry.keyName)) {
+          return (entry.values || []).map(Number).includes(4) && isSbcSpecialItem(item);
+        }
+        return false;
+      };
+      const legacyCategory = (item) => isTotwItem(item) || isTotsItem(item) || isFofItem(item) || isFuttiesItem(item);
+      const tested = candidates.map(({ item, pileName }) => {
+        const matched = rawMatcher(item) === true;
+        return {
+          item,
+          pileName,
+          matched,
+          outsideLegacyCategory: matched && !legacyCategory(item)
+        };
+      });
+      const accepted = tested.filter((candidate) => candidate.matched);
+      const acceptedOutsideLegacyCategory = accepted.filter((candidate) => candidate.outsideLegacyCategory);
+      const groupValues = (entry.values || []).map(Number).filter(Number.isFinite);
+      const expandedGroup83Contract = entry.keyName === "PLAYER_RARITY_GROUP" && groupValues.length === 1 && groupValues[0] === 83 && accepted.length > 0;
+      const evidence2 = {
+        specialCandidatesTested: tested.length,
+        matcherAcceptedCount: accepted.length,
+        acceptedOutsideLegacyCategoryCount: acceptedOutsideLegacyCategory.length,
+        expandedGroup83MembershipCount: expandedGroup83Contract ? accepted.length : 0,
+        matcherExpansionProof: expandedGroup83Contract ? "live-group-83-expanded-contract" : null,
+        sample: tested.filter((candidate) => candidate.matched).slice(0, 8).map((candidate) => requiredSpecialProbeItem(
+          candidate.item,
+          candidate.pileName,
+          candidate.matched,
+          candidate.outsideLegacyCategory
+        ))
+      };
+      const matcherSource = entry.keyName === "PLAYER_RARITY_GROUP" ? "runtime-item-groups" : typeof entry.requirement?.meetsRequirements === "function" ? "ea-requirement" : "runtime-special-classification";
+      if (expandedGroup83Contract) {
+        return {
+          mode: REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS,
+          source: REQUIRED_SPECIAL_ALLOWANCE_SOURCES.LIVE_MATCHER,
+          matcherSource,
+          evidence: evidence2
+        };
+      }
+      return {
+        mode: REQUIRED_SPECIAL_ALLOWANCE_MODES.REQUIRED_ONLY,
+        source: REQUIRED_SPECIAL_ALLOWANCE_SOURCES.FAIL_CLOSED,
+        matcherSource,
+        evidence: evidence2
+      };
+    }
     function parseRatingSbcChallenge2(loopDef, challenge) {
       return parseRatingSbcChallenge({
         loopDef,
@@ -44088,7 +44333,8 @@
         },
         itemLeagueId: itemLeagueId2,
         requiredSpecialLabel,
-        isRequiredSpecialItem
+        isRequiredSpecialItem,
+        detectRequiredSpecialAllowanceMode: (entry) => probeRequiredSpecialAllowanceMode(loopDef, challenge, entry)
       });
     }
     function validateRatingSbcModelAgainstItems2(model, items = [], challenge = null, options = {}) {
@@ -44116,8 +44362,8 @@
       if (isSbcSpecialItem(item)) {
         if (!allowedSpecialCount) return false;
         if (!roleAware && requiredSpecialKind(loopDef) && !isRequiredSpecialItem(item, loopDef)) return false;
-        if (!roleAware && model && hasDynamicPlayerGroupRequirement(loopDef)) {
-          const matchesActivePlayerGroup = eaPlayerGroupConstraints(model).some(({ constraint }) => {
+        if (!roleAware && model && hasDynamicRequiredSpecialRequirement(loopDef)) {
+          const matchesActivePlayerGroup = eaRequiredSpecialConstraints(model).some(({ constraint }) => {
             try {
               return constraint.matches(item) === true;
             } catch {
@@ -44604,19 +44850,22 @@
     function requiredSpecialKind(loopDef = {}) {
       return String(loopDef.requiredSpecialKind || "").trim().toLowerCase();
     }
-    function dynamicPlayerGroupRequirements(loopDef = {}) {
-      return (loopDef.dynamicActiveEligibilityRequirements || []).filter((requirement2) => String(requirement2?.key || "") === "PLAYER_RARITY_GROUP");
+    function dynamicRequiredSpecialRequirements(loopDef = {}) {
+      return (loopDef.dynamicActiveEligibilityRequirements || []).filter(isRequiredSpecialEligibilityRequirement);
     }
-    function hasDynamicPlayerGroupRequirement(loopDef = {}) {
-      return dynamicPlayerGroupRequirements(loopDef).length > 0;
+    function hasDynamicRequiredSpecialRequirement(loopDef = {}) {
+      return dynamicRequiredSpecialRequirements(loopDef).length > 0;
     }
     function requiredSpecialLabel(loopDef = {}) {
-      const groupValues = [...new Set(dynamicPlayerGroupRequirements(loopDef).flatMap((requirement2) => requirement2.values || []).map(Number).filter(Number.isFinite))];
+      if (allowsAllMatchingSpecials(loopDef)) return "Any matching Special";
+      const groupValues = [...new Set(dynamicRequiredSpecialRequirements(loopDef).filter((requirement2) => String(requirement2?.key || "") === "PLAYER_RARITY_GROUP").flatMap((requirement2) => requirement2.values || []).map(Number).filter(Number.isFinite))];
       if (groupValues.length) return `EA player group ${groupValues.join("/")}`;
       return requiredSpecialKind(loopDef) === "totw-tots-fof" ? "TOTW/TOTS/FOF" : "TOTW";
     }
     function isRequiredSpecialItem(item, loopDef = {}) {
-      if (hasDynamicPlayerGroupRequirement(loopDef)) return false;
+      if (hasDynamicRequiredSpecialRequirement(loopDef)) {
+        return allowsAllMatchingSpecials(loopDef) && isSbcSpecialItem(item);
+      }
       const kind = requiredSpecialKind(loopDef);
       if (kind === "totw-tots-fof") return isTotwItem(item) || isTotsItem(item) || isFofItem(item);
       return isTotwItem(item);
@@ -45398,12 +45647,12 @@
       }
       return { ok: true };
     }
-    function eaPlayerGroupConstraints(model = {}) {
-      return (model.constraints || []).map((constraint, index) => ({ constraint, index })).filter(({ constraint }) => constraint.source === "ea" && constraint.keyName === "PLAYER_RARITY_GROUP");
+    function eaRequiredSpecialConstraints(model = {}) {
+      return (model.constraints || []).map((constraint, index) => ({ constraint, index })).filter(({ constraint }) => constraint.source === "ea" && isRequiredSpecialConstraint(constraint));
     }
     function evaluateDynamicPlayerGroupAvailability(loopDef, model) {
       const candidates = buildRatingSbcCandidateEntries(loopDef, model);
-      const requirements = eaPlayerGroupConstraints(model).map(({ constraint, index }) => {
+      const requirements = eaRequiredSpecialConstraints(model).map(({ constraint, index }) => {
         const matches = candidates.entries.filter((entry) => entry.requirementMatches[index] === true);
         return {
           constraint,
@@ -45490,7 +45739,7 @@
       };
     }
     async function ensureRequiredEligibilityForFillAndVerify(loopDef, challenge) {
-      if (!hasDynamicPlayerGroupRequirement(loopDef)) {
+      if (!hasDynamicRequiredSpecialRequirement(loopDef)) {
         const legacyPreflight = needsAutoTotwPreflight(loopDef);
         const ready = await ensureTotwForFillAndVerify(loopDef);
         return {
@@ -45501,7 +45750,7 @@
       }
       const model = parseRatingSbcChallenge2(loopDef, challenge);
       const groupMatcherErrors = (model.unsupported || []).filter((entry) => String(entry).startsWith("PLAYER_RARITY_GROUP"));
-      const groupConstraints = eaPlayerGroupConstraints(model);
+      const groupConstraints = eaRequiredSpecialConstraints(model);
       if (groupMatcherErrors.length || !groupConstraints.length) {
         const reason = groupMatcherErrors.length ? `live EA player-group matcher unavailable: ${groupMatcherErrors.join(", ")}` : "live EA player-group requirement could not be bound to the active Challenge";
         log(`${loopDef.name}: ${reason}`);
@@ -45623,7 +45872,7 @@
       const blocked3 = [];
       const entries = [];
       let specialCount = 0;
-      const requiredSpecialCount = hasDynamicPlayerGroupRequirement(loopDef) ? 0 : Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
+      const requiredSpecialCount = hasDynamicRequiredSpecialRequirement(loopDef) ? 0 : Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
       const expectedPlayerCount = Math.max(
         0,
         Number(options.expectedPlayerCount || 0) || Number(loopDef.expectedPlayerCount || 0) || (loopDef.inventoryFillFirst === true ? sumRequirementPlayerCount(loopDef) : 0) || 0
@@ -45730,7 +45979,7 @@
     }
     function logSbcSquadInspection(loopDef, inspection, options = {}) {
       const maxItems = Number(options.maxItems || 20);
-      const requiredPart = !hasDynamicPlayerGroupRequirement(loopDef) && Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0) ? `, ${requiredSpecialLabel(loopDef)} ${inspection.requiredSpecialMetCount || 0}/${Number(loopDef.requiredSpecialCount || 0)}` : "";
+      const requiredPart = !hasDynamicRequiredSpecialRequirement(loopDef) && Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0) ? `, ${requiredSpecialLabel(loopDef)} ${inspection.requiredSpecialMetCount || 0}/${Number(loopDef.requiredSpecialCount || 0)}` : "";
       const playerCountPart = inspection.expectedPlayerCount ? `${inspection.items.length}/${inspection.expectedPlayerCount}` : String(inspection.items.length);
       log(`${loopDef.name}: squad inspection ${playerCountPart} item(s), special ${inspection.specialCount || 0}${requiredPart}, blocked ${inspection.blocked.length}`);
       (inspection.entries || []).slice(0, maxItems).forEach(({ item, index, reasons }) => {
@@ -45746,7 +45995,7 @@
     function getManualSbcFixHints(loopDef, inspection) {
       const hints = [];
       const allowedSpecialCount = Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
-      const requiredSpecialCount = hasDynamicPlayerGroupRequirement(loopDef) ? 0 : Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
+      const requiredSpecialCount = hasDynamicRequiredSpecialRequirement(loopDef) ? 0 : Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
       for (const { item, index, reasons } of inspection.blocked || []) {
         const name = itemDisplayName(item);
         const rating = Number(item?.rating || 0) || "?";
@@ -50222,14 +50471,20 @@
     }
     function rollingSnapshotMatchesRequiredSpecial(item, loopDef = {}) {
       if (item?.special !== true) return false;
-      const requiredGroups = new Set(dynamicPlayerGroupRequirements(loopDef).flatMap((requirement2) => requirement2.values || []).map(Number).filter(Number.isFinite));
+      const requiredSpecialRequirements = dynamicRequiredSpecialRequirements(loopDef);
+      const requiredGroups = new Set(requiredSpecialRequirements.filter((requirement2) => String(requirement2?.key || "") === "PLAYER_RARITY_GROUP").flatMap((requirement2) => requirement2.values || []).map(Number).filter(Number.isFinite));
       if (requiredGroups.size) {
         return (item.groups || []).some((group) => requiredGroups.has(Number(group)));
       }
+      if (requiredSpecialRequirements.some((requirement2) => ["PLAYER_QUALITY", "PLAYER_LEVEL"].includes(String(requirement2?.key || "")) && (requirement2.values || []).map(Number).includes(4))) {
+        return isSbcSpecialItem(item);
+      }
+      if (allowsAllMatchingSpecials(loopDef)) return isSbcSpecialItem(item);
       return isRequiredSpecialItem(item, loopDef);
     }
     function rollingSnapshotRequiredSpecial(item, loopDef = {}) {
       if (!rollingSnapshotMatchesRequiredSpecial(item, loopDef)) return false;
+      if (allowsAllMatchingSpecials(loopDef)) return true;
       const pile = normalizedRuntimePileName(item?.pile || item?.ref?.pile) || "unknown";
       return pile !== "club" || isTotwItem(item);
     }
@@ -50240,7 +50495,7 @@
       return rollingBaseProtectionReasons(item, loopDef, pile).length === 0;
     }
     function rollingLiveRequiredSpecial(item, model = {}) {
-      const constraints = eaPlayerGroupConstraints(model);
+      const constraints = eaRequiredSpecialConstraints(model);
       if (!constraints.length) {
         const fallback = (model.constraints || []).find((constraint) => constraint.id === "runner-required-special");
         if (!fallback) return false;
@@ -50822,9 +51077,37 @@
       };
     }
     function rollingRequiredSpecialConstraintIndexes(model = {}) {
-      return (model.constraints || []).map((constraint, index) => ({ constraint, index })).filter(({ constraint }) => constraint.source === "ea" && constraint.keyName === "PLAYER_RARITY_GROUP" || constraint.id === "runner-required-special").map(({ index }) => index);
+      return (model.constraints || []).map((constraint, index) => ({ constraint, index })).filter(({ constraint }) => isRequiredSpecialConstraint(constraint)).map(({ index }) => index);
+    }
+    function applyRequiredSpecialAllowanceModel(loopDef, model) {
+      loopDef.requiredSpecialAllowanceMode = model.requiredSpecialAllowanceMode;
+      loopDef.requiredSpecialAllowanceDecisionSource = model.requiredSpecialAllowanceDecisionSource;
+      loopDef.allowedSpecialCount = model.requiredSpecialAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS ? Number(model.requiredPlayerCount || loopDef.expectedPlayerCount || 0) : Number(loopDef.requiredSpecialCount || 0);
+      return loopDef;
+    }
+    function logRollingRequiredSpecialContract(set, challenge, loopDef, model) {
+      const setId = Number(set?.id || loopDef?.sbcSetIds?.[0] || 0) || "?";
+      const challengeId = Number(challenge?.id || challenge?.challengeId || 0) || "?";
+      const rawRequirements = readEligibilityRequirements(challenge, {
+        requiredPlayerCount: model.requiredPlayerCount,
+        eligibilityKeyName: (key) => eaSbcAdapter().eligibilityKeyName(key)
+      }).map((entry) => ({
+        key: entry.keyName,
+        values: entry.values,
+        count: entry.count
+      }));
+      log(`${loopDef.name}: Required Special contract Set #${setId}, Challenge #${challengeId}; raw eligibility ${diagnosticJson(rawRequirements)}`);
+      const constraints = eaRequiredSpecialConstraints(model);
+      const minimum = constraints.reduce((total, { constraint }) => total + Math.max(0, Number(constraint.count || 0) || 0), 0);
+      log(`${loopDef.name}: Required Special mode:${model.requiredSpecialAllowanceMode}, decision:${model.requiredSpecialAllowanceDecisionSource}, minimum:${minimum}, maximum:${model.maxSpecialCount}`);
+      constraints.forEach(({ constraint }, index) => {
+        log(`${loopDef.name}: Required Special constraint ${index + 1}/${constraints.length} ${constraint.label}; matcher:${constraint.matcherSource || "runtime"}; evidence:${diagnosticJson(constraint.requiredSpecialAllowanceEvidence || {})}`);
+      });
     }
     function rollingRequiredSpecialSourceErrors(selection, model = {}) {
+      if (model.requiredSpecialAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS) {
+        return [];
+      }
       const indexes = rollingRequiredSpecialConstraintIndexes(model);
       return (selection?.entries || []).filter((entry) => rollingSelectionSubmissionPile(entry) === "club" && indexes.some((index) => entry.requirementMatches?.[index] === true) && !isTotwItem(entry.item)).map((entry) => `Club ${itemDisplayName(entry.item)} is not TOTW`);
     }
@@ -50842,9 +51125,13 @@
         specialIndex: isSbcSpecialItem(item) ? 1 : 0
       });
       const pile = normalizedRuntimePileName(pileOverride || item?.pile || item?.ref?.pile) || "unknown";
+      if (allowsAllMatchingSpecials(loopDef) && isSbcSpecialItem(item)) {
+        if (isEvolutionItem(item)) reasons.push("rolling-any-special-evolution");
+        if (hasPlayerCosmetics(item)) reasons.push("rolling-any-special-cosmetics");
+      }
       const strictClubSpecial = loopDef.rollingProtectAllClubNonTotwSpecials === true && pile === "club" && isSbcSpecialItem(item) && !isTotwItem(item);
       if (strictClubSpecial) reasons.push("rolling-club-non-totw-special-strict");
-      const protectedClubEventSpecial = pile === "club" && !isTotwItem(item) && (rollingSnapshotMatchesRequiredSpecial(item, loopDef) || isTotsItem(item) || isFofItem(item) || isFuttiesItem(item));
+      const protectedClubEventSpecial = pile === "club" && !isTotwItem(item) && !allowsAllMatchingSpecials(loopDef) && (rollingSnapshotMatchesRequiredSpecial(item, loopDef) || isTotsItem(item) || isFofItem(item) || isFuttiesItem(item));
       if (protectedClubEventSpecial) reasons.push("rolling-club-non-totw-required-special");
       return [...new Set(reasons)];
     }
@@ -50932,6 +51219,9 @@
           provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef),
           provisionsRecoveryAvailable: rollingCapabilityAvailable(loopDef.rollingProvisionsUpgrade),
           proactiveProvisionsEnabled: loopDef.rollingSurplusCraftingEnabled === true,
+          requiredSpecialReserveLimit: allowsAllMatchingSpecials(
+            context.model || context.primaryContext?.model
+          ) ? Number((context.model || context.primaryContext?.model)?.requiredPlayerCount || 1) : 1,
           storeOtherSpecialDuplicates: rollingPrimaryReservesAllSpecialSlots(
             context.model || context.primaryContext?.model
           ),
@@ -51061,6 +51351,8 @@
         loopDef
       );
       const model = parseRatingSbcChallenge2(activeLoopDef, challenge);
+      applyRequiredSpecialAllowanceModel(activeLoopDef, model);
+      logRollingRequiredSpecialContract(set, challenge, activeLoopDef, model);
       if (model.unsupported.length) {
         return {
           status: "blocked",
@@ -51068,7 +51360,7 @@
           reasonCode: "LIVE_REQUIREMENT_UNAVAILABLE"
         };
       }
-      const roles = eaPlayerGroupConstraints(model);
+      const roles = eaRequiredSpecialConstraints(model);
       const roleCount = roles.reduce((total, entry) => total + Number(entry.constraint.count || 0), 0);
       if (roleCount !== 1) {
         return {
@@ -51199,8 +51491,8 @@
       }
       return { ok: true, playerPickCount: playerPickIds.size, playerPickIds: [...playerPickIds] };
     }
-    function rollingRecoveryProtection(runtime, additionalProtected = []) {
-      return rollingRecoveryProtectionWithOptions(runtime, additionalProtected);
+    function rollingRecoveryProtection(runtime, additionalProtected = [], options = {}) {
+      return rollingRecoveryProtectionWithOptions(runtime, additionalProtected, options);
     }
     function rollingNonPrimaryPendingRefs(runtime) {
       const primaryRefs = runtime.primaryDuplicateRefs || [];
@@ -51215,7 +51507,8 @@
           ...rollingActiveSquadConflictRefs(runtime),
           ...additionalProtected
         ],
-        allowRequiredSpecial: options.allowRequiredSpecial === true
+        allowRequiredSpecial: options.allowRequiredSpecial === true,
+        allowedRequiredSpecialItems: options.allowedRequiredSpecialItems || []
       });
     }
     function rollingItemMatchesRef(item, ref) {
@@ -51230,12 +51523,14 @@
         ...options.allowPrimaryDuplicates === true ? [] : runtime.primaryDuplicateRefs || []
       ], {
         allowPrimaryDuplicates: options.allowPrimaryDuplicates === true,
-        allowRequiredSpecial: options.allowRequiredSpecial === true
+        allowRequiredSpecial: options.allowRequiredSpecial === true,
+        allowedRequiredSpecialItems: options.allowedRequiredSpecialItems || []
       });
       const reserveRatings = options.allowProvisionsReserve === true ? /* @__PURE__ */ new Set() : new Set(rollingProvisionsReserveRatings(loopDef));
       const allowedPrimaryDuplicateRefs = options.allowPrimaryDuplicates === true ? rollingUniqueRefs(options.allowedPrimaryDuplicateRefs || []) : [];
       const allowedProtectedItems = rollingUniqueRefs(options.allowedProtectedItems || []);
       const allowedProvisionsReserveItems = rollingUniqueRefs(options.allowedProvisionsReserveItems || []);
+      const allowedRequiredSpecialItems = rollingUniqueRefs(options.allowedRequiredSpecialItems || []);
       const protectionRating = rollingProtectionRating(loopDef);
       const minRating = Number(options.minRating);
       const maxRating = Number(options.maxRating);
@@ -51259,7 +51554,9 @@
         const allowedPrimaryDuplicate = allowedPrimaryDuplicateRefs.some((ref) => rollingExactItemMatchesRef(item, ref));
         const allowedProtectedItem = allowedProtectedItems.some((ref) => rollingExactItemMatchesRef(item, ref));
         const allowedProvisionsReserveItem = allowedProvisionsReserveItems.some((ref) => rollingItemMatchesRef(item, ref));
-        if (options.allowRequiredSpecial !== true && (rollingLiveRequiredSpecial(item, runtime.primaryContext?.model) || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef))) {
+        const requiredSpecial = rollingLiveRequiredSpecial(item, runtime.primaryContext?.model) || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef);
+        const allowedRequiredSpecial = allowedRequiredSpecialItems.some((ref) => rollingExactItemMatchesRef(item, ref));
+        if (options.allowRequiredSpecial !== true && requiredSpecial && !allowedRequiredSpecial) {
           fail2(`${loopDef.name}: recovery squad attempted to consume a Required Special card`);
         }
         if (!allowedProtectedItem && protection.protectedItems.some((ref) => rollingItemMatchesRef(item, ref))) {
@@ -51322,7 +51619,10 @@
         ...options.additionalProtected || [],
         ...runtime.primaryDuplicateRefs || []
       ];
-      const protection = rollingRecoveryProtection(runtime, additionalProtected);
+      const protection = rollingRecoveryProtection(runtime, additionalProtected, {
+        allowRequiredSpecial: options.allowRequiredSpecial === true,
+        allowedRequiredSpecialItems: options.allowedRequiredSpecialItems || []
+      });
       const protectedDuplicateRefs = options.protectedDuplicateRefs || [];
       const reserveRefs = options.protectProvisionsReserve === true ? rollingRecoveryEntryRefs(runtime, ({ classification }) => classification.provisionsReserve === true) : [];
       const hardProtectedIds = [...new Set([
@@ -51415,6 +51715,8 @@
           additionalProtected,
           allowProvisionsReserve: options.allowProvisionsReserve === true,
           allowSpecial: options.allowSpecial === true,
+          allowRequiredSpecial: options.allowRequiredSpecial === true,
+          allowedRequiredSpecialItems: options.allowedRequiredSpecialItems || [],
           minRating: options.minRating,
           maxRating: options.maxRating,
           selection: squadPlan?.selection || selection,
@@ -53166,6 +53468,38 @@
       const routing = rollingPendingStorageRoutingState(runtime, options);
       if (!routing.ok) return routing;
       const currentFree = runtime.coordinator?.getLedger?.()?.summary?.()?.capacities?.storage?.free;
+      if (options.allowIncremental === true) {
+        const requirement2 = storagePressureRequirement({
+          currentFree,
+          pendingStorageItems: routing.pendingRefs.length
+        });
+        if (!requirement2.ok) return requirement2;
+        const maximumRelease = Math.max(1, Number(options.maximumRelease || 1) || 1);
+        const requiredRelease = Math.min(requirement2.minimumConsumption, maximumRelease);
+        if (storageItemsConsumed < requiredRelease) {
+          return {
+            ok: false,
+            reason: `${storageItemsConsumed} selected Storage card(s) cannot make the required incremental release of ${requiredRelease}`,
+            reasonCode: "RECOVERY_STORAGE_HEADROOM_INSUFFICIENT",
+            details: {
+              currentFree: requirement2.currentFree,
+              pendingStorageItems: requirement2.pendingStorageItems,
+              requiredRelease,
+              storageItemsConsumed
+            }
+          };
+        }
+        return {
+          ok: true,
+          currentFree: requirement2.currentFree,
+          projectedFree: requirement2.currentFree + storageItemsConsumed,
+          requiredFree: requirement2.requiredFree,
+          pendingStorageItems: requirement2.pendingStorageItems,
+          requiredRelease,
+          storageItemsConsumed,
+          incremental: true
+        };
+      }
       return validateStorageRecoveryHeadroom({
         currentFree,
         pendingStorageItems: routing.pendingRefs.length,
@@ -53507,9 +53841,20 @@
         completedCount: challenges.length - incomplete.length
       };
     }
-    function rollingStorageSinkLoopDefForPiles(context, priorityPiles) {
+    function rollingStorageSinkLoopDefForPiles(context, priorityPiles, parentLoopDef = {}) {
+      const protectionRating = rollingProtectionRating(parentLoopDef);
       return {
         ...context.activeLoopDef,
+        sbcFodderPolicy: {
+          ...context.activeLoopDef.sbcFodderPolicy || {},
+          mode: "rating-constrained",
+          ratingSbcMaxCardRating: protectionRating
+        },
+        runtimeSbcFodderPolicy: {
+          ...context.activeLoopDef.runtimeSbcFodderPolicy || {},
+          mode: "rating-constrained",
+          ratingSbcMaxCardRating: protectionRating
+        },
         priorityPiles: [...priorityPiles],
         ratingSbcFill: {
           ...context.activeLoopDef.ratingSbcFill || {},
@@ -53519,6 +53864,10 @@
     }
     function rollingStorageSinkSelectionPolicy(loopDef, runtime, options = {}) {
       const requiredSpecialRoles = storageSinkRequiredSpecialRoles(options.model);
+      const allowPrimaryRequiredSpecials = allowsAllMatchingSpecials(runtime.primaryContext?.model);
+      const classifiedPrimaryRequiredSpecialItems = (runtime.coordinator.getLedger()?.classifiedEntries?.() || []).filter(({ classification }) => classification?.requiredSpecial === true).map(({ item, pile }) => liveItemRef(item, pile));
+      const primaryRequiredSpecialItems = allowPrimaryRequiredSpecials ? rollingStoragePressureRequiredSpecialEntries(runtime, loopDef).map(({ item }) => liveItemRef(item, "storage")) : [];
+      const allowMultipleSpecials = requiredSpecialRoles.length === 0 || allowsAllMatchingSpecials(options.model);
       const consumablePendingRefs = options.consumablePendingRefs || [];
       const consumableItemRefs = options.consumableItemRefs || [];
       const selectionPolicy = createRollingRatingRecoverySelectionPolicy({
@@ -53531,7 +53880,10 @@
         ],
         requiredItems: options.requiredItems || [],
         exclusiveRoles: [...requiredSpecialRoles, ...options.additionalRoles || []],
-        allowRequiredSpecial: requiredSpecialRoles.length > 0
+        allowRequiredSpecial: requiredSpecialRoles.length > 0,
+        allowedRequiredSpecialItems: primaryRequiredSpecialItems,
+        allowOtherSpecialAsOrdinary: allowMultipleSpecials,
+        model: options.model
       });
       if (consumableItemRefs.length) {
         selectionPolicy.protectedItems = selectionPolicy.protectedItems.filter((ref) => !consumableItemRefs.some((candidate) => rollingItemMatchesRef(ref, candidate)));
@@ -53539,10 +53891,11 @@
       const candidateFilter = createRollingStorageSinkCandidateFilter({
         exactConsumeRefs: options.duplicateTransactionContext?.consumeRefs || [],
         constraintIndexes: requiredSpecialRoles.map((role) => role.constraintIndex),
-        isPrimaryRequiredSpecial: (item) => rollingLiveRequiredSpecial(item, runtime.primaryContext?.model) || rollingSnapshotRequiredSpecial(
-          item,
-          runtime.primaryContext?.activeLoopDef || loopDef
-        ),
+        isSpecial: isSbcSpecialItem,
+        requireSpecialRoleMatch: allowsAllMatchingSpecials(options.model),
+        requirePrimaryRequiredSpecialMatch: requiredSpecialRoles.length === 0 && allowPrimaryRequiredSpecials,
+        allowPrimaryRequiredSpecialAsOrdinary: allowPrimaryRequiredSpecials,
+        isPrimaryRequiredSpecial: (item) => (allowPrimaryRequiredSpecials ? primaryRequiredSpecialItems : classifiedPrimaryRequiredSpecialItems).some((ref) => rollingExactItemMatchesRef(item, ref)),
         isClubTotw: isTotwItem,
         resolveSubmissionPile: (entry) => entry?.signal && entry?.pileName === "unassigned" ? "unassigned" : rollingSelectionSubmissionPile(entry)
       });
@@ -53636,7 +53989,8 @@
       if (!duplicateTransactionContext.ok) return duplicateTransactionContext;
       const activeLoopDef = rollingStorageSinkLoopDefForPiles(
         context,
-        storageSinkSquadSourceStrategy(89).priorityPiles
+        storageSinkSquadSourceStrategy(89).priorityPiles,
+        loopDef
       );
       const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
         model: context.model,
@@ -53685,7 +54039,7 @@
       );
       if (!duplicateTransactionContext.ok) return duplicateTransactionContext;
       const buildFor = (priorityPiles) => {
-        const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, priorityPiles);
+        const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, priorityPiles, loopDef);
         const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
           model: context.model,
           duplicateTransactionContext
@@ -53794,6 +54148,68 @@
       const mayConsumePendingReserve = runtime?.duplicateSwapEnabled === true;
       return (runtime.openRouting?.storageItems || []).filter((item) => !mayConsumePendingReserve || !consumableReserveIds.has(Number(item?.id || 0))).map((item) => liveItemRef(item, "unassigned"));
     }
+    function rollingStoragePressureProvisionsReserveEntries(runtime, loopDef = {}, options = {}) {
+      return rollingStoragePressureRequiredSpecialEntries(runtime, loopDef, {
+        minRating: ROLLING_PROVISIONS_RATING_RANGE.min,
+        logDiagnostics: options.logDiagnostics === true
+      });
+    }
+    function rollingStoragePressureRequiredSpecialEntries(runtime, loopDef = {}, options = {}) {
+      const model = runtime?.primaryContext?.model;
+      const activeLoopDef = runtime?.primaryContext?.activeLoopDef || loopDef;
+      if (!allowsAllMatchingSpecials(model)) {
+        if (options.logDiagnostics === true) {
+          const evidence2 = eaRequiredSpecialConstraints(model).map(({ constraint }) => constraint.requiredSpecialAllowanceEvidence?.matcherExpansionProof).filter(Boolean).join(",") || "none";
+          log(`${loopDef.name}: Storage Pressure group authorization mode:${model?.requiredSpecialAllowanceMode || "unknown"}; expansion proof:${evidence2}; no additional exact group-83 entities authorized`);
+        }
+        return [];
+      }
+      const minRating = Math.max(1, Number(options.minRating || 1) || 1);
+      const maxRating = rollingProtectionRating(loopDef);
+      const entries = runtime?.coordinator?.getLedger?.()?.classifiedEntries?.() || [];
+      const counts = {
+        storageSpecial: 0,
+        matcherRejected: 0,
+        protected: 0,
+        rating: 0,
+        authorized: 0
+      };
+      const authorized = entries.filter(({ item, pile, classification }) => {
+        if (String(pile || item?.pile || item?.ref?.pile || "") !== "storage") return false;
+        if (!isSbcSpecialItem(item)) return false;
+        counts.storageSpecial++;
+        if (classification?.protected === true) {
+          counts.protected++;
+          return false;
+        }
+        const rating = Number(item?.rating || 0);
+        if (rating < minRating || rating > maxRating) {
+          counts.rating++;
+          return false;
+        }
+        const liveItem = findCachedItemById(Number(item?.id || 0), ["storage"])?.item || item;
+        try {
+          if (!rollingLiveRequiredSpecial(liveItem, model)) {
+            counts.matcherRejected++;
+            return false;
+          }
+        } catch {
+          counts.matcherRejected++;
+          return false;
+        }
+        if (rollingBaseProtectionReasons(liveItem, activeLoopDef, "storage").length > 0) {
+          counts.protected++;
+          return false;
+        }
+        counts.authorized++;
+        return true;
+      });
+      if (options.logDiagnostics === true) {
+        const constraints = eaRequiredSpecialConstraints(model).map(({ constraint }) => constraint.label).join(",") || "none";
+        log(`${loopDef.name}: Storage Pressure group authorization mode:${model.requiredSpecialAllowanceMode}; matcher:${constraints}; Storage specials:${counts.storageSpecial}; authorized exact group-83 entities:${counts.authorized}; matcher rejected:${counts.matcherRejected}; rating excluded:${counts.rating}; protected:${counts.protected}`);
+      }
+      return authorized;
+    }
     function validateRollingStorageSinkHeadroom(runtime, squadPlan, options = {}) {
       const storage = runtime.coordinator.getLedger().summary().capacities?.storage || {};
       const currentFree = storage.free;
@@ -53833,11 +54249,16 @@
       const requiredSpecialRoles = storageSinkRequiredSpecialRoles(context.model);
       const pendingStorageItems = runtime.openRouting?.storageItems || [];
       const allowedPendingItems = (options.selection?.entries || []).filter((entry) => entry.pileName === "unassigned" && entry.signal && Number(entry.item?.rating || 0) <= rollingProtectionRating(loopDef) && pendingStorageItems.some((item) => rollingItemMatchesRef(entry.signal, item))).map((entry) => liveItemRef(entry.item, entry.submissionPileName || entry.pileName));
+      const allowedRequiredSpecialItems = [
+        ...rollingStoragePressureRequiredSpecialEntries(runtime, loopDef).map(({ item }) => liveItemRef(item, "storage")),
+        ...allowedPendingItems
+      ];
       assertRollingRecoveryItems(loopDef, runtime, players, {
         allowProvisionsReserve: true,
         allowSpecial: true,
         allowPrimaryDuplicates: true,
         allowRequiredSpecial: requiredSpecialRoles.length > 0,
+        allowedRequiredSpecialItems,
         allowedProtectedItems: allowedPendingItems,
         selection: options.selection
       });
@@ -53846,7 +54267,7 @@
         players,
         options.checkSavedChallenge === true ? context.challenge : null,
         {
-          allowOtherSpecialAsOrdinary: true,
+          allowOtherSpecialAsOrdinary: requiredSpecialRoles.length === 0 || allowsAllMatchingSpecials(context.model),
           exclusiveRoles: requiredSpecialRoles
         }
       );
@@ -54521,7 +54942,7 @@
         context.challenge
       );
       if (!duplicateTransactionContext.ok) return duplicateTransactionContext;
-      const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, strategy.priorityPiles);
+      const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, strategy.priorityPiles, loopDef);
       const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
         model: context.model,
         duplicateTransactionContext
@@ -55062,7 +55483,8 @@
               const capabilities = await runtime.capabilityCalculator.calculate({
                 ledger: activeLedger,
                 policyKey,
-                provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef)
+                provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef),
+                protectionRating: rollingProtectionRating(loopDef)
               });
               const currentVersion = runtime.coordinator?.getLedger?.()?.summary?.().inventoryVersion;
               if (!runtime.telemetryActive || currentVersion !== requestedVersion) {
@@ -55227,6 +55649,7 @@
         provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef),
         provisionsRecoveryAvailable: rollingCapabilityAvailable(loopDef.rollingProvisionsUpgrade),
         proactiveProvisionsEnabled: loopDef.rollingSurplusCraftingEnabled === true,
+        requiredSpecialReserveLimit: allowsAllMatchingSpecials(runtime.primaryContext?.model) ? Number(runtime.primaryContext?.model?.requiredPlayerCount || 1) : 1,
         storeOtherSpecialDuplicates: rollingPrimaryReservesAllSpecialSlots(runtime.primaryContext?.model),
         isDuplicate: () => true,
         isSpecial: isSbcSpecialItem,
@@ -55389,7 +55812,7 @@
             }
             runtime.primaryContext = await loadRollingPrimaryContext(loopDef);
             if (runtime.primaryContext.status !== "ready") return runtime.primaryContext;
-            const groupMatcher = eaPlayerGroupConstraints(runtime.primaryContext.model).map(({ constraint }) => `${constraint.label}:${constraint.matcherSource || "runtime"}`).join(",") || "none";
+            const groupMatcher = eaRequiredSpecialConstraints(runtime.primaryContext.model).map(({ constraint }) => `${constraint.label}:${constraint.matcherSource || "runtime"}`).join(",") || "none";
             log(`${loopDef.name}: live primary Challenge #${runtime.primaryContext.challenge?.id || "?"} ready; target rating:${runtime.primaryContext.model.targetRating}, players:${runtime.primaryContext.model.requiredPlayerCount}, Required Special matcher:${groupMatcher}, Protection rating:${rollingProtectionRating(loopDef)}`);
             return { status: "ready" };
           },
@@ -55654,12 +56077,21 @@
               };
             }
             const storagePressure = context.trigger === "storage-pressure";
-            const preferredSignalRefs = duplicateReserve ? (runtime.openRouting?.provisionsItems || []).map((item) => liveItemRef(item, "unassigned")) : storagePressure ? rollingRecoveryEntryRefs(runtime, ({ pile, classification }) => pile === "storage" && classification.provisionsReserve === true && classification.requiredSpecial !== true && classification.protected !== true) : [];
-            const consumableReserveIds = new Set((runtime.openRouting?.entries || []).filter(({ classification }) => classification.provisionsReserve === true).map(({ item }) => Number(item?.id || 0)).filter(Boolean));
-            const additionalProtected = storagePressure ? rollingEmergencyProvisionsProtectedRefs(runtime, consumableReserveIds) : [];
+            const normalProvisionsMaxRating = rollingProvisionsMaxRating(loopDef);
+            const storagePressureReserveEntries = storagePressure ? rollingStoragePressureProvisionsReserveEntries(runtime, loopDef, { logDiagnostics: true }) : [];
+            const storagePressureReserveIds = new Set(storagePressureReserveEntries.map(({ item }) => Number(item?.id || 0)).filter(Boolean));
+            const preferredSignalRefs = duplicateReserve ? (runtime.openRouting?.provisionsItems || []).map((item) => liveItemRef(item, "unassigned")) : storagePressure ? rollingRecoveryEntryRefs(runtime, ({ item, pile, classification }) => pile === "storage" && classification.provisionsReserve === true && classification.requiredSpecial !== true && classification.protected !== true || storagePressureReserveIds.has(Number(item?.id || 0))) : [];
+            const consumableReserveIds = new Set((runtime.openRouting?.entries || []).filter(({ item, classification }) => classification.provisionsReserve === true || storagePressureReserveIds.has(Number(item?.id || 0))).map(({ item }) => Number(item?.id || 0)).filter(Boolean));
+            const expandedSpecialMaxRating = storagePressureReserveEntries.length ? rollingProtectionRating(loopDef) : normalProvisionsMaxRating;
+            const expandedRatingProtected = storagePressure ? rollingRecoveryEntryRefs(runtime, ({ item }) => Number(item?.rating || 0) > normalProvisionsMaxRating && !storagePressureReserveIds.has(Number(item?.id || 0))) : [];
+            const clubSpecialProtected = storagePressure ? rollingRecoveryEntryRefs(runtime, ({ item, pile }) => pile === "club" && isSbcSpecialItem(item) && !isTotwItem(item)) : [];
+            const additionalProtected = storagePressure ? [
+              ...rollingEmergencyProvisionsProtectedRefs(runtime, consumableReserveIds),
+              ...clubSpecialProtected,
+              ...expandedRatingProtected
+            ] : [];
             log(`${loopDef.name}: ${storagePressure ? "emergency" : duplicateReserve ? "duplicate-reserve" : "normal"} Provisions recovery (${context.trigger})`);
-            const provisionsMaxRating = rollingProvisionsMaxRating(loopDef);
-            log(`${loopDef.name}: Provisions material is restricted to ratings ${ROLLING_PROVISIONS_RATING_RANGE.min}-${provisionsMaxRating}`);
+            log(`${loopDef.name}: Provisions ordinary material is restricted to ratings ${ROLLING_PROVISIONS_RATING_RANGE.min}-${normalProvisionsMaxRating}${storagePressureReserveEntries.length ? `; Storage Pressure additionally authorizes ${storagePressureReserveEntries.length} exact matcher-approved group 83 special candidate(s) up to ${expandedSpecialMaxRating}` : ""}`);
             const recoveryPriorityPiles = resolveRollingRecoveryPriorityPiles(loopDef, {
               recoveryMode: storagePressure ? "storage-pressure" : duplicateReserve ? "pending-unassigned" : "normal"
             });
@@ -55672,17 +56104,22 @@
                 additionalProtected,
                 allowProvisionsReserve: true,
                 allowSpecial: true,
+                allowedRequiredSpecialItems: storagePressureReserveEntries.map(({ item }) => liveItemRef(item, "storage")),
                 softProtectClubSpecial: true,
                 preferredSignalRefs,
                 requirePreferredSignal: duplicateReserve,
                 requirePreferredItem: storagePressure,
                 validateSelection: storagePressure ? ({ storageItemsConsumed }) => validateRollingEmergencyProvisionsSelection(
                   runtime,
-                  storageItemsConsumed
+                  storageItemsConsumed,
+                  {
+                    allowIncremental: true,
+                    maximumRelease: rollingProvisionsRequiredCount(loopDef)
+                  }
                 ) : null,
                 rejectPendingStorageSignals: storagePressure,
                 minRating: ROLLING_PROVISIONS_RATING_RANGE.min,
-                maxRating: provisionsMaxRating
+                maxRating: expandedSpecialMaxRating
               }
             );
             if (recovery.submitted) {
@@ -55700,11 +56137,16 @@
             }
             return recovery;
           },
-          recoverStorageSink: async () => runRollingStorageSinkRecovery(
-            loopDef,
-            runtime,
-            loopDef.rollingStorageSink
-          ),
+          recoverStorageSink: async () => {
+            rollingStoragePressureRequiredSpecialEntries(runtime, loopDef, {
+              logDiagnostics: true
+            });
+            return runRollingStorageSinkRecovery(
+              loopDef,
+              runtime,
+              loopDef.rollingStorageSink
+            );
+          },
           recoverRequiredSpecial: async ({ context } = {}) => {
             if (loopDef.rollingRequiredSpecialRecoveryEnabled !== true) {
               return {
@@ -55996,7 +56438,9 @@
             const requiredSpecialSourceFilter = createRollingRequiredSpecialSourceFilter({
               constraintIndexes: rollingRequiredSpecialConstraintIndexes(model),
               isClubTotw: isTotwItem,
-              resolveSubmissionPile: rollingSelectionSubmissionPile
+              isSpecial: isSbcSpecialItem,
+              resolveSubmissionPile: rollingSelectionSubmissionPile,
+              requireSpecialRoleMatch: allowsAllMatchingSpecials(activeLoopDef)
             });
             let relaxedPrimaryDuplicateRefs = [];
             let selectionPolicy = null;
@@ -56214,7 +56658,7 @@
                     opened.challenge,
                     {
                       exclusiveRoles: selectionPolicy.exclusiveRoles,
-                      allowOtherSpecialAsOrdinary: true
+                      allowOtherSpecialAsOrdinary: selectionPolicy.protectionPolicy?.allowOtherSpecialAsOrdinary === true
                     }
                   );
                   if (!validation.ok) {

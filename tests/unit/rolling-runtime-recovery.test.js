@@ -2624,6 +2624,42 @@ describe('Rolling runtime recovery helpers', () => {
     });
   });
 
+  it('accepts an incremental Provisions release when one batch frees four of eight pending cards', async () => {
+    const pending = Array.from({ length: 8 }, (_, index) => makePlayer({
+      id: 705 + index,
+      definitionId: 9705 + index,
+      duplicate: true,
+    }));
+    const { api } = await loadUserscript({ unassigned: pending });
+    const runtime = {
+      openRouting: { storageItems: pending },
+      coordinator: {
+        getLedger: () => ({
+          summary: () => ({ capacities: { storage: { free: 0 } } }),
+        }),
+      },
+    };
+
+    expect(api.validateRollingEmergencyProvisionsSelection(runtime, 3, {
+      allowIncremental: true,
+      maximumRelease: 4,
+    })).toMatchObject({
+      ok: false,
+      reasonCode: 'RECOVERY_STORAGE_HEADROOM_INSUFFICIENT',
+      details: { requiredRelease: 4, storageItemsConsumed: 3 },
+    });
+    expect(api.validateRollingEmergencyProvisionsSelection(runtime, 4, {
+      allowIncremental: true,
+      maximumRelease: 4,
+    })).toMatchObject({
+      ok: true,
+      incremental: true,
+      requiredRelease: 4,
+      requiredFree: 8,
+      projectedFree: 4,
+    });
+  });
+
   it('does not require Storage headroom for pending cards consumed by the recovery squad', async () => {
     const pendingOne = makePlayer({ id: 711, definitionId: 9711, duplicate: true });
     const pendingTwo = makePlayer({ id: 712, definitionId: 9712, duplicate: true });
