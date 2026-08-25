@@ -1359,6 +1359,39 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.planPrimarySquad).toHaveBeenCalledTimes(2);
   });
 
+  it('passes a rating-excess plan into Provisions recovery before replanning the primary squad', async () => {
+    let inventoryVersion = 1;
+    let ready = false;
+    const excessPlan = {
+      ok: false,
+      reason: 'primary squad minimum rating is 89 for target 84',
+      reasonCode: 'SQUAD_RATING_EXCESS',
+      missing: { code: 'SQUAD_RATING_EXCESS' },
+    };
+    const options = harness({
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => ready
+        ? { ok: true, itemRefs: [{ id: 1 }] }
+        : excessPlan),
+      recoverProvisions: vi.fn(async ({ context }) => {
+        expect(context).toMatchObject({
+          trigger: 'primary-fodder-shortage',
+          plan: excessPlan,
+        });
+        ready = true;
+        inventoryVersion++;
+        return { status: 'submitted' };
+      }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({ status: 'completed', recoveries: { provisions: 1 } });
+    expect(options.recoverProvisions).toHaveBeenCalledOnce();
+    expect(options.planPrimarySquad).toHaveBeenCalledTimes(2);
+  });
+
   it('stops when shortage-driven Provisions is blocked before submission', async () => {
     const options = harness({
       findPrimaryPack: vi.fn(async () => null),

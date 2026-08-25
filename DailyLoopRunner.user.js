@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.47
+// @version      0.8.48
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.47",
+    version: "0.8.48",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -2175,6 +2175,27 @@
   ]);
   var DEFAULT_ROLLING_SHORTAGE_PROVISIONS_PACK_LIMIT = 2;
   var MAX_ROLLING_SHORTAGE_PROVISIONS_PACK_LIMIT = 30;
+  var ROLLING_PROVISIONS_RECOVERY_MODES = Object.freeze({
+    NORMAL: "normal",
+    PENDING_UNASSIGNED: "pending-unassigned",
+    STORAGE_PRESSURE: "storage-pressure",
+    RATING_EXCESS_STORAGE_PRESSURE: "rating-excess-storage-pressure"
+  });
+  function resolveRollingProvisionsRecoveryMode(input2 = {}) {
+    const trigger = String(input2.trigger || "");
+    if (trigger === "duplicate-reserve") {
+      return ROLLING_PROVISIONS_RECOVERY_MODES.PENDING_UNASSIGNED;
+    }
+    if (trigger === "storage-pressure") {
+      return ROLLING_PROVISIONS_RECOVERY_MODES.STORAGE_PRESSURE;
+    }
+    const storageFree = input2.storageFree === null || input2.storageFree === void 0 ? Number.NaN : Number(input2.storageFree);
+    const requiredCount = Math.max(1, Number(input2.requiredCount || 4) || 4);
+    if (trigger === "primary-fodder-shortage" && String(input2.reasonCode || "") === "SQUAD_RATING_EXCESS" && Number.isFinite(storageFree) && storageFree < requiredCount) {
+      return ROLLING_PROVISIONS_RECOVERY_MODES.RATING_EXCESS_STORAGE_PRESSURE;
+    }
+    return ROLLING_PROVISIONS_RECOVERY_MODES.NORMAL;
+  }
   function normalizeRollingProvisionsMaxRating(value) {
     const rating = Number(value);
     return ROLLING_PROVISIONS_MAX_RATINGS.includes(rating) ? rating : DEFAULT_ROLLING_PROVISIONS_MAX_RATING;
@@ -47620,6 +47641,18 @@
       } else {
         logInventorySelection(`${loopDef.name} rating SBC`, selection, { maxItems: 30 });
       }
+      if (options.deferAboveTarget === true && Number(selection.rating || 0) > Number(model.targetRating || 0)) {
+        log(`${loopDef.name}: optimized rating ${selection.rating} exceeds target ${model.targetRating}; deferring squad mutation until Rolling recovery or duplicate relaxation produces a target-rated plan`);
+        return {
+          ok: true,
+          deferred: true,
+          reasonCode: "SQUAD_RATING_EXCESS",
+          selection,
+          model,
+          candidates,
+          optimizedRating: selection.rating
+        };
+      }
       const prepared = await prepareInventorySelection(loopDef, selection);
       const plannedModelValidation = validateRatingSbcModelAgainstItems2(model, prepared.selected || [], null, {
         exclusiveRoles: selectionPolicy?.exclusiveRoles,
@@ -51429,8 +51462,35 @@
     function rollingCapabilityAvailable(definition) {
       return isPlainObject(definition) && definition.activityResolved === true && hasResolvedSbcIdentity(definition);
     }
-    function rollingProvisionsRequiredCount(loopDef = {}) {
-      const definition = loopDef?.rollingProvisionsUpgrade;
+    function latestRollingCapability(loopDef = {}, field5) {
+      const primarySetId = Number(loopDef?.sbcSetIds?.[0] || 0);
+      const latestLoop = findLoopDefById(loopDef?.id) || getLoopDefs().find((candidate) => candidate?.strategy === "rollingUpgrade" && primarySetId > 0 && Number(candidate?.sbcSetIds?.[0] || 0) === primarySetId);
+      const latestDefinition = latestLoop?.[field5];
+      if (rollingCapabilityAvailable(latestDefinition)) return latestDefinition;
+      return loopDef?.[field5] || latestDefinition || null;
+    }
+    async function ensureLatestRollingCapability(loopDef, runtime, field5, label) {
+      let definition = latestRollingCapability(loopDef, field5);
+      if (rollingCapabilityAvailable(definition)) return definition;
+      runtime.capabilityRefreshAttempts ||= /* @__PURE__ */ new Set();
+      if (runtime.capabilityRefreshAttempts.has(field5)) return definition;
+      runtime.capabilityRefreshAttempts.add(field5);
+      log(`${loopDef.name}: ${label} capability is unresolved; refreshing live SBC metadata once before stopping`);
+      try {
+        await scanAvailableDynamicSbcs({ forceFull: true, updateUi: false });
+      } catch (error) {
+        log(`${loopDef.name}: ${label} capability refresh failed (${error?.message || error})`);
+        return definition;
+      }
+      definition = latestRollingCapability(loopDef, field5);
+      if (rollingCapabilityAvailable(definition)) {
+        log(`${loopDef.name}: ${label} capability resolved after live refresh -> ${definition.name || `Set #${definition.sbcSetIds?.[0] || "?"}`}`);
+      } else {
+        log(`${loopDef.name}: ${label} capability remains unavailable after one live refresh`);
+      }
+      return definition;
+    }
+    function rollingProvisionsRequiredCount(loopDef = {}, definition = loopDef?.rollingProvisionsUpgrade) {
       if (!rollingCapabilityAvailable(definition)) return 4;
       const count = Number(definition?.requirements?.[0]?.count);
       return Number.isInteger(count) && count > 0 ? count : 4;
@@ -53475,7 +53535,11 @@
         });
         if (!requirement2.ok) return requirement2;
         const maximumRelease = Math.max(1, Number(options.maximumRelease || 1) || 1);
-        const requiredRelease = Math.min(requirement2.minimumConsumption, maximumRelease);
+        const requestedMinimum = Math.max(0, Number(options.minimumConsumption || 0) || 0);
+        const requiredRelease = Math.min(
+          Math.max(requirement2.minimumConsumption, requestedMinimum),
+          maximumRelease
+        );
         if (storageItemsConsumed < requiredRelease) {
           return {
             ok: false,
@@ -56076,7 +56140,33 @@
                 reasonCode: "PROVISIONS_SHORTAGE_RECOVERY_DISABLED"
               };
             }
-            const storagePressure = context.trigger === "storage-pressure";
+            const provisionsDefinition = await ensureLatestRollingCapability(
+              loopDef,
+              runtime,
+              "rollingProvisionsUpgrade",
+              "Provisions recovery"
+            );
+            const provisionsRequiredCount = rollingProvisionsRequiredCount(
+              loopDef,
+              provisionsDefinition
+            );
+            const ledgerStorageFree = runtime.coordinator?.getLedger?.()?.summary?.()?.capacities?.storage?.free;
+            const storageFree = ledgerStorageFree !== null && ledgerStorageFree !== void 0 && Number.isFinite(Number(ledgerStorageFree)) ? Number(ledgerStorageFree) : storageSpaceLeft();
+            const recoveryMode = resolveRollingProvisionsRecoveryMode({
+              trigger: context.trigger,
+              reasonCode: context.plan?.reasonCode || context.plan?.missing?.code,
+              storageFree,
+              requiredCount: provisionsRequiredCount
+            });
+            const storagePressure = [
+              ROLLING_PROVISIONS_RECOVERY_MODES.STORAGE_PRESSURE,
+              ROLLING_PROVISIONS_RECOVERY_MODES.RATING_EXCESS_STORAGE_PRESSURE
+            ].includes(recoveryMode);
+            const ratingExcessStoragePressure = recoveryMode === ROLLING_PROVISIONS_RECOVERY_MODES.RATING_EXCESS_STORAGE_PRESSURE;
+            const minimumStorageConsumption = ratingExcessStoragePressure ? Math.max(1, Math.min(
+              provisionsRequiredCount,
+              provisionsRequiredCount - Math.max(0, Number(storageFree || 0))
+            )) : 0;
             const normalProvisionsMaxRating = rollingProvisionsMaxRating(loopDef);
             const storagePressureReserveEntries = storagePressure ? rollingStoragePressureProvisionsReserveEntries(runtime, loopDef, { logDiagnostics: true }) : [];
             const storagePressureReserveIds = new Set(storagePressureReserveEntries.map(({ item }) => Number(item?.id || 0)).filter(Boolean));
@@ -56090,15 +56180,16 @@
               ...clubSpecialProtected,
               ...expandedRatingProtected
             ] : [];
-            log(`${loopDef.name}: ${storagePressure ? "emergency" : duplicateReserve ? "duplicate-reserve" : "normal"} Provisions recovery (${context.trigger})`);
-            log(`${loopDef.name}: Provisions ordinary material is restricted to ratings ${ROLLING_PROVISIONS_RATING_RANGE.min}-${normalProvisionsMaxRating}${storagePressureReserveEntries.length ? `; Storage Pressure additionally authorizes ${storagePressureReserveEntries.length} exact matcher-approved group 83 special candidate(s) up to ${expandedSpecialMaxRating}` : ""}`);
+            const recoveryLabel = ratingExcessStoragePressure ? "rating-excess emergency" : storagePressure ? "emergency" : duplicateReserve ? "duplicate-reserve" : "normal";
+            log(`${loopDef.name}: ${recoveryLabel} Provisions recovery (${context.trigger})`);
+            log(`${loopDef.name}: Provisions ordinary material is restricted to ratings ${ROLLING_PROVISIONS_RATING_RANGE.min}-${normalProvisionsMaxRating}${storagePressureReserveEntries.length ? `; Storage Pressure additionally authorizes ${storagePressureReserveEntries.length} exact matcher-approved group 83 special candidate(s) up to ${expandedSpecialMaxRating}` : ""}${ratingExcessStoragePressure ? `; requires at least ${minimumStorageConsumption} real Storage card(s) to restore ${provisionsRequiredCount} free slot(s)` : ""}`);
             const recoveryPriorityPiles = resolveRollingRecoveryPriorityPiles(loopDef, {
               recoveryMode: storagePressure ? "storage-pressure" : duplicateReserve ? "pending-unassigned" : "normal"
             });
             const recovery = await submitRollingRequirementRecovery(
               loopDef,
               runtime,
-              loopDef.rollingProvisionsUpgrade,
+              provisionsDefinition,
               {
                 priorityPiles: recoveryPriorityPiles,
                 additionalProtected,
@@ -56114,7 +56205,8 @@
                   storageItemsConsumed,
                   {
                     allowIncremental: true,
-                    maximumRelease: rollingProvisionsRequiredCount(loopDef)
+                    maximumRelease: provisionsRequiredCount,
+                    minimumConsumption: minimumStorageConsumption
                   }
                 ) : null,
                 rejectPendingStorageSignals: storagePressure,
@@ -56466,6 +56558,7 @@
               }, {
                 dryRun: loopDef.dryRun === true,
                 selectionPolicy,
+                deferAboveTarget: true,
                 skipInventoryRefresh: relaxedPrimaryDuplicateRefs.length > 0 || Boolean(duplicateTransactionContext.transaction)
               });
               if (!fill.ok || Number(fill.optimizedRating || 0) <= Number(model.targetRating || 0)) break;

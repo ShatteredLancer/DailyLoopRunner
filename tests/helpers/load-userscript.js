@@ -106,6 +106,7 @@ export async function loadUserscript(options = {}) {
       parseRatingSbcChallenge,
       buildRatingSbcCandidateEntries,
       findOptimalRatingSbcSelection,
+      fillSbcSquadRatingOptimized,
       validateRatingSbcModelAgainstItems,
       inspectSbcItems,
       isRatingSbcCandidateSafe,

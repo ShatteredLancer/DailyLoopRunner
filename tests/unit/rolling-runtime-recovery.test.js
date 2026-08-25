@@ -2660,6 +2660,37 @@ describe('Rolling runtime recovery helpers', () => {
     });
   });
 
+  it('enforces the minimum real Storage release requested by rating-excess recovery', async () => {
+    const { api } = await loadUserscript();
+    const runtime = {
+      openRouting: { storageItems: [] },
+      coordinator: {
+        getLedger: () => ({
+          summary: () => ({ capacities: { storage: { free: 1 } } }),
+        }),
+      },
+    };
+
+    expect(api.validateRollingEmergencyProvisionsSelection(runtime, 2, {
+      allowIncremental: true,
+      maximumRelease: 4,
+      minimumConsumption: 3,
+    })).toMatchObject({
+      ok: false,
+      reasonCode: 'RECOVERY_STORAGE_HEADROOM_INSUFFICIENT',
+      details: { requiredRelease: 3, storageItemsConsumed: 2 },
+    });
+    expect(api.validateRollingEmergencyProvisionsSelection(runtime, 3, {
+      allowIncremental: true,
+      maximumRelease: 4,
+      minimumConsumption: 3,
+    })).toMatchObject({
+      ok: true,
+      requiredRelease: 3,
+      projectedFree: 4,
+    });
+  });
+
   it('does not require Storage headroom for pending cards consumed by the recovery squad', async () => {
     const pendingOne = makePlayer({ id: 711, definitionId: 9711, duplicate: true });
     const pendingTwo = makePlayer({ id: 712, definitionId: 9712, duplicate: true });

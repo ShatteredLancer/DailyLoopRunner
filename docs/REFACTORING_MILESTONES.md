@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.8.46`
-- Git 基线：`main` Rolling Recap card-version guard + Manual Player Pick FUTBIN links
+- Userscript 版本：`0.8.48`
+- Git 基线：`main` Rolling rating-excess recovery + live group-83 Required Special handling
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -17,6 +17,19 @@ Storage-first 顺序。待处理 Unassigned 重复卡仍强制 Unassigned-first�
 pressure 与 maintenance 仍使用专用 Storage-first 及净释放校验。Provisions reserve
 上限可选 `88/89/90/91`，默认 `88`，已有较高保存值继续有效。该修正取代下方
 `0.8.20` 发布记录中的全局 Storage-first 和新安装默认 `91` 行为。
+
+`0.8.48` 发布记录：Rolling 主阵评分求解结果高于 EA 目标评分时，只保留规划结果，
+不再先清空、保存或改写当前 EA 阵容。若此时 SBC Storage 剩余空间不足以容纳
+Provisions 奖励，则把本次缺料恢复升级为 Storage-first 紧急 Provisions：至少消耗足够
+数量的真实 Storage 卡腾出完整奖励空间，并且只额外授权当前 Challenge 的 live group-83
+matcher 精确命中的 Storage 色卡；FSU lock、Evolution、高于 Automatic-use 上限、待入库
+duplicate signal 和 Club 非 TOTW 色卡继续硬保护。运行时捕获的 Provisions capability
+尚未解析时，会先执行一次有界实时扫描再决定是否停止。
+
+`0.8.47` 发布记录：Required Special 继续使用 EA Challenge 的 live
+`PLAYER_RARITY_GROUP=83` matcher 和原始最低数量，但 Rolling 主阵可在现有来源限制与
+保护规则内使用多张该 matcher 命中的当前卡池色卡；既有 Required Special/TOTW 与
+Provisions 奖励会在再次制作恢复 SBC 前优先复用。
 
 `0.8.46` 发布记录：将远程 Manual Player Pick FUTBIN 候选链接和本地 Rolling Recap
 卡版本保护合并为同一份可更新 userscript，并同步生成 root/dist 产物。Runner 版本、

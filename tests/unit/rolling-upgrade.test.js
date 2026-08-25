@@ -12,8 +12,10 @@ import {
   resolveRollingStorageSinkPickCapability,
   resolveRollingStorageSinkCapability,
   resolveRollingAutomaticUseMaxRating,
+  ROLLING_PROVISIONS_RECOVERY_MODES,
   ROLLING_STORAGE_FIRST_RECOVERY_PILES,
   ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES,
+  resolveRollingProvisionsRecoveryMode,
   resolveRollingRecoveryPriorityPiles,
   shouldQueueRollingProvisionsReward,
 } from '../../src/config/rolling-upgrade.js';
@@ -188,6 +190,37 @@ describe('Rolling Upgrade configuration contracts', () => {
       .toEqual(ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES);
     expect(resolveRollingRecoveryPriorityPiles({}, { recoveryMode: 'pending-unassigned' }))
       .toEqual(ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES);
+  });
+
+  it('uses Storage-pressure Provisions material only for a rating excess near full Storage', () => {
+    expect(resolveRollingProvisionsRecoveryMode({
+      trigger: 'primary-fodder-shortage',
+      reasonCode: 'SQUAD_RATING_EXCESS',
+      storageFree: 1,
+      requiredCount: 4,
+    })).toBe(ROLLING_PROVISIONS_RECOVERY_MODES.RATING_EXCESS_STORAGE_PRESSURE);
+    expect(resolveRollingProvisionsRecoveryMode({
+      trigger: 'primary-fodder-shortage',
+      reasonCode: 'SQUAD_RATING_EXCESS',
+      storageFree: 4,
+      requiredCount: 4,
+    })).toBe(ROLLING_PROVISIONS_RECOVERY_MODES.NORMAL);
+    expect(resolveRollingProvisionsRecoveryMode({
+      trigger: 'primary-fodder-shortage',
+      reasonCode: 'PLAYER_COUNT_SHORTAGE',
+      storageFree: 1,
+      requiredCount: 4,
+    })).toBe(ROLLING_PROVISIONS_RECOVERY_MODES.NORMAL);
+    expect(resolveRollingProvisionsRecoveryMode({
+      trigger: 'primary-fodder-shortage',
+      reasonCode: 'SQUAD_RATING_EXCESS',
+      storageFree: null,
+      requiredCount: 4,
+    })).toBe(ROLLING_PROVISIONS_RECOVERY_MODES.NORMAL);
+    expect(resolveRollingProvisionsRecoveryMode({ trigger: 'storage-pressure' }))
+      .toBe(ROLLING_PROVISIONS_RECOVERY_MODES.STORAGE_PRESSURE);
+    expect(resolveRollingProvisionsRecoveryMode({ trigger: 'duplicate-reserve' }))
+      .toBe(ROLLING_PROVISIONS_RECOVERY_MODES.PENDING_UNASSIGNED);
   });
 
   it('uses the shared automatic-use rating for Rolling instead of the standard Rating SBC cap', () => {

@@ -5,6 +5,31 @@ All notable user-facing changes are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.8.48] - 2026-08-25
+
+### Fixed
+
+- Keep a Rolling primary squad that exceeds the live target rating as a plan
+  only; do not save or otherwise mutate the current EA squad before recovery
+  has produced a target-rated plan.
+- When that rating excess occurs with insufficient SBC Storage headroom, run
+  Provisions as an emergency Storage-first recovery. The recovery must consume
+  enough real Storage cards for its reward, and may additionally use only the
+  exact live group-83 special cards authorized by the current primary
+  Challenge while preserving locks, Evolutions, high cards, pending duplicate
+  signals, and Club non-TOTW specials.
+- Refresh unresolved Provisions capability metadata once before declaring the
+  recovery unavailable, so a loop captured before the latest SBC scan does not
+  stop on stale capability state.
+
+### Verification
+
+- Full `npm run verify` passed, including syntax, ESLint, config/profile,
+  architecture, FSU patch replay, tests, userscript/FSU builds, dist equality,
+  metadata, and release-asset checks.
+
+## [0.8.47] - 2026-08-25
+
 ### Fixed
 
 - Make Rolling check existing Required Special/TOTW rewards before crafting,
@@ -15,6 +40,9 @@ All notable user-facing changes are documented here. This project follows
   reward IDs remain usable while avoiding similar unverified Pack names.
 - Log the verified family reward candidates and current My Packs counts when
   Rolling enters TOTW or Provisions recovery.
+- Preserve the live EA minimum count for `PLAYER_RARITY_GROUP=83`, while
+  allowing Rolling to consume additional current-pool cards that the same live
+  matcher accepts, subject to the existing source and protection guards.
 
 ## [0.8.46] - 2026-08-24
 

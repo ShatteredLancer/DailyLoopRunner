@@ -62,6 +62,34 @@ export const ROLLING_STORAGE_FIRST_RECOVERY_PILES = Object.freeze([
 export const DEFAULT_ROLLING_SHORTAGE_PROVISIONS_PACK_LIMIT = 2;
 export const MAX_ROLLING_SHORTAGE_PROVISIONS_PACK_LIMIT = 30;
 
+export const ROLLING_PROVISIONS_RECOVERY_MODES = Object.freeze({
+  NORMAL: 'normal',
+  PENDING_UNASSIGNED: 'pending-unassigned',
+  STORAGE_PRESSURE: 'storage-pressure',
+  RATING_EXCESS_STORAGE_PRESSURE: 'rating-excess-storage-pressure',
+});
+
+export function resolveRollingProvisionsRecoveryMode(input = {}) {
+  const trigger = String(input.trigger || '');
+  if (trigger === 'duplicate-reserve') {
+    return ROLLING_PROVISIONS_RECOVERY_MODES.PENDING_UNASSIGNED;
+  }
+  if (trigger === 'storage-pressure') {
+    return ROLLING_PROVISIONS_RECOVERY_MODES.STORAGE_PRESSURE;
+  }
+  const storageFree = input.storageFree === null || input.storageFree === undefined
+    ? Number.NaN
+    : Number(input.storageFree);
+  const requiredCount = Math.max(1, Number(input.requiredCount || 4) || 4);
+  if (trigger === 'primary-fodder-shortage'
+    && String(input.reasonCode || '') === 'SQUAD_RATING_EXCESS'
+    && Number.isFinite(storageFree)
+    && storageFree < requiredCount) {
+    return ROLLING_PROVISIONS_RECOVERY_MODES.RATING_EXCESS_STORAGE_PRESSURE;
+  }
+  return ROLLING_PROVISIONS_RECOVERY_MODES.NORMAL;
+}
+
 export function normalizeRollingProvisionsMaxRating(value) {
   const rating = Number(value);
   return ROLLING_PROVISIONS_MAX_RATINGS.includes(rating)
