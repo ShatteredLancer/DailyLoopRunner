@@ -159,6 +159,8 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Club non-TOTW specials fallback allowed');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Club current-pool Provisions off');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('duplicate swap experimental off');
     renderSelectionPolicySummary({
       panel,
@@ -171,6 +173,7 @@ describe('main panel state rendering', () => {
         rollingProvisionsShortageRecoveryEnabled: true,
         rollingRequiredSpecialRecoveryEnabled: true,
         rollingProtectAllClubNonTotwSpecials: true,
+        rollingAllowClubCurrentPoolSpecialsForProvisions: true,
         rollingDuplicateSwapEnabled: true,
         rollingProvisionsMaxRating: 89,
         rollingRecoveryStorageFirst: true,
@@ -198,9 +201,21 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Club non-TOTW specials protected');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Club current-pool Provisions blocked by strict protection');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('duplicate swap experimental enabled');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Active Squad 409 replace/review');
+
+    renderSelectionPolicySummary({
+      panel,
+      pickOptions: {
+        rollingProtectAllClubNonTotwSpecials: false,
+        rollingAllowClubCurrentPoolSpecialsForProvisions: true,
+      },
+    });
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Club current-pool Provisions last-resort allowed');
   });
 
   it('renders indeterminate and determinate Dynamic SBC scan progress', () => {

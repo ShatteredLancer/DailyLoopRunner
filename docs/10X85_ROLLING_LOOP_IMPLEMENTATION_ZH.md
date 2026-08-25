@@ -76,11 +76,11 @@
 已确认规则：
 
 - `Unassigned -> Storage -> Transfer` 中命中 live eligibility matcher 的 TOTW/TOTS/FOF/FUTTIES 可以作为主 `10x85+` 的特殊卡槽；Transfer 仍是 duplicate signal，提交时解析为 Club/Storage 中真实可提交的对应副本。
-- Club 只扫描 TOTW 作为 Required Special。Club 中 TOTS/FOF/FUTTIES 以及其它命中 live matcher 的非 TOTW 卡必须保留，不得进入主特殊槽、普通槽或恢复 SBC。
+- 主阵只扫描 Club TOTW 作为 Required Special。Club 中 TOTS/FOF/FUTTIES 以及其它命中 live matcher 的非 TOTW 卡不得进入主特殊槽或普通槽；恢复 SBC 默认同样排除。唯一例外是普通 Provisions shortage recovery 在用户显式开启 `rollingAllowClubCurrentPoolSpecialsForProvisions`、严格 Club 色卡保护关闭时，可把 live matcher 精确批准且评分位于配置 Provisions 范围内的 Club 非 TOTW item 作为最后候选。
 - 当前 live `PLAYER_RARITY_GROUP=83` 是 EA 扩展后的特殊卡合同，存在可用 group-83 候选时最多可使用整队数量的 matcher-approved 特殊卡。这里只放宽数量，每张卡仍必须包含 group 83；其它 player group 仍保持原 count 上限。
 - 不得作为主 SBC 的普通评分填料。
-- 不得投入 TOTW Upgrade、Provisions、Rare Gold Pick 或 5x80+。
-- Required Special 即使评分落在当前 Provisions Reserve 范围内，也不进入普通储备池；Storage pressure 下只对 Storage 中实时 matcher 精确批准的实体开放该例外，并允许多张按批次释放。
+- 不得投入 TOTW Upgrade、Rare Gold Pick 或 5x80+。Provisions 也默认排除；只有上一条的显式普通 shortage 例外可按精确 item ID 授权，且不扩展到 duplicate-reserve、Storage pressure 或 maintenance。
+- Required Special 即使评分落在当前 Provisions Reserve 范围内，也不进入普通储备池；Storage pressure 下只对 Storage 中实时 matcher 精确批准的实体开放既有例外并允许多张按批次释放。普通 shortage 的新例外只接受显式设置批准的 Club 精确 item，并保持最后候选层。
 - 选择时遵循来源顺序，并在同一来源中优先重复、低评分和低保护成本球员。
 - 高于 Protection rating 的重复 Required Special 必须进入 Storage，不能因为能够满足特殊卡槽而提交。
 - Club TOTW 可以作为特殊卡槽使用；Club TOTS/FOF/FUTTIES 是硬保护，不存在最后回退。
@@ -129,7 +129,7 @@ Player Pick 通过 `pickSelectionMode` 统一表达选择策略，并兼容旧 `
 
 1. 只有显式开启 `rollingSurplusCraftingEnabled` 时，当前配置的 Provisions Reserve 才优先于“不高于 Protection rating 即可回填”；默认范围为 87/88，可选 87/88/89。关闭时这些评分段的可用重复卡与其它 85-89 重复卡一样优先回填主阵；Required Special 始终只能进入特殊卡槽。
 2. 高于 Protection rating 的重复特殊卡必须存入 Storage。
-3. Required Special 在任何来源中都不能作为普通材料或恢复 SBC 材料。
+3. Required Special 不能作为主阵普通材料；恢复 SBC 默认同样排除。仅普通 Provisions shortage 可在 `rollingAllowClubCurrentPoolSpecialsForProvisions=true`、严格 Club 色卡保护关闭、live matcher/评分范围/全部安全门禁均通过时，授权精确 Club item 作为最后候选。
 4. Storage 中不高于 Protection rating 的 Other Special 和普通卡可以合理消耗。
 5. Rare Gold 重复卡优先进入动态不限次数 Rare Gold Pick，Pick 立即开启并使用现有自动选择；剩余 Gold 再进入 `5x80+`。
 6. 没有现成 `10x85+` 奖励包时，允许从库存完成一套主 SBC 启动循环。
@@ -137,13 +137,13 @@ Player Pick 通过 `pickSelectionMode` 统一表达选择策略，并兼容旧 `
 8. 选择 Rolling Loop 时默认勾选 `Open reward packs`。用户随后可以手动取消，但启动时必须拒绝不能开包的 Rolling Run，不暗中覆盖设置。
 9. Reward Alert 继续使用现有最低评分、Toast、Desktop 和 ntfy 设置，不新增专用 98+ 通知链。
 10. 实时资源信息放入主面板内部的透明 Runtime Telemetry，不新增独立悬浮窗。
-11. `rollingProtectAllClubNonTotwSpecials` 默认 `false` 以保持现有行为；开启后，严重缺料也不得消耗 Club 非 TOTW 色卡。Storage/Transfer/Unassigned 色卡继续按现有角色、评分和保护规则使用，Club TOTW 仍只允许进入 Required Special 槽。
+11. `rollingProtectAllClubNonTotwSpecials` 默认 `false` 以保持现有行为；开启后，严重缺料也不得消耗 Club 非 TOTW 色卡。`rollingAllowClubCurrentPoolSpecialsForProvisions` 默认 `false`，只在前者关闭时允许普通 Provisions shortage 使用配置评分范围内、live matcher 精确批准的 Club non-TOTW item，且只作为最后候选。Storage/Transfer/Unassigned 色卡继续按现有角色、评分和保护规则使用，Club TOTW 仍只允许进入 Required Special 槽。
 
 ## 5. 材料资格矩阵
 
 | 材料 | Unassigned | Storage | Transfer | Club |
 | --- | --- | --- | --- | --- |
-| Required Special | 未扩展时每套最多一张；扩展时可多张但必须命中同一 live matcher | 未扩展时每套最多一张；Storage pressure 扩展时可多张且必须是精确批准实体 | 未扩展时每套最多一张；按 duplicate signal 解析并重新执行 matcher | 仅 TOTW 可进入主 SBC 特殊槽；其它 Club 非 TOTW 特殊卡硬保护 |
+| Required Special | 未扩展时每套最多一张；扩展时可多张但必须命中同一 live matcher | 未扩展时每套最多一张；Storage pressure 扩展时可多张且必须是精确批准实体 | 未扩展时每套最多一张；按 duplicate signal 解析并重新执行 matcher | 主 SBC 仅 TOTW；其它 Club 非 TOTW 特殊卡默认硬保护。显式开启普通 Provisions shortage 例外后，配置范围内的精确 matcher-approved item 才可作为最后候选 |
 | Other Special `<= Protection rating` | 可作普通材料 | 可作普通材料 | 可作普通材料 | 默认普通 Other Special 软保护、TOTS/FOF/FUTTIES 硬保护；严格 Club 色卡保护开启后全部非 TOTW 硬保护 |
 | Regular `<= Protection rating` | 优先处理重复 | 可作普通材料 | 可作普通材料 | 可作普通材料，仍遵守 FSU 过滤 |
 | 非 Required Special 且评分位于可配置 Reserve 范围 | 默认与其它 `<= Protection rating` 材料相同并优先回填主阵；开启余量制作后，完整四张组做 Provisions、余数进 Storage | 默认可作主阵材料；开启余量制作后，87/88 完整组做 Provisions，`<=86` 和 89 可进入 TOTW 维护 | 默认可作主阵材料；开启余量制作后保留为 Provisions 储备 | 默认可作主阵材料但 Other Special 仍遵守 Club 软保护；开启余量制作后保留 Reserve |
@@ -367,6 +367,7 @@ TOTW Upgrade 自身的普通材料池必须排除全部 Required Special。新�
 - Required Special 永远排除。
 - Storage 中位于 Reserve 范围的 Other Special 可以使用。
 - Club Other Special 保持最后候选软保护。
+- `rollingAllowClubCurrentPoolSpecialsForProvisions=true` 且严格 Club 色卡保护关闭时，普通 shortage 可把 live matcher 精确批准、评分位于当前 Reserve 范围、具备稳定 item ID 的 Club 非 TOTW Required Special 加入同一最后候选层。普通材料先尝试；该授权不作用于 duplicate-reserve、Storage pressure、maintenance 或其它恢复 SBC。
 - 严格 Club 色卡保护开启时，Club Other Special 不得进入候选或 fallback；Provisions 只能使用其它 pile 的合格色卡或普通材料。
 - 不消耗下一套主 SBC 唯一可用的 Required Special，因为它根本不进入候选池。
 
@@ -965,7 +966,7 @@ RL-0 锁定的当前行为和已确认缺口：
 - Provisions 的必要恢复触发为主 Solver 明确材料不足和 Storage 压力。显式开启 `rollingSurplusCraftingEnabled` 后，才增加当前主包完整 Reserve 的 `duplicate-reserve` 和主阵后的 Storage 维护；每次提交后重新读取 ledger 和重跑主规划。
 - Provisions 奖励产生的 Rare Gold duplicate 优先进入动态不限次数 Rare Gold Pick 并立即选择；剩余普通 Gold duplicate 进入动态 `5x80+`。主 `10x85+` 奖励产生的重复卡绝不加入这条 Gold drain 链：默认全部作为主阵 required/preferred 候选并按高分优先放宽；开启余量制作时完整 Reserve 组进入 Provisions。每次提交或开包后重新读取实时库存，不预判随机奖励。
 - 新增一次性 Rolling 运行时适配器，复用共享 `submitSbcAttempt()`、`submitInventorySbcAttempt()`、`openPack()`、Player Pick 和 Inventory Ledger；不调用旧 `runFillAndVerifyLoop()` 的递归补料编排。
-- 所有恢复 SBC 都硬排除 Required Special 和受保护卡。TOTW 恢复额外保留当前配置的 Reserve；Pick/5x80+ 也不消耗 Provisions 储备；Provisions 每次严格只选四张当前范围内的卡，默认 87/88、可选 87/88/89，超出范围的卡即使低于 Protection rating 也不得进入，符合评分范围的 Club Other Special 只在普通材料不足后回退。
+- 恢复 SBC 默认硬排除 Required Special 和受保护卡。TOTW 恢复额外保留当前配置的 Reserve；Pick/5x80+ 也不消耗 Provisions 储备。Provisions 每次严格只选四张当前范围内的卡，默认 87/88、可选扩展到 89/90/91；超出范围的卡即使低于 Protection rating 也不得进入。Club Other Special 只在普通材料不足后回退；普通 shortage 还可在显式开关、严格保护关闭、live matcher 精确匹配及全部保护检查通过时，把范围内的 Club current-pool non-TOTW item 加入最后候选层。
 - Unassigned/Transfer duplicate signal 只对本次主阵临时授权其 `duplicateId` 指向的真实 Club/Storage 提交实体；signal 受保护、缺少稳定实体或消失时保持 fail closed。确认提交后的 transport、ledger 登记和 duplicate 同步使用不可中断临界区，Stop 请求延迟到同步完成后的安全点执行。
 - 每个主 SBC 周期有独立恢复预算：总动作 100、奖励开包 30、Gold drain 40、Provisions 20、Required Special 10；主提交成功后重置周期预算，全局结果保留有界计数。
 - 每个恢复动作比较 Inventory Ledger `inventoryVersion` 进度指纹。动作声称成功但库存版本不变时以 `RECOVERY_NO_PROGRESS` 停止；预算耗尽时以 `RECOVERY_BUDGET_REACHED` 停止。
@@ -1020,7 +1021,7 @@ RL-0 锁定的当前行为和已确认缺口：
 - 完成第 18 节真实页面验收。
 - 记录发现的问题、修复提交和最终版本。
 - 动态扫描成功后将 Rolling Loop 加入可选列表，使用现有启动预检和动态 capability 门禁控制执行安全。
-- Selection Policy UI 按作用域拆分普通 SBC 单卡上限、Rolling/Pick 自动使用上限、主动余量制作、Provisions Reserve 范围、普通恢复来源顺序、duplicate-reserve 奖励开启时机和 Pick 模式，旧配置 key 保持兼容。`rollingSurplusCraftingEnabled` 默认关闭；`rollingProvisionsMaxRating` 默认 88、允许 88/89/90/91；`rollingRecoveryStorageFirst` 默认关闭，使普通 Provisions 与 Required Special/TOTW 恢复保持 Unassigned-first。待处理 Unassigned 重复卡不受该开关影响并始终 Unassigned-first，Storage pressure 与 maintenance 始终使用专用 Storage-first；`rollingOpenDuplicateProvisionsRewards` 默认关闭。
+- Selection Policy UI 按作用域拆分普通 SBC 单卡上限、Rolling/Pick 自动使用上限、主动余量制作、Provisions Reserve 范围、普通恢复来源顺序、Club current-pool Provisions 最后候选、duplicate-reserve 奖励开启时机和 Pick 模式，旧配置 key 保持兼容。`rollingSurplusCraftingEnabled` 默认关闭；`rollingProvisionsMaxRating` 默认 88、允许 88/89/90/91；`rollingAllowClubCurrentPoolSpecialsForProvisions` 默认关闭并受严格 Club 色卡保护覆盖；`rollingRecoveryStorageFirst` 默认关闭，使普通 Provisions 与 Required Special/TOTW 恢复保持 Unassigned-first。待处理 Unassigned 重复卡不受该开关影响并始终 Unassigned-first，Storage pressure 与 maintenance 始终使用专用 Storage-first；`rollingOpenDuplicateProvisionsRewards` 默认关闭。
 
 自动验证结果（2026-08-16）：候选版本 `0.7.94` 完成完整 `npm run verify`；388 个 JavaScript 文件通过语法检查，186 个测试文件、1,251 项测试全部通过，配置/Profile、架构、FSU patch、root/dist userscript 和版本一致性均通过。本轮修复 Runtime Telemetry 阻塞、主包重复 Reserve 的独立 Provisions 路由和 Primary 精确评分放宽。RL-8 仍需完成第 18 节真实页面验收与结果记录。
 

@@ -11,6 +11,14 @@
 
 本文档是重构工作的状态来源。实施过程中应更新里程碑状态、验收记录和发现的问题，不在聊天记录或临时日志中维护另一套进度。
 
+当前开发修正：Selection Policy 新增默认关闭的
+`rollingAllowClubCurrentPoolSpecialsForProvisions`。普通 Provisions shortage 在普通材料
+无法成阵后，可把当前 primary live matcher 精确批准、评分位于配置 `87-91` 范围内的
+Club non-TOTW special 作为最后候选。授权绑定稳定 item ID，不扩展到同 definition、
+duplicate-reserve、Storage pressure、maintenance、其它恢复 SBC 或主阵；
+`rollingProtectAllClubNonTotwSpecials` 优先覆盖，FSU Lock、Evolution、Active Squad、
+Protection rating 和其它提交门禁保持不变。
+
 当前开发修正：Rolling 普通 Provisions 与 Required Special/TOTW 恢复默认恢复为
 `Unassigned -> Storage -> Transfer -> Club`；Selection Policy 提供可选的
 Storage-first 顺序。待处理 Unassigned 重复卡仍强制 Unassigned-first，Storage

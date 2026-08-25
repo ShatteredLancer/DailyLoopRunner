@@ -727,6 +727,14 @@ export function createRollingRecoveryProtection(input = {}) {
         && classification?.protected !== true
     ))
     .map(({ item }) => itemRef(item));
+  const clubAllowedRequiredSpecial = entries
+    .filter(({ item, pile, classification }) => (
+      String(pile || item?.pile || item?.ref?.pile || '') === 'club'
+        && classification?.requiredSpecial === true
+        && classification?.protected !== true
+        && allowedRequiredSpecialItems.some((ref) => refMatchesItem(ref, item))
+    ))
+    .map(({ item }) => itemRef(item));
   const protectedItems = uniqueRefs([
     ...hardProtected,
     ...additionalProtected,
@@ -740,8 +748,50 @@ export function createRollingRecoveryProtection(input = {}) {
       .filter((ref) => !Number(ref.id || 0))
       .map((ref) => Number(ref.definitionId || 0))
       .filter(Boolean),
-    softProtectedItems: uniqueRefs(clubOtherSpecial),
+    softProtectedItems: uniqueRefs([
+      ...clubOtherSpecial,
+      ...clubAllowedRequiredSpecial,
+    ]),
   };
+}
+
+export function selectRollingClubCurrentPoolProvisionsFallbackEntries(input = {}) {
+  if (input.enabled !== true
+    || input.strictClubSpecialProtection === true
+    || input.allMatchingSpecials !== true) return [];
+  const entries = input.ledger?.classifiedEntries?.() || input.entries || [];
+  const minRating = Math.max(1, Number(input.minRating || 87) || 87);
+  const maxRating = Math.max(minRating, Number(input.maxRating || 91) || 91);
+  const protectionRating = Math.max(1, Number(input.protectionRating || 90) || 90);
+  const isSpecial = typeof input.isSpecial === 'function'
+    ? input.isSpecial
+    : (item) => item?.special === true;
+  const isTotw = typeof input.isTotw === 'function'
+    ? input.isTotw
+    : () => false;
+  const protectionReasons = typeof input.protectionReasons === 'function'
+    ? input.protectionReasons
+    : () => [];
+
+  return entries
+    .filter(({ item, pile, classification }) => {
+      const actualPile = String(pile || item?.pile || item?.ref?.pile || 'unknown');
+      const rating = normalizedRating(item?.rating);
+      if (actualPile !== 'club'
+        || classification?.requiredSpecial !== true
+        || classification?.protected === true
+        || Number(item?.id || item?.ref?.id || 0) <= 0
+        || rating < minRating
+        || rating > maxRating
+        || rating > protectionRating) return false;
+      try {
+        if (isSpecial(item) !== true || isTotw(item) === true) return false;
+        return !(protectionReasons(item, actualPile) || []).length;
+      } catch {
+        return false;
+      }
+    })
+    .sort((left, right) => sortByRatingAndIdentity(left.item, right.item));
 }
 
 export function createRollingRatingRecoverySelectionPolicy(input = {}) {

@@ -40,6 +40,7 @@ Loop 不写死当前 Set、Challenge、奖励包 ID、目标评分或阵容人�
 | `Provisions packs per shortage` | `2` | 一次真实缺料处理中最多打开多少个已有 Provisions 奖励，范围 `1-30`；每批后重新规划。 |
 | `Craft surplus Provisions/TOTW` | 关闭 | 关闭时只在缺料或 Storage 压力下执行恢复 SBC；开启后才主动消耗余量。 |
 | `Protect all Club non-TOTW specials` | 关闭 | 开启后，Rolling 的主阵、Storage pressure SBC 和所有恢复阵都禁止使用 Club 非 TOTW 色卡，即使严重缺料也不放宽；Storage、Transfer 和 Unassigned 色卡仍按原有评分及角色限制可用。 |
+| `Allow Club current-pool specials for Provisions` | 关闭 | 仅用于普通 Provisions 缺料恢复：普通材料不足时，允许使用当前 EA live matcher 精确认可、评分位于配置 Provisions 范围内的 Club 非 TOTW 色卡。只按精确 item ID 授权，且仍排除 FSU Lock、Evolution、Active Squad 冲突、超保护评分和其它受保护卡；开启上一项严格保护后，本项自动失效。 |
 | `Enable experimental native duplicate swaps` | 关闭 | 受控实验开关。关闭时，Unassigned 重复卡先整体送入 Storage，不交换 Club 卡；Storage 不足时安全停止。开启后还必须选择交换范围：`special-only`（特殊卡）、`safe-only`（普通卡）或仅故障调查使用的 `all-eligible`。受控模式每次最多交换一个 pair，未知 fingerprint/交易性/卡种直接留在 Storage。 |
 | `Open duplicate Provisions rewards immediately` | 关闭 | 关闭时，由主包重复 Reserve 制作的 Provisions 奖励留在 My Packs，等真正缺料再开。 |
 | `Storage pressure recovery` | `Off` | `Automatic` 优先使用兼容的 95+ Pick；`Selected SBC` 只使用用户指定的高评分 Player Pick 或直接球员 SBC。 |
@@ -99,9 +100,10 @@ Storage pressure 和 Storage maintenance 不读取该普通恢复选项，它们
 Required Special 是主 SBC 要求的 `TOTW/TOTS/FOF/FUTTIES` 角色，规则如下：
 
 - Unassigned、Storage、Transfer 中由实时 matcher 识别的四类卡可作为 Required Special。
-- Club 中只允许 TOTW 进入这个角色；Club 中的 TOTS、FOF、FUTTIES 始终保留。
+- 主阵中只允许 Club TOTW 进入这个角色；Club 中的 TOTS、FOF、FUTTIES 默认保留。
 - `PLAYER_RARITY_GROUP=83` 的成员范围由 EA live item groups 决定。实时 group 83 已覆盖旧 TOTW/TOTS/FOF/FUTTIES 分类之外的特殊卡时，允许使用多张逐卡命中 group 83 的安全特殊卡；不含 group 83 的特殊卡不会被放行。
 - 扩展模式只放宽数量，不把 matcher 改成“任意特殊卡”；Evo、cosmetics、超保护评分和 Club 非 TOTW 特殊卡仍受保护。
+- 显式开启 `Allow Club current-pool specials for Provisions` 后，只有普通 Provisions 缺料恢复可把评分位于配置范围内的精确 Club current-pool 非 TOTW 实体作为最后候选；它不改变主阵 Required Special 来源，也不作用于 duplicate-reserve、Storage pressure 或其它恢复 SBC。
 - 高于 `Automatic-use max rating`、Evolution、交易中或身份不确定的卡仍受保护；开启 `Protect FSU locked players` 后，FSU Lock 卡也会被排除。
 
 ### 4.3 普通材料和其它 Special
@@ -110,6 +112,7 @@ Required Special 是主 SBC 要求的 `TOTW/TOTS/FOF/FUTTIES` 角色，规则如
 - Storage 中不高于阈值的非 Required Special 可作为普通材料。
 - Club 中的其它 Special 属于最后候选，尽量保留；Club 中匹配 TOTS/FOF/FUTTIES 身份的卡硬保护。
 - 开启 `Protect all Club non-TOTW specials` 后，上一条的最后候选层关闭：所有 Club 非 TOTW 色卡都进入硬保护。Club TOTW 仍只能用于 Required Special 槽；该开关不会禁止 Storage、Transfer 或 Unassigned 中可安全消耗的色卡。
+- `Allow Club current-pool specials for Provisions` 是更窄的显式例外：只在普通 Provisions 缺料恢复、普通候选无法成阵后，才放行当前 matcher 命中的精确 Club 非 TOTW item；严格 Club 色卡保护优先级更高。
 - 高于阈值的重复卡优先移动到 Storage，不会为了继续循环而强制提交。
 - loan、limited-use、concept、academy/evolution、active trade item 和同阵 definition 冲突始终排除；FSU Lock 由默认关闭的 `Protect FSU locked players` 控制。
 
@@ -215,7 +218,7 @@ Rare Gold Pick 不绑定固定奖励评分或固定成本。动态扫描只接�
 
 扫描中的 `repeats:0` 才算明确不限次数；正数属于有限次数，缺失或 `null` 属于 unknown。有限或 unknown Pick 仍可作为独立动态 Loop，但不会进入 Rolling 恢复链。实际提交前会再次检查 live Set，防止旧扫描结果误用已经变化的活动。
 
-制作 Provisions 时，材料评分严格限制为配置的 `87-88` 或 `87-89`。不会因为这些评分不足就放宽到 90-95；Required Special 始终排除，符合评分范围的 Club Other Special 也只作为最后候选。
+制作 Provisions 时，材料评分严格限制为配置的 `87-88`、`87-89`、`87-90` 或 `87-91`，不会因为不足自动越过上限。Required Special 默认排除；只有显式开启 `Allow Club current-pool specials for Provisions` 的普通缺料恢复，才可在普通候选不足后使用范围内、live matcher 精确批准的 Club 非 TOTW item。符合范围的 Club Other Special 仍只作为最后候选，全部锁定、Evolution、Active Squad 和评分保护继续生效。
 
 ### 7.3 Storage 压力
 

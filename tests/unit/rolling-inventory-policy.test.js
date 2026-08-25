@@ -14,6 +14,7 @@ import {
   rollingDuplicateTargetProtectionReasons,
   rollingPrimaryDuplicateProtectionConflicts,
   rollingPrimaryDuplicateRelaxationOrder,
+  selectRollingClubCurrentPoolProvisionsFallbackEntries,
   validateRollingPrimaryDuplicateIdentity,
 } from '../../src/inventory/rolling-policy.js';
 
@@ -892,6 +893,79 @@ describe('Rolling inventory policy', () => {
 
     expect(protection.protectedItemIds).toEqual([1, 2]);
     expect(protection.softProtectedItems.map((ref) => ref.id)).toEqual([3]);
+  });
+
+  it('soft-protects an exact allowed Club Required Special for last-resort recovery', () => {
+    const allowed = item(1, 89, { special: true, pile: 'club' });
+    const sameDefinition = item(2, 89, {
+      special: true,
+      pile: 'club',
+      definitionId: allowed.definitionId,
+    });
+    sameDefinition.ref = { ...sameDefinition.ref, definitionId: allowed.definitionId };
+    const entries = [allowed, sameDefinition].map((value) => ({
+      item: value,
+      pile: value.pile,
+      classification: { requiredSpecial: true, otherSpecial: false, protected: false },
+    }));
+
+    const protection = createRollingRecoveryProtection({
+      entries,
+      allowedRequiredSpecialItems: [allowed.ref],
+    });
+
+    expect(protection.protectedItemIds).toEqual([sameDefinition.id]);
+    expect(protection.softProtectedItems).toEqual([allowed.ref]);
+  });
+
+  it('selects only exact safe Club current-pool specials inside the Provisions range', () => {
+    const eligible = item(1, 89, { special: true, pile: 'club' });
+    const totw = item(2, 88, { special: true, pile: 'club' });
+    const overRange = item(3, 92, { special: true, pile: 'club' });
+    const locked = item(4, 88, { special: true, pile: 'club' });
+    const storage = item(5, 88, { special: true, pile: 'storage' });
+    const otherSpecial = item(6, 88, { special: true, pile: 'club' });
+    const entries = [eligible, totw, overRange, locked, storage, otherSpecial]
+      .map((value) => ({
+        item: value,
+        pile: value.pile,
+        classification: {
+          requiredSpecial: value !== otherSpecial,
+          otherSpecial: value === otherSpecial,
+          protected: false,
+        },
+      }));
+
+    const selected = selectRollingClubCurrentPoolProvisionsFallbackEntries({
+      entries,
+      enabled: true,
+      strictClubSpecialProtection: false,
+      allMatchingSpecials: true,
+      minRating: 87,
+      maxRating: 91,
+      protectionRating: 96,
+      isSpecial: (value) => value.special === true,
+      isTotw: (value) => value.id === totw.id,
+      protectionReasons: (value) => value.id === locked.id ? ['fsu-locked'] : [],
+    });
+
+    expect(selected.map(({ item: value }) => value.id)).toEqual([eligible.id]);
+    expect(selectRollingClubCurrentPoolProvisionsFallbackEntries({
+      entries,
+      enabled: false,
+      allMatchingSpecials: true,
+    })).toEqual([]);
+    expect(selectRollingClubCurrentPoolProvisionsFallbackEntries({
+      entries,
+      enabled: true,
+      strictClubSpecialProtection: true,
+      allMatchingSpecials: true,
+    })).toEqual([]);
+    expect(selectRollingClubCurrentPoolProvisionsFallbackEntries({
+      entries,
+      enabled: true,
+      allMatchingSpecials: false,
+    })).toEqual([]);
   });
 
   it('protects the Club submission entity behind a transient primary duplicate signal', () => {

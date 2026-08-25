@@ -55,6 +55,7 @@ describe('selection policy settings modal', () => {
         rollingProvisionsShortageRecoveryEnabled: false,
         rollingRequiredSpecialRecoveryEnabled: false,
         rollingProtectAllClubNonTotwSpecials: false,
+        rollingAllowClubCurrentPoolSpecialsForProvisions: false,
         rollingDuplicateSwapEnabled: false,
         rollingProvisionsMaxRating: 88,
         rollingRecoveryStorageFirst: false,
@@ -78,6 +79,8 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-allow-club-current-pool-provisions').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-allow-club-current-pool-provisions').disabled).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap-mode').value).toBe('off');
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
@@ -106,6 +109,7 @@ describe('selection policy settings modal', () => {
     ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked = true;
+    ui.byId.get('#bronze-loop-policy-rolling-allow-club-current-pool-provisions').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap').checked = true;
     ui.byId.get('#bronze-loop-policy-pick-open-at-end').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value = '91';
@@ -132,6 +136,7 @@ describe('selection policy settings modal', () => {
         rollingProvisionsShortageRecoveryEnabled: true,
         rollingRequiredSpecialRecoveryEnabled: true,
         rollingProtectAllClubNonTotwSpecials: true,
+        rollingAllowClubCurrentPoolSpecialsForProvisions: false,
         rollingDuplicateSwapEnabled: true,
         rollingDuplicateSwapMode: 'special-only',
         rollingProvisionsMaxRating: 91,
@@ -164,6 +169,7 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-allow-club-current-pool-provisions').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-duplicate-swap-mode').value).toBe('off');
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
@@ -172,6 +178,30 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');
     expect(ui.byId.get('#bronze-loop-policy-protect-fsu-locked-players').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-protect-active-squad-players').checked).toBe(false);
+  });
+
+  it('persists the explicit Club current-pool Provisions fallback when strict protection is off', async () => {
+    const ui = harness();
+    const onSave = vi.fn(async () => true);
+    showSelectionPolicySettings({
+      dom: ui.dom,
+      pickOptions: {
+        rollingProtectAllClubNonTotwSpecials: false,
+        rollingAllowClubCurrentPoolSpecialsForProvisions: true,
+      },
+      onSave,
+    });
+
+    expect(ui.byId.get('#bronze-loop-policy-rolling-allow-club-current-pool-provisions').checked).toBe(true);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-allow-club-current-pool-provisions').disabled).toBe(false);
+    await ui.byId.get('#bronze-loop-policy-save').click();
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      pickOptions: expect.objectContaining({
+        rollingProtectAllClubNonTotwSpecials: false,
+        rollingAllowClubCurrentPoolSpecialsForProvisions: true,
+      }),
+    }));
   });
 
   it('does not save a Storage sink change when the dialog is cancelled', async () => {

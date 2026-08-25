@@ -245,6 +245,23 @@ export function showSelectionPolicySettings(options = {}) {
     pickOptions.rollingProtectAllClubNonTotwSpecials === true,
     'Never use a Club non-TOTW special in Rolling, including severe fodder shortage; Storage, Transfer, and Unassigned specials remain eligible under the existing limits',
   );
+  const rollingAllowClubCurrentPoolSpecialsForProvisions = checkbox(
+    dom,
+    'bronze-loop-policy-rolling-allow-club-current-pool-provisions',
+    'Allow Club current-pool specials for Provisions',
+    pickOptions.rollingAllowClubCurrentPoolSpecialsForProvisions === true,
+    'As a last resort for normal Provisions shortage recovery, allow exact live-matcher-approved Club non-TOTW specials within the configured Provisions rating range; FSU locks, Evolution, Active Squad and all other protection guards still apply',
+  );
+  const updateClubCurrentPoolProvisionsAvailability = () => {
+    const disabled = rollingProtectAllClubNonTotwSpecials.input.checked === true;
+    rollingAllowClubCurrentPoolSpecialsForProvisions.input.disabled = disabled;
+    rollingAllowClubCurrentPoolSpecialsForProvisions.label.style.opacity = disabled ? '0.65' : '1';
+  };
+  rollingProtectAllClubNonTotwSpecials.input.addEventListener(
+    'change',
+    updateClubCurrentPoolProvisionsAvailability,
+  );
+  updateClubCurrentPoolProvisionsAvailability();
   const rollingDuplicateSwap = checkbox(
     dom,
     'bronze-loop-policy-rolling-duplicate-swap',
@@ -333,6 +350,7 @@ export function showSelectionPolicySettings(options = {}) {
     rollingProvisionsShortageRecovery.label,
     rollingRequiredSpecialRecovery.label,
     rollingProtectAllClubNonTotwSpecials.label,
+    rollingAllowClubCurrentPoolSpecialsForProvisions.label,
     rollingDuplicateSwap.label,
     wideField(dom, 'Duplicate swap scope', rollingDuplicateSwapMode, mode, 'Controlled modes require both entities to be untradeable and have identical value fingerprints; all eligible is retained only for legacy experiments'),
     rollingOpenDuplicateProvisionsRewards.label,
@@ -399,6 +417,9 @@ export function showSelectionPolicySettings(options = {}) {
         rollingRequiredSpecialRecovery.input.checked,
       rollingProtectAllClubNonTotwSpecials:
         rollingProtectAllClubNonTotwSpecials.input.checked,
+      rollingAllowClubCurrentPoolSpecialsForProvisions:
+        rollingProtectAllClubNonTotwSpecials.input.checked !== true
+          && rollingAllowClubCurrentPoolSpecialsForProvisions.input.checked,
       rollingDuplicateSwapEnabled: rollingDuplicateSwap.input.checked,
       rollingDuplicateSwapMode: rollingDuplicateSwap.input.checked
         ? rollingDuplicateSwapMode.value === 'off'
@@ -453,6 +474,7 @@ export function showSelectionPolicySettings(options = {}) {
       rollingProvisionsShortageRecovery.input,
       rollingRequiredSpecialRecovery.input,
       rollingProtectAllClubNonTotwSpecials.input,
+      rollingAllowClubCurrentPoolSpecialsForProvisions.input,
       rollingDuplicateSwap.input,
       rollingDuplicateSwapMode,
       rollingOpenDuplicateProvisionsRewards.input,

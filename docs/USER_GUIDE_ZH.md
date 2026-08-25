@@ -179,5 +179,6 @@ Unassigned -> Storage -> Transfer -> Club
 - `Protect FSU locked players` 开启后，Runner 不会把 FSU/Enhancer Lock player 中的卡选入 SBC，并会在最终提交前再次检查；发现锁卡已经进入阵容时停止。关闭时不增加这层 Lock player 保护，其他 FSU 过滤仍保持原行为。
 - `Protect Active Squad players` 关闭时，Rolling 保留原有的严格校验后单次 `skipValidation:true` 确认逻辑。开启后，普通冲突卡按精确 item ID 在本次 Rolling 中排除并自动重规划；合法特殊卡显示 `Use this card` / `Replace card`；违反既有特殊卡保护或 Required Special 角色约束时直接报错。缺少合法 `itemViolations` 时无论开关状态都不会强制提交。
 - TOTS/FOF/FUTTIES 正常可以作为来自 Unassigned、Storage 或 Transfer 的 Required Special 材料，但它们不属于 Active Squad 确认候选。若 EA 对它们返回 `409/itemViolations`，说明 EA 实体身份或规划状态与库存来源矛盾，直接报错，不发送确认提交；`Protect all Club non-TOTW specials` 不改变这一点。该选项关闭时只允许其它 Club 非 TOTW 特殊卡作为最后 fallback，并在 Active Squad 冲突时询问用户。所有排除和批准仅在当前 Rolling 运行期间有效。
+- `Allow Club current-pool specials for Provisions` 默认关闭。开启后，仅普通 Provisions 缺料恢复可在普通材料不足时使用当前 live matcher 精确认可、评分位于 `Provisions reserve max` 范围内的 Club 非 TOTW 色卡；`Protect all Club non-TOTW specials` 开启时该放宽自动失效。FSU Lock、Evolution、Active Squad、Automatic-use 上限及其它提交保护仍会再次检查。
 
 FSU Local 的 Club 快速缓存属于 provisional 数据。使用 Club 球员时，Runner 必须在保存前按 item/definition identity 向 EA 定向验证；失败时重新选材或停止。

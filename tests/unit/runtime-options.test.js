@@ -33,6 +33,7 @@ describe('loop runtime option projection', () => {
       rollingProvisionsShortageRecoveryEnabled: false,
       rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
+      rollingAllowClubCurrentPoolSpecialsForProvisions: false,
       rollingDuplicateSwapEnabled: false,
       rollingDuplicateSwapMode: 'off',
       rollingProvisionsMaxRating: 88,
@@ -64,6 +65,7 @@ describe('loop runtime option projection', () => {
       rollingProvisionsShortageRecoveryEnabled: false,
       rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
+      rollingAllowClubCurrentPoolSpecialsForProvisions: false,
       rollingDuplicateSwapEnabled: false,
       rollingDuplicateSwapMode: 'off',
       rollingProvisionsMaxRating: 88,
@@ -523,6 +525,25 @@ describe('loop runtime option projection', () => {
     expect(enabled).toMatchObject({
       rollingProtectAllClubNonTotwSpecials: true,
       runtimePickOptions: { rollingProtectAllClubNonTotwSpecials: true },
+    });
+  });
+
+  it('keeps Club current-pool Provisions fallback opt-in and projects it onto Rolling', () => {
+    expect(normalizePickRuntimeOptions({})).toMatchObject({
+      rollingAllowClubCurrentPoolSpecialsForProvisions: false,
+    });
+    expect(resolvePickRuntimeOptions(
+      { rollingAllowClubCurrentPoolSpecialsForProvisions: false },
+      { pickOptions: { rollingAllowClubCurrentPoolSpecialsForProvisions: true } },
+    )).toMatchObject({ rollingAllowClubCurrentPoolSpecialsForProvisions: true });
+
+    const enabled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(enabled, {
+      pickOptions: { rollingAllowClubCurrentPoolSpecialsForProvisions: true },
+    });
+    expect(enabled).toMatchObject({
+      rollingAllowClubCurrentPoolSpecialsForProvisions: true,
+      runtimePickOptions: { rollingAllowClubCurrentPoolSpecialsForProvisions: true },
     });
   });
 

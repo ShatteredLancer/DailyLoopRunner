@@ -5,6 +5,15 @@ All notable user-facing changes are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- Add an explicit Rolling setting that lets normal Provisions shortage
+  recovery use exact Club current-pool non-TOTW special cards inside the
+  configured `87-91` Provisions range only as a final fallback. The option is
+  off by default, is overridden by strict Club special protection, and keeps
+  FSU locks, Evolutions, Active Squad conflicts, protection ratings, and all
+  other submission guards in force.
+
 ## [0.8.48] - 2026-08-25
 
 ### Fixed
