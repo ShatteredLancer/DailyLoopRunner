@@ -34,6 +34,7 @@ describe('loop runtime option projection', () => {
       rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
       rollingAllowClubCurrentPoolSpecialsForProvisions: false,
+      rollingStoragePressureClubBoostersEnabled: false,
       rollingDuplicateSwapEnabled: false,
       rollingDuplicateSwapMode: 'off',
       rollingProvisionsMaxRating: 88,
@@ -66,6 +67,7 @@ describe('loop runtime option projection', () => {
       rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
       rollingAllowClubCurrentPoolSpecialsForProvisions: false,
+      rollingStoragePressureClubBoostersEnabled: false,
       rollingDuplicateSwapEnabled: false,
       rollingDuplicateSwapMode: 'off',
       rollingProvisionsMaxRating: 88,
@@ -544,6 +546,25 @@ describe('loop runtime option projection', () => {
     expect(enabled).toMatchObject({
       rollingAllowClubCurrentPoolSpecialsForProvisions: true,
       runtimePickOptions: { rollingAllowClubCurrentPoolSpecialsForProvisions: true },
+    });
+  });
+
+  it('keeps expanded Club normal-gold Storage-pressure boosters opt-in and projects them onto Rolling', () => {
+    expect(normalizePickRuntimeOptions({})).toMatchObject({
+      rollingStoragePressureClubBoostersEnabled: false,
+    });
+    expect(resolvePickRuntimeOptions(
+      { rollingStoragePressureClubBoostersEnabled: false },
+      { pickOptions: { rollingStoragePressureClubBoostersEnabled: true } },
+    )).toMatchObject({ rollingStoragePressureClubBoostersEnabled: true });
+
+    const enabled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(enabled, {
+      pickOptions: { rollingStoragePressureClubBoostersEnabled: true },
+    });
+    expect(enabled).toMatchObject({
+      rollingStoragePressureClubBoostersEnabled: true,
+      runtimePickOptions: { rollingStoragePressureClubBoostersEnabled: true },
     });
   });
 

@@ -9359,7 +9359,7 @@ function updateLoopControls() {
     const storageSink = options.rollingStorageSinkMode === 'selected'
       ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ''}`.trim()
       : options.rollingStorageSinkMode;
-    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Storage recovery priority ${options.rollingStorageRecoveryPriority === 'provisions' ? 'Provisions-first' : 'Storage-Pressure-first'}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Club current-pool Provisions ${options.rollingAllowClubCurrentPoolSpecialsForProvisions && !options.rollingProtectAllClubNonTotwSpecials ? 'last-resort allowed' : 'off'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
+    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Storage recovery priority ${options.rollingStorageRecoveryPriority === 'provisions' ? 'Provisions-first' : 'Storage-Pressure-first'}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Club current-pool Provisions ${options.rollingAllowClubCurrentPoolSpecialsForProvisions && !options.rollingProtectAllClubNonTotwSpecials ? 'last-resort allowed' : 'off'}; Storage Pressure Club normal-gold boosters ${options.rollingStoragePressureClubBoostersEnabled ? `enabled (87-${options.rollingProvisionsMaxRating})` : 'off'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
     renderCurrentSelectionPolicySummary();
     return options;
   }
@@ -17954,6 +17954,28 @@ function updateLoopControls() {
     };
   }
 
+  function rollingStoragePressureClubBoosterPolicy(loopDef, context, requestedPressure, strategy) {
+    const requiredPlayerCount = Math.max(0, Math.floor(Number(
+      context?.model?.requiredPlayerCount || loopDef?.expectedPlayerCount || 0,
+    )));
+    const pressure = Math.max(0, Math.min(
+      requiredPlayerCount,
+      Math.floor(Number(requestedPressure || 0)),
+    ));
+    const enabled = loopDef?.rollingStoragePressureClubBoostersEnabled === true
+      && pressure > 0;
+    return {
+      enabled,
+      maxClubCount: enabled
+        ? Math.max(0, requiredPlayerCount - pressure)
+        : Math.max(0, Math.floor(Number(strategy?.maxClubCount || 0))),
+      ordinaryMinRating: enabled ? ROLLING_PROVISIONS_RATING_RANGE.min : undefined,
+      ordinaryMaxRating: enabled
+        ? Math.min(rollingProtectionRating(loopDef), rollingProvisionsMaxRating(loopDef))
+        : undefined,
+    };
+  }
+
   async function selectRollingGenericStorageSinkSquad(loopDef, runtime, context, snapshot, options = {}) {
     const strategy = genericStorageSinkSquadSourceStrategy(context?.targetRating);
     if (!strategy) {
@@ -17981,22 +18003,31 @@ function updateLoopControls() {
       snapshot,
     );
     const maxRating = rollingProtectionRating(loopDef);
+    const requestedPressure = Math.max(0, Math.floor(Number(
+      options.minimumPressureConsumption || 0,
+    )));
+    const clubBoosterPolicy = rollingStoragePressureClubBoosterPolicy(
+      loopDef,
+      context,
+      requestedPressure,
+      strategy,
+    );
     const clubEntries = selectStorageSinkClubFallbackEntries(candidates.entries, {
-      count: strategy.maxClubCount,
+      count: clubBoosterPolicy.maxClubCount,
+      maxCount: clubBoosterPolicy.maxClubCount,
       maxRating,
+      ordinaryMinRating: clubBoosterPolicy.ordinaryMinRating,
+      ordinaryMaxRating: clubBoosterPolicy.ordinaryMaxRating,
       requiredConstraintIndexes: storageSinkRequiredSpecialRoles(context.model)
         .map((role) => role.constraintIndex),
       protectedItems: basePolicy.protectedItems,
     });
-    const requestedPressure = Math.max(0, Math.floor(Number(
-      options.minimumPressureConsumption || 0,
-    )));
     let lastFailure = null;
     let bestFeasible = null;
     let requiredDiagnostic = null;
     const attemptDiagnostics = [];
     for (let minimumPressure = requestedPressure; minimumPressure >= 0; minimumPressure--) {
-      for (let clubCount = 0; clubCount <= strategy.maxClubCount; clubCount++) {
+      for (let clubCount = 0; clubCount <= clubBoosterPolicy.maxClubCount; clubCount++) {
         if (clubCount > clubEntries.length) break;
         const prepared = prepareGenericStorageSinkCandidates(candidates.entries, {
           primaryRefs: runtime.primaryDuplicateRefs || [],
@@ -18160,14 +18191,22 @@ function updateLoopControls() {
       ),
     });
     const strategy = genericStorageSinkSquadSourceStrategy(context?.targetRating);
+    const requestedPressure = Math.max(0, Number(options.minimumPressureConsumption || 0));
+    const clubBoosterPolicy = rollingStoragePressureClubBoosterPolicy(
+      loopDef,
+      context,
+      requestedPressure,
+      strategy,
+    );
     return result.ok ? {
       ...result,
       details: {
         ...result.details,
         targetRating: strategy.targetRating,
         sourceOrder: strategy.priorityPiles,
-        maxClubPerSquad: strategy.maxClubCount,
-        minimumPressureConsumption: Math.max(0, Number(options.minimumPressureConsumption || 0)),
+        maxClubPerSquad: clubBoosterPolicy.maxClubCount,
+        clubNormalGoldBoosters: clubBoosterPolicy.enabled,
+        minimumPressureConsumption: requestedPressure,
         storagePressureConsumed: Number(result.plans?.[0]?.selection?.storagePressureConsumed || 0),
       },
     } : result;
@@ -20463,7 +20502,7 @@ function updateLoopControls() {
         const storageSinkSummary = loopDef.rollingStorageSinkEnabled
           ? `${loopDef.rollingStorageSink?.mode || 'automatic'}/configured:${loopDef.rollingStorageSinkSetName || `Set #${loopDef.rollingStorageSinkSetId || '?'}`}/bound:${loopDef.rollingStorageSink?.capability?.setName || 'unavailable'} (Set #${loopDef.rollingStorageSink?.capability?.setId || '?'})`
           : 'off';
-        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Storage recovery priority ${loopDef.rollingStorageRecoveryPriority === 'provisions' ? 'Provisions-first' : 'Storage-Pressure-first'}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Club current-pool Provisions ${loopDef.rollingAllowClubCurrentPoolSpecialsForProvisions && !loopDef.rollingProtectAllClubNonTotwSpecials ? 'last-resort allowed' : 'off'}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || 'special-only'})` : 'off; Storage route only'}; Storage pressure SBC ${storageSinkSummary}`);
+        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Storage recovery priority ${loopDef.rollingStorageRecoveryPriority === 'provisions' ? 'Provisions-first' : 'Storage-Pressure-first'}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Club current-pool Provisions ${loopDef.rollingAllowClubCurrentPoolSpecialsForProvisions && !loopDef.rollingProtectAllClubNonTotwSpecials ? 'last-resort allowed' : 'off'}; Storage Pressure Club normal-gold boosters ${loopDef.rollingStoragePressureClubBoostersEnabled ? `enabled (87-${rollingProvisionsMaxRating(loopDef)})` : 'off'}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || 'special-only'})` : 'off; Storage route only'}; Storage pressure SBC ${storageSinkSummary}`);
       } else {
         log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
       }

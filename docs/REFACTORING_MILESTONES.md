@@ -12,6 +12,14 @@
 本文档是重构工作的状态来源。实施过程中应更新里程碑状态、验收记录和发现的问题，不在聊天记录或临时日志中维护另一套进度。
 
 当前开发修正：Selection Policy 新增默认关闭的
+`rollingStoragePressureClubBoostersEnabled`。启用后，动态 Storage Pressure 阵容在仍需
+净消耗真实 Storage 卡时，可突破通用的三张 Club filler 上限，使用普通 Club 金卡
+`87` 至当前 Provisions reserve 上限补评分；Club 数量受阵容剩余位置和本次要求释放的
+Storage 数量共同约束。特殊卡不因该开关获得授权，FSU 过滤、Lock、Evolution、
+Active Squad、Automatic-use protection 和提交前验证继续生效；既有 95+ Pick 的
+89/88 专用流程与三张 Club fallback 合同不变。
+
+当前开发修正：Selection Policy 新增默认关闭的
 `rollingAllowClubCurrentPoolSpecialsForProvisions`。普通 Provisions shortage 在普通材料
 无法成阵后，可把当前 primary live matcher 精确批准、评分位于配置 `87-91` 范围内的
 Club non-TOTW special 作为最后候选。授权绑定稳定 item ID，不扩展到同 definition、

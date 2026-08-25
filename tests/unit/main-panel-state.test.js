@@ -161,6 +161,8 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Club current-pool Provisions off');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Storage Pressure Club normal-gold boosters off');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('duplicate swap experimental off');
     renderSelectionPolicySummary({
       panel,
@@ -174,6 +176,7 @@ describe('main panel state rendering', () => {
         rollingRequiredSpecialRecoveryEnabled: true,
         rollingProtectAllClubNonTotwSpecials: true,
         rollingAllowClubCurrentPoolSpecialsForProvisions: true,
+        rollingStoragePressureClubBoostersEnabled: true,
         rollingDuplicateSwapEnabled: true,
         rollingProvisionsMaxRating: 89,
         rollingRecoveryStorageFirst: true,
@@ -202,6 +205,8 @@ describe('main panel state rendering', () => {
       .toContain('Club non-TOTW specials protected');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Club current-pool Provisions blocked by strict protection');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Storage Pressure Club normal-gold boosters enabled');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('duplicate swap experimental enabled');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
