@@ -407,6 +407,9 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     for (const kind of order) {
       const attemptContext = {
         ...context,
+        ...(kind === 'provisions' && context.provisionsTrigger
+          ? { trigger: context.provisionsTrigger }
+          : {}),
         ...(kind === 'storageSink' && lastKind === 'provisions' ? { provisions: last } : {}),
         ...(kind === 'provisions' && lastKind === 'storageSink' ? { storageSink: last } : {}),
       };
@@ -975,6 +978,21 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           leftoverRecoveryBatchActive = true;
           shortageProvisionsPacksOpened = 0;
           continue;
+        }
+        if (planCode === 'SQUAD_RATING_EXCESS' && options.storageSinkEnabled === true) {
+          const recovery = await recoverStorageBlocked({
+            trigger: 'storage-pressure',
+            provisionsTrigger: 'primary-fodder-shortage',
+            source: 'primary-rating-excess',
+            plan: planned,
+          });
+          if (recovery.progressed) continue;
+          const failure = recovery.terminal || recovery.value || planned;
+          return finishRecoveryFailure(
+            failure?.status ? failure : planned,
+            'primary squad rating-excess recovery is unavailable',
+            planCode,
+          );
         }
         const recovery = await recoverProvisions({
           trigger: 'primary-fodder-shortage',

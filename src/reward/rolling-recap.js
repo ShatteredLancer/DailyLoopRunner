@@ -87,6 +87,7 @@ function buildCardSummary(item, sequence, context = {}) {
   return {
     id: boundedInteger(recapItem?.id),
     definitionId: boundedInteger(recapItem?.definitionId),
+    duplicateId: boundedInteger(recapItem?.duplicateId),
     name: recapItemDisplayName(recapItem),
     rating,
     tier: tier(recapItem, rating),

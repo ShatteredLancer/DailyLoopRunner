@@ -12239,15 +12239,30 @@ function updateLoopControls() {
   function createRecapItemHydrator() {
     const byItemId = new Map();
     const byDefinitionId = new Map();
+    const byDuplicateId = new Map();
     const destinationByItemId = new Map();
+    const destinationByDuplicateId = new Map();
     const destinationsByDefinitionId = new Map();
     ['storage', 'club', 'unassigned', 'transfer'].forEach((pileName) => {
       getPileItemsByName(pileName).forEach((item) => {
         const itemId = Number(item?.id || 0);
         const definitionId = recapDefinitionId(item);
+        const duplicateId = Number(item?.duplicateId || 0);
         if (Number.isInteger(itemId) && itemId > 0 && !byItemId.has(itemId)) {
           byItemId.set(itemId, item);
           destinationByItemId.set(itemId, pileName);
+        }
+        if (Number.isInteger(duplicateId) && duplicateId > 0) {
+          const duplicateCandidates = byDuplicateId.get(duplicateId) || [];
+          // A confirmed Player Pick first materializes in Unassigned. Prefer
+          // that current entity over an older identical copy already in
+          // Storage that can share the same Club duplicateId.
+          if (pileName === 'unassigned') duplicateCandidates.unshift(item);
+          else duplicateCandidates.push(item);
+          byDuplicateId.set(duplicateId, duplicateCandidates);
+          const duplicateDestinations = destinationByDuplicateId.get(duplicateId) || [];
+          duplicateDestinations.push(pileName);
+          destinationByDuplicateId.set(duplicateId, duplicateDestinations);
         }
         if (definitionId) {
           const candidates = byDefinitionId.get(definitionId) || [];
@@ -12262,17 +12277,40 @@ function updateLoopControls() {
     const hydrateItem = (item) => {
       const itemId = Number(item?.id || 0);
       if (Number.isInteger(itemId) && itemId > 0 && byItemId.has(itemId)) return byItemId.get(itemId);
+      const duplicateId = Number(item?.duplicateId || 0);
+      if (Number.isInteger(duplicateId) && duplicateId > 0) {
+        const duplicateCandidate = (byDuplicateId.get(duplicateId) || []).find((candidate) => (
+          Number(candidate?.id || 0) !== duplicateId
+            && isSamePlayerCardVersion(item, candidate)
+        ));
+        if (duplicateCandidate) return duplicateCandidate;
+      }
       const candidates = byDefinitionId.get(recapDefinitionId(item)) || [];
       // A temporary Player Pick id can share a definition with an evolved Club card.
       // Only hydrate from an inventory entity when its card version is identical;
       // otherwise the original response card remains authoritative for the recap.
-      return candidates.find((candidate) => isSamePlayerCardVersion(item, candidate)) || item;
+      // A duplicate-linked response must never hydrate to the existing duplicate
+      // itself; that is the source entity, not the newly selected card.
+      return candidates.find((candidate) => (
+        Number(candidate?.id || 0) !== duplicateId
+          && isSamePlayerCardVersion(item, candidate)
+      )) || item;
     };
     hydrateItem.resolveDestination = (item) => {
       const itemId = Number(item?.id || 0);
       if (Number.isInteger(itemId) && itemId > 0 && destinationByItemId.has(itemId)) {
         return destinationByItemId.get(itemId);
       }
+      const duplicateId = Number(item?.duplicateId || 0);
+      if (Number.isInteger(duplicateId) && duplicateId > 0) {
+        const duplicateDestinations = [...new Set(destinationByDuplicateId.get(duplicateId) || [])];
+        if (duplicateDestinations.length === 1) return duplicateDestinations[0];
+      }
+      // A positive item ID is an entity identity. If that exact entity has
+      // already left the live inventory, do not infer its destination from a
+      // different card with the same definition (for example the old Club
+      // duplicate left behind after a Player Pick result was stored/consumed).
+      if (Number.isInteger(duplicateId) && duplicateId > 0) return null;
       const destinations = [...(destinationsByDefinitionId.get(recapDefinitionId(item)) || [])];
       return destinations.length === 1 ? destinations[0] : null;
     };

@@ -1392,6 +1392,161 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.planPrimarySquad).toHaveBeenCalledTimes(2);
   });
 
+  it('uses the configured Storage Pressure SBC first when the primary squad exceeds its rating', async () => {
+    let inventoryVersion = 1;
+    let ready = false;
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      storageRecoveryPriority: 'storage-pressure',
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push('plan');
+        return ready
+          ? { ok: true, itemRefs: [{ id: 1 }] }
+          : { ok: false, missing: { code: 'SQUAD_RATING_EXCESS' } };
+      }),
+      recoverStorageSink: vi.fn(async ({ context }) => {
+        calls.push('storage-pressure');
+        expect(context).toMatchObject({
+          trigger: 'storage-pressure',
+          source: 'primary-rating-excess',
+        });
+        ready = true;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('provisions');
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      recoveries: { storageSink: 1, provisions: 0 },
+    });
+    expect(calls).toEqual(['plan', 'storage-pressure', 'plan']);
+    expect(options.recoverProvisions).not.toHaveBeenCalled();
+  });
+
+  it('falls back to Provisions when the preferred Storage Pressure SBC cannot handle rating excess', async () => {
+    let inventoryVersion = 1;
+    let ready = false;
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      storageRecoveryPriority: 'storage-pressure',
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push('plan');
+        return ready
+          ? { ok: true, itemRefs: [{ id: 1 }] }
+          : { ok: false, missing: { code: 'SQUAD_RATING_EXCESS' } };
+      }),
+      recoverStorageSink: vi.fn(async () => {
+        calls.push('storage-pressure');
+        return { status: 'unavailable', reason: 'selected Storage Pressure SBC is unavailable' };
+      }),
+      recoverProvisions: vi.fn(async ({ context }) => {
+        calls.push('provisions');
+        expect(context).toMatchObject({
+          trigger: 'primary-fodder-shortage',
+          source: 'primary-rating-excess',
+          storageSink: { status: 'unavailable' },
+        });
+        ready = true;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      recoveries: { storageSink: 0, provisions: 1 },
+    });
+    expect(calls).toEqual(['plan', 'storage-pressure', 'provisions', 'plan']);
+  });
+
+  it('keeps Provisions first for primary rating excess when that priority is configured', async () => {
+    let inventoryVersion = 1;
+    let ready = false;
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      storageRecoveryPriority: 'provisions',
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push('plan');
+        return ready
+          ? { ok: true, itemRefs: [{ id: 1 }] }
+          : { ok: false, missing: { code: 'SQUAD_RATING_EXCESS' } };
+      }),
+      recoverProvisions: vi.fn(async ({ context }) => {
+        calls.push('provisions');
+        expect(context).toMatchObject({
+          trigger: 'primary-fodder-shortage',
+          source: 'primary-rating-excess',
+        });
+        ready = true;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+      recoverStorageSink: vi.fn(async () => {
+        calls.push('storage-pressure');
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      recoveries: { storageSink: 0, provisions: 1 },
+    });
+    expect(calls).toEqual(['plan', 'provisions', 'plan']);
+    expect(options.recoverStorageSink).not.toHaveBeenCalled();
+  });
+
+  it('stops once without replanning when neither rating-excess recovery is available', async () => {
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      storageRecoveryPriority: 'storage-pressure',
+      findPrimaryPack: vi.fn(async () => null),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push('plan');
+        return { ok: false, missing: { code: 'SQUAD_RATING_EXCESS' } };
+      }),
+      recoverStorageSink: vi.fn(async () => {
+        calls.push('storage-pressure');
+        return {
+          status: 'unavailable',
+          reason: 'selected Storage Pressure SBC is unavailable',
+          reasonCode: 'STORAGE_SINK_UNAVAILABLE',
+        };
+      }),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('provisions');
+        return {
+          status: 'unavailable',
+          reason: 'Provisions capability is unavailable',
+          reasonCode: 'PROVISIONS_UNAVAILABLE',
+        };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'unavailable',
+      reason: 'selected Storage Pressure SBC is unavailable',
+      reasonCode: 'STORAGE_SINK_UNAVAILABLE',
+      recoveries: { storageSink: 0, provisions: 0 },
+    });
+    expect(calls).toEqual(['plan', 'storage-pressure', 'provisions']);
+    expect(options.planPrimarySquad).toHaveBeenCalledOnce();
+  });
+
   it('stops when shortage-driven Provisions is blocked before submission', async () => {
     const options = harness({
       findPrimaryPack: vi.fn(async () => null),

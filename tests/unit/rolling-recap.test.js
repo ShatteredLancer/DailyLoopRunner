@@ -82,6 +82,130 @@ describe('Rolling recap aggregation', () => {
     expect(api.createRecapItemHydrator()(candidate)).toBe(finalLukaku);
   });
 
+  it('hydrates a duplicate Player Pick to the newly generated entity, not its existing Club source', async () => {
+    const clubXhaka = makePlayer({
+      id: 915695560200,
+      definitionId: 100862799,
+      name: 'Xhaka',
+      rating: 97,
+      rareflag: 138,
+    });
+    const pickedXhaka = makePlayer({
+      id: 930745043407,
+      definitionId: 100862799,
+      name: 'Xhaka',
+      rating: 97,
+      rareflag: 138,
+      duplicateId: 915695560200,
+    });
+    const { api } = await loadUserscript({ club: [clubXhaka], storage: [pickedXhaka] });
+    const temporaryPick = makePlayer({
+      id: 2,
+      definitionId: 100862799,
+      name: 'Xhaka',
+      rating: 97,
+      rareflag: 138,
+      duplicateId: 915695560200,
+    });
+    const hydrateItem = api.createRecapItemHydrator();
+
+    expect(hydrateItem(temporaryPick)).toBe(pickedXhaka);
+    expect(hydrateItem.resolveDestination(temporaryPick)).toBe('storage');
+  });
+
+  it('prefers the current Unassigned Pick entity over an older identical Storage duplicate', async () => {
+    const clubXhaka = makePlayer({
+      id: 915695560200,
+      definitionId: 100862799,
+      name: 'Xhaka',
+      rating: 97,
+      rareflag: 138,
+    });
+    const storedXhaka = makePlayer({
+      id: 929000000001,
+      definitionId: 100862799,
+      name: 'Xhaka',
+      rating: 97,
+      rareflag: 138,
+      duplicateId: 915695560200,
+    });
+    const currentXhaka = makePlayer({
+      id: 930745043407,
+      definitionId: 100862799,
+      name: 'Xhaka',
+      rating: 97,
+      rareflag: 138,
+      duplicateId: 915695560200,
+    });
+    const { api } = await loadUserscript({
+      club: [clubXhaka],
+      storage: [storedXhaka],
+      unassigned: [currentXhaka],
+    });
+    const temporaryPick = makePlayer({
+      id: 2,
+      definitionId: 100862799,
+      name: 'Xhaka',
+      rating: 97,
+      rareflag: 138,
+      duplicateId: 915695560200,
+    });
+
+    expect(api.createRecapItemHydrator()(temporaryPick)).toBe(currentXhaka);
+  });
+
+  it('keeps a recorded Player Pick destination when the selected entity later leaves inventory', async () => {
+    const clubXhaka = makePlayer({
+      id: 915695560200,
+      definitionId: 100862799,
+      name: 'Xhaka',
+      rating: 97,
+      rareflag: 138,
+    });
+    const pickedXhaka = makePlayer({
+      id: 930745043407,
+      definitionId: 100862799,
+      name: 'Xhaka',
+      rating: 97,
+      rareflag: 138,
+      duplicateId: 915695560200,
+    });
+    // Match the live sequence: EA materializes the confirmed Pick in
+    // Unassigned, while cleanup predicts and later performs the Storage move.
+    const { api } = await loadUserscript({ club: [clubXhaka], unassigned: [pickedXhaka] });
+    const recordHydrator = api.createRecapItemHydrator();
+    const aggregator = createRollingRecapAggregator();
+    const temporaryPick = makePlayer({
+      id: 2,
+      definitionId: 100862799,
+      name: 'Xhaka',
+      rating: 97,
+      rareflag: 138,
+      duplicateId: 915695560200,
+    });
+    aggregator.recordItems([temporaryPick], {
+      sourceLabel: '1 of 3 95+ FOF or FUTTIES Player Pick',
+      hydrateItem: recordHydrator,
+      destination: 'storage',
+    });
+
+    // Simulate the selected entity being consumed later while the original
+    // Club source remains in the live inventory used for recap reopening.
+    const { api: liveApi } = await loadUserscript({ club: [clubXhaka] });
+    const liveHydrator = liveApi.createRecapItemHydrator();
+    const model = createRollingRecapModel({
+      snapshot: aggregator.getSnapshot(),
+      hydrateItem: liveHydrator,
+      resolveDestination: liveHydrator.resolveDestination,
+    });
+
+    expect(model.rows[0]).toMatchObject({
+      name: 'Xhaka',
+      rating: 97,
+      destination: 'storage',
+    });
+  });
+
   it('keeps long runs bounded and stores summaries instead of source items', () => {
     const aggregator = createRollingRecapAggregator({ alertMinimumRating: 94 });
     const source = card({ id: 1, definitionId: 101, rating: 99, special: true, rareflag: 8 });

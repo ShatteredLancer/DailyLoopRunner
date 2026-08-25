@@ -23893,6 +23893,7 @@
     return {
       id: boundedInteger2(recapItem?.id),
       definitionId: boundedInteger2(recapItem?.definitionId),
+      duplicateId: boundedInteger2(recapItem?.duplicateId),
       name: recapItemDisplayName(recapItem),
       rating,
       tier: tier(recapItem, rating),
@@ -28889,6 +28890,7 @@
       for (const kind of order) {
         const attemptContext = {
           ...context,
+          ...kind === "provisions" && context.provisionsTrigger ? { trigger: context.provisionsTrigger } : {},
           ...kind === "storageSink" && lastKind === "provisions" ? { provisions: last } : {},
           ...kind === "provisions" && lastKind === "storageSink" ? { storageSink: last } : {}
         };
@@ -29397,6 +29399,21 @@
             leftoverRecoveryBatchActive = true;
             shortageProvisionsPacksOpened = 0;
             continue;
+          }
+          if (planCode === "SQUAD_RATING_EXCESS" && options.storageSinkEnabled === true) {
+            const recovery2 = await recoverStorageBlocked({
+              trigger: "storage-pressure",
+              provisionsTrigger: "primary-fodder-shortage",
+              source: "primary-rating-excess",
+              plan: planned
+            });
+            if (recovery2.progressed) continue;
+            const failure2 = recovery2.terminal || recovery2.value || planned;
+            return finishRecoveryFailure(
+              failure2?.status ? failure2 : planned,
+              "primary squad rating-excess recovery is unavailable",
+              planCode
+            );
           }
           const recovery = await recoverProvisions({
             trigger: "primary-fodder-shortage",
@@ -50074,15 +50091,27 @@
     function createRecapItemHydrator() {
       const byItemId = /* @__PURE__ */ new Map();
       const byDefinitionId = /* @__PURE__ */ new Map();
+      const byDuplicateId = /* @__PURE__ */ new Map();
       const destinationByItemId = /* @__PURE__ */ new Map();
+      const destinationByDuplicateId = /* @__PURE__ */ new Map();
       const destinationsByDefinitionId = /* @__PURE__ */ new Map();
       ["storage", "club", "unassigned", "transfer"].forEach((pileName) => {
         getPileItemsByName(pileName).forEach((item) => {
           const itemId6 = Number(item?.id || 0);
           const definitionId3 = recapDefinitionId2(item);
+          const duplicateId = Number(item?.duplicateId || 0);
           if (Number.isInteger(itemId6) && itemId6 > 0 && !byItemId.has(itemId6)) {
             byItemId.set(itemId6, item);
             destinationByItemId.set(itemId6, pileName);
+          }
+          if (Number.isInteger(duplicateId) && duplicateId > 0) {
+            const duplicateCandidates = byDuplicateId.get(duplicateId) || [];
+            if (pileName === "unassigned") duplicateCandidates.unshift(item);
+            else duplicateCandidates.push(item);
+            byDuplicateId.set(duplicateId, duplicateCandidates);
+            const duplicateDestinations = destinationByDuplicateId.get(duplicateId) || [];
+            duplicateDestinations.push(pileName);
+            destinationByDuplicateId.set(duplicateId, duplicateDestinations);
           }
           if (definitionId3) {
             const candidates = byDefinitionId.get(definitionId3) || [];
@@ -50097,14 +50126,25 @@
       const hydrateItem = (item) => {
         const itemId6 = Number(item?.id || 0);
         if (Number.isInteger(itemId6) && itemId6 > 0 && byItemId.has(itemId6)) return byItemId.get(itemId6);
+        const duplicateId = Number(item?.duplicateId || 0);
+        if (Number.isInteger(duplicateId) && duplicateId > 0) {
+          const duplicateCandidate = (byDuplicateId.get(duplicateId) || []).find((candidate) => Number(candidate?.id || 0) !== duplicateId && isSamePlayerCardVersion(item, candidate));
+          if (duplicateCandidate) return duplicateCandidate;
+        }
         const candidates = byDefinitionId.get(recapDefinitionId2(item)) || [];
-        return candidates.find((candidate) => isSamePlayerCardVersion(item, candidate)) || item;
+        return candidates.find((candidate) => Number(candidate?.id || 0) !== duplicateId && isSamePlayerCardVersion(item, candidate)) || item;
       };
       hydrateItem.resolveDestination = (item) => {
         const itemId6 = Number(item?.id || 0);
         if (Number.isInteger(itemId6) && itemId6 > 0 && destinationByItemId.has(itemId6)) {
           return destinationByItemId.get(itemId6);
         }
+        const duplicateId = Number(item?.duplicateId || 0);
+        if (Number.isInteger(duplicateId) && duplicateId > 0) {
+          const duplicateDestinations = [...new Set(destinationByDuplicateId.get(duplicateId) || [])];
+          if (duplicateDestinations.length === 1) return duplicateDestinations[0];
+        }
+        if (Number.isInteger(duplicateId) && duplicateId > 0) return null;
         const destinations = [...destinationsByDefinitionId.get(recapDefinitionId2(item)) || []];
         return destinations.length === 1 ? destinations[0] : null;
       };
