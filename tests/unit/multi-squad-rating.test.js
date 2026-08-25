@@ -82,7 +82,12 @@ describe('multi-squad rating planner', () => {
       requirePrimaryUnassigned: true,
       maxClubCount: 3,
     });
-    expect(genericStorageSinkSquadSourceStrategy(86)).toBeNull();
+    expect(genericStorageSinkSquadSourceStrategy(86)).toEqual({
+      targetRating: 86,
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      requirePrimaryUnassigned: true,
+      maxClubCount: 3,
+    });
 
     const entries = [
       { item: player(1, 101, 93), signal: player(901, 101, 93, 'unassigned'), pileName: 'unassigned' },
@@ -313,7 +318,8 @@ describe('multi-squad rating planner', () => {
     ];
 
     expect(nextGenericStorageSinkContext(contexts)).toBe(contexts[0]);
-    expect(nextGenericStorageSinkContext([{ targetRating: 86 }, contexts[1]])).toBe(contexts[1]);
+    const lowerRatedFirst = [{ targetRating: 86 }, contexts[1]];
+    expect(nextGenericStorageSinkContext(lowerRatedFirst)).toBe(lowerRatedFirst[0]);
   });
 
   it('models a live player-group condition as an exact Storage Sink role', () => {

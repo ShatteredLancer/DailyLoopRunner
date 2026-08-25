@@ -531,8 +531,15 @@ function shortageReason(code, model, policy) {
     case 'PLAYER_COUNT_SHORTAGE':
       return `only ${policy.buckets.eligible.length + policy.buckets.softProtected.length}/${requiredCount} policy-eligible player definitions are available`;
     case 'SQUAD_RATING_SHORTAGE':
-    default:
-      return `maximum policy-eligible squad rating ${policy.diagnostic.maxReachableRating}/${Number(model.targetRating || 0)}`;
+    default: {
+      const roleLimited = policy.roleAvailability.some((role) => (
+        Number.isFinite(Number(role.maxCount))
+          && Number(role.maxCount) < Number(role.available || 0)
+      ));
+      return roleLimited
+        ? `no policy- and role-valid squad reaches rating ${Number(model.targetRating || 0)}; role-unconstrained candidate ceiling ${policy.diagnostic.maxReachableRating}`
+        : `maximum policy-eligible squad rating ${policy.diagnostic.maxReachableRating}/${Number(model.targetRating || 0)}`;
+    }
   }
 }
 

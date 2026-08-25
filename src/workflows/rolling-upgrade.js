@@ -430,7 +430,9 @@ export async function runRollingUpgradeWorkflow(options = {}) {
         lastAttemptedValue = value;
       }
       if (isProgressed(value)) return { progressed: true, value, kind };
-      if (isStopped(value) || value?.status === 'planned') {
+      if (isStopped(value)
+        || value?.status === 'planned'
+        || reasonCode(value) === 'STORAGE_SINK_SELECTION_REQUIRED') {
         return { terminal: value, value, kind, attempted, storageSinkAttempted };
       }
       last = value;

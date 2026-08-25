@@ -502,6 +502,137 @@ describe('Rolling Upgrade configuration contracts', () => {
     });
   });
 
+  it('normalizes Required Special metadata for an automatically discovered Storage sink', () => {
+    const result = parseRollingStorageSinkSnapshot({
+      set: storageSinkPlayerSet({
+        challenges: [{
+          id: 21994,
+          requiredPlayerCount: 11,
+          eligibilityRequirements: [
+            { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+            { key: 'TEAM_RATING', values: [89], count: -1 },
+          ],
+        }],
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: 'supported',
+      capability: {
+        loop: {
+          dynamicChallenges: [{
+            challengeId: 21994,
+            requiredPlayerCount: 11,
+            targetRating: 89,
+            specialCount: 1,
+            requiredSpecialAllowanceMode: 'required-only',
+            requiredSpecialAllowanceDecisionSource: 'fail-closed',
+            eligibilityRequirements: [
+              { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+              { key: 'TEAM_RATING', values: [89], count: 11 },
+            ],
+          }],
+        },
+      },
+    });
+  });
+
+  it('binds the live Maxwel Cornet 86/87 challenge structure by its selected Set identity', () => {
+    const cornet = storageSinkPlayerSet({
+      id: 1382,
+      name: 'Maxwel Cornet',
+      complete: false,
+      timesCompleted: 0,
+      repeats: 0,
+      rewards: [{
+        type: 'PLAYER',
+        name: 'Cornet',
+        resourceId: 67324662,
+        definitionId: 67324662,
+        count: 1,
+      }],
+      challenges: [{
+        id: 3938,
+        status: 'NOT_STARTED',
+        completed: false,
+        requiredPlayerCount: 11,
+        eligibilityRequirements: [
+          { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+          { key: 'TEAM_RATING', values: [86], count: -1 },
+        ],
+      }, {
+        id: 3939,
+        status: 'IN_PROGRESS',
+        completed: false,
+        requiredPlayerCount: 11,
+        eligibilityRequirements: [{ key: 'TEAM_RATING', values: [87], count: -1 }],
+      }],
+    });
+
+    expect(resolveRollingStorageSinkCapability([cornet], {
+      mode: 'selected',
+      setId: 1382,
+      setName: 'Maxwel Cornet',
+    })).toMatchObject({
+      status: 'resolved',
+      mode: 'selected',
+      selectedSetId: 1382,
+      selectedSetName: 'Maxwel Cornet',
+      capability: {
+        setId: 1382,
+        setName: 'Maxwel Cornet',
+        challengeRatings: [86, 87],
+        challenges: [
+          { challengeId: 3938, completed: false, targetRating: 86 },
+          { challengeId: 3939, completed: false, targetRating: 87 },
+        ],
+      },
+    });
+  });
+
+  it('keeps a selected Storage sink actionable when its 87 squad is complete but its 86 squad remains', () => {
+    const cornet = storageSinkPlayerSet({
+      id: 1382,
+      name: 'Maxwel Cornet',
+      complete: false,
+      rewards: [{
+        type: 'PLAYER',
+        name: 'Cornet',
+        resourceId: 67324662,
+        definitionId: 67324662,
+        count: 1,
+      }],
+      challenges: [{
+        id: 3938,
+        status: 'IN_PROGRESS',
+        completed: false,
+        requiredPlayerCount: 11,
+        eligibilityRequirements: [
+          { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+          { key: 'TEAM_RATING', values: [86], count: -1 },
+        ],
+      }, {
+        id: 3939,
+        status: 'COMPLETED',
+        completed: true,
+        requiredPlayerCount: 11,
+        eligibilityRequirements: [{ key: 'TEAM_RATING', values: [87], count: -1 }],
+      }],
+    });
+
+    expect(parseRollingStorageSinkSnapshot({ set: cornet })).toMatchObject({
+      status: 'supported',
+      capability: {
+        setId: 1382,
+        challengeRatings: [86, 87],
+        challenges: [
+          { challengeId: 3938, completed: false, targetRating: 86 },
+          { challengeId: 3939, completed: true, targetRating: 87 },
+        ],
+      },
+    });
+  });
+
   it('keeps a Storage sink resolved when only a completed challenge has unavailable squad metadata', () => {
     const set = storageSinkPickSet({
       challenges: [
@@ -599,8 +730,14 @@ describe('Rolling Upgrade configuration contracts', () => {
     const missing = resolveRollingStorageSinkCapability([legacy], {
       mode: 'selected',
       setId: selected.id,
+      setName: selected.name,
     });
-    expect(missing).toMatchObject({ status: 'unavailable', mode: 'selected' });
+    expect(missing).toMatchObject({
+      status: 'unavailable',
+      mode: 'selected',
+      selectedSetId: selected.id,
+      selectedSetName: selected.name,
+    });
     expect(missing).not.toHaveProperty('capability');
 
     const automatic = resolveRollingStorageSinkCapability([selected, legacy], {

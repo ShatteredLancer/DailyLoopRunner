@@ -8,7 +8,7 @@ const PHASE_LABELS = Object.freeze({
   PROCESS_RECOVERY_REWARD: 'Clearing duplicates',
   DRAIN_RECOVERY_DUPLICATES: 'Clearing duplicates',
   RECOVER_PROVISIONS: 'Crafting Provisions',
-  RECOVER_STORAGE_SINK: 'Freeing Storage with 95+ Pick',
+  RECOVER_STORAGE_SINK: 'Freeing Storage with Storage Pressure SBC',
   RECOVER_REQUIRED_SPECIAL: 'Recovering TOTW',
   MAINTAIN_STORAGE: 'Maintaining Storage',
   REDEEM_RARE_GOLD_PICK: 'Redeeming Rare Gold Pick',

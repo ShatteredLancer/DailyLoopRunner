@@ -29,7 +29,7 @@ export function storageSinkSquadSourceStrategy(targetRating) {
 
 export function genericStorageSinkSquadSourceStrategy(targetRating) {
   const rating = Number(targetRating || 0);
-  if (!Number.isInteger(rating) || rating < 87 || rating > 99) return null;
+  if (!Number.isInteger(rating) || rating < 1 || rating > 99) return null;
   return {
     targetRating: rating,
     priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],

@@ -425,6 +425,7 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
     loopDef.rollingStorageSinkEnabled = resolvedPickOptions.rollingStorageSinkEnabled;
     loopDef.rollingStorageSinkMode = resolvedPickOptions.rollingStorageSinkMode;
     loopDef.rollingStorageSinkSetId = resolvedPickOptions.rollingStorageSinkSetId;
+    loopDef.rollingStorageSinkSetName = resolvedPickOptions.rollingStorageSinkSetName;
     loopDef.rollingSurplusCraftingEnabled = resolvedPickOptions.rollingSurplusCraftingEnabled;
     loopDef.rollingProvisionsShortageRecoveryEnabled =
       resolvedPickOptions.rollingProvisionsShortageRecoveryEnabled;
@@ -464,6 +465,21 @@ export function assertRollingRuntimePreflight(loopDef = {}) {
   }
   if (loopDef.rollingWorkflowEnabled !== true) {
     throw new Error('Rolling Upgrade workflow is staged but not enabled in this build');
+  }
+  if (loopDef.rollingStorageSinkEnabled === true
+    && loopDef.rollingStorageSinkMode === 'selected') {
+    const selectedSetId = Number(loopDef.rollingStorageSinkSetId || 0);
+    const selectedSetName = String(loopDef.rollingStorageSinkSetName || '').trim();
+    const capability = loopDef.rollingStorageSink?.capability || {};
+    const boundSetId = Number(capability.setId || capability.loop?.sbcSetIds?.[0] || 0);
+    const boundSetName = String(capability.setName || '').trim();
+    if (!selectedSetId || boundSetId !== selectedSetId) {
+      throw new Error(
+        `Selected Storage pressure SBC ${selectedSetName || `Set #${selectedSetId || '?'}`} `
+        + `(Set #${selectedSetId || '?'}) is not bound; current binding is `
+        + `${boundSetName || 'none'} (Set #${boundSetId || '?'})`,
+      );
+    }
   }
   return loopDef;
 }

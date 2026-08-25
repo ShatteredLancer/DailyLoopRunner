@@ -8,6 +8,17 @@ import { STRATEGY_RUNNER_KEYS } from '../../src/workflows/dispatch.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 describe('current direct side-effect call baseline', () => {
+  it('routes every runtime rating-SBC model through the live allowance resolver', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    expect(source.match(/\bparseRatingSbcChallenge\(/g) || []).toHaveLength(2);
+    const resolverStart = source.indexOf('function resolveRatingSbcChallenge');
+    const resolverEnd = source.indexOf('function validateRatingSbcModelAgainstItems', resolverStart);
+    const resolver = source.slice(resolverStart, resolverEnd);
+    expect(resolver).toContain('const model = parseRatingSbcChallenge(loopDef, challenge)');
+    expect(resolver).toContain('applyRequiredSpecialAllowanceModel(loopDef, model)');
+    expect(source.match(/\bresolveRatingSbcChallenge\(/g) || []).toHaveLength(7);
+  });
+
   it('uses the current product name for Console logging', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     expect(source).toContain("const CONSOLE_PREFIX = '[DailyLoopRunner]';");

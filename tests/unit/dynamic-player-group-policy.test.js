@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { parseRollingStorageSinkSnapshot } from '../../src/config/rolling-upgrade.js';
+import { materializeDynamicUpgradeChallengeLoopDef } from '../../src/config/upgrade-discovery.js';
 import { createInventorySnapshot } from '../../src/domain/contracts.js';
+import { storageSinkRequiredSpecialRoles } from '../../src/selection/multi-squad-rating.js';
 import { loadUserscript, makePlayer } from '../helpers/load-userscript.js';
 
 function requirement(key, values, count = -1, matcher = null) {
@@ -12,6 +15,132 @@ function requirement(key, values, count = -1, matcher = null) {
 }
 
 describe('dynamic EA player-group policy', () => {
+  it('carries an expanded group-83 contract through automatic Storage Sink discovery and planning', async () => {
+    const specials = Array.from({ length: 11 }, (_, index) => makePlayer({
+      id: 12000 + index,
+      definitionId: 22000 + index,
+      rating: 89,
+      rareflag: 120 + index,
+      groups: [19, 83],
+      name: `Discovered Sink Special ${index + 1}`,
+    }));
+    const discovered = parseRollingStorageSinkSnapshot({
+      set: {
+        id: 4000,
+        name: 'Rafael Leao',
+        rewards: [{ type: 'PLAYER', resourceId: 5000, name: 'Rafael Leao' }],
+        challenges: [{
+          id: 4006,
+          requiredPlayerCount: 11,
+          eligibilityRequirements: [
+            { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+            { key: 'TEAM_RATING', values: [89], count: -1 },
+          ],
+        }],
+      },
+    });
+    expect(discovered.status).toBe('supported');
+    const liveChallenge = {
+      id: 4006,
+      requiredPlayerCount: 11,
+      squad: { getNumOfRequiredPlayers: () => 11 },
+      eligibilityRequirements: [
+        requirement('PLAYER_RARITY_GROUP', [83], 1),
+        requirement('TEAM_RATING', [89]),
+      ],
+    };
+    const activeLoopDef = {
+      ...materializeDynamicUpgradeChallengeLoopDef(discovered.capability.loop, liveChallenge),
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 97 },
+      ratingSbcFill: { priorityPiles: ['storage'], targetRating: 89 },
+    };
+    const { api } = await loadUserscript({ storage: specials });
+    const model = api.resolveRatingSbcChallenge(activeLoopDef, liveChallenge);
+    const exclusiveRoles = storageSinkRequiredSpecialRoles(model);
+    const candidates = api.buildRatingSbcCandidateEntries(activeLoopDef, model, { exclusiveRoles });
+    const selection = await api.findOptimalRatingSbcSelection(
+      candidates.entries,
+      model,
+      candidates.piles,
+      {
+        selectionPolicy: {
+          exclusiveRoles,
+          maxPlayerRating: 97,
+          maxOrdinaryRating: 97,
+          protectionPolicy: { allowOtherSpecialAsOrdinary: true },
+        },
+      },
+    );
+
+    expect(activeLoopDef).toMatchObject({
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 11,
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+    });
+    expect(model).toMatchObject({
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+      maxSpecialCount: 11,
+    });
+    expect(exclusiveRoles).toEqual([
+      expect.objectContaining({ minCount: 1, maxCount: 11 }),
+    ]);
+    expect(selection).toMatchObject({ ok: true });
+    expect(selection.selected).toHaveLength(11);
+    expect(selection.selected.every((item) => item.groups.includes(83))).toBe(true);
+  });
+
+  it('keeps an automatically discovered group-83 Storage Sink fail-closed without live matching material', async () => {
+    const discovered = parseRollingStorageSinkSnapshot({
+      set: {
+        id: 4010,
+        name: 'Fail-closed Player SBC',
+        rewards: [{ type: 'PLAYER', resourceId: 5010, name: 'Player Reward' }],
+        challenges: [{
+          id: 4016,
+          requiredPlayerCount: 11,
+          eligibilityRequirements: [
+            { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+            { key: 'TEAM_RATING', values: [89], count: -1 },
+          ],
+        }],
+      },
+    });
+    const liveChallenge = {
+      id: 4016,
+      requiredPlayerCount: 11,
+      squad: { getNumOfRequiredPlayers: () => 11 },
+      eligibilityRequirements: [
+        requirement('PLAYER_RARITY_GROUP', [83], 1),
+        requirement('TEAM_RATING', [89]),
+      ],
+    };
+    const activeLoopDef = {
+      ...materializeDynamicUpgradeChallengeLoopDef(discovered.capability.loop, liveChallenge),
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 97 },
+    };
+    const ordinaryGolds = Array.from({ length: 11 }, (_, index) => makePlayer({
+      id: 13000 + index,
+      rating: 89,
+      rareflag: 1,
+      groups: [4],
+    }));
+    const { api } = await loadUserscript({ storage: ordinaryGolds });
+    const model = api.resolveRatingSbcChallenge(activeLoopDef, liveChallenge);
+
+    expect(activeLoopDef).toMatchObject({
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      requiredSpecialAllowanceMode: 'required-only',
+    });
+    expect(model).toMatchObject({
+      requiredSpecialAllowanceMode: 'required-only',
+      maxSpecialCount: 1,
+    });
+    expect(storageSinkRequiredSpecialRoles(model)).toEqual([
+      expect.objectContaining({ minCount: 1, maxCount: 1 }),
+    ]);
+  });
+
   it('uses the Rolling protection rating for Storage Pressure candidates', async () => {
     const { api } = await loadUserscript();
     const active = api.rollingStorageSinkLoopDefForPiles({

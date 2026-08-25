@@ -496,6 +496,37 @@ describe('role-aware rating selection policy', () => {
     expect(JSON.stringify(plan.diagnostics)).not.toContain('definitionId');
   });
 
+  it('does not report an unconstrained rating ceiling as a feasible role-valid squad', async () => {
+    const entries = Array.from({ length: 11 }, (_, index) => entry(index + 1, 97, {
+      special: true,
+      requirementMatches: [true],
+    }));
+    const plan = await select(entries, {
+      ratingModel: {
+        requiredPlayerCount: 11,
+        targetRating: 89,
+        maxSpecialCount: 1,
+        constraints: [{ id: 'required-special', label: 'PLAYER_RARITY_GROUP 83 x1', count: 1 }],
+      },
+      selection: {
+        exclusiveRoles: [{
+          id: 'required-special',
+          constraintId: 'required-special',
+          minCount: 1,
+          maxCount: 1,
+        }],
+      },
+    });
+
+    expect(plan).toMatchObject({
+      ok: false,
+      missing: { code: 'SQUAD_RATING_SHORTAGE' },
+      details: { reasonCode: 'SQUAD_RATING_SHORTAGE' },
+    });
+    expect(plan.missing.reason).toContain('no policy- and role-valid squad reaches rating 89');
+    expect(plan.missing.reason).toContain('role-unconstrained candidate ceiling 97');
+  });
+
   it('distinguishes an unavailable mandatory item from an ordinary player shortage', async () => {
     const plan = await select([
       entry(1, 84),

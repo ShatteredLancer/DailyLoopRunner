@@ -116,7 +116,6 @@ import {
   buildRollingStorageSinkCatalog,
   ROLLING_PROVISIONS_RATING_RANGE,
   ROLLING_PROVISIONS_RECOVERY_MODES,
-  ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING,
   resolveRollingRecoveryPriorityPiles,
   resolveRollingAutomaticUseMaxRating,
   resolveRollingProvisionsRecoveryMode,
@@ -5021,6 +5020,7 @@ function updateLoopControls() {
         storageSinkSelection: {
           mode: pickOptions.rollingStorageSinkMode,
           setId: pickOptions.rollingStorageSinkSetId,
+          setName: pickOptions.rollingStorageSinkSetName,
         },
       },
     );
@@ -5086,10 +5086,20 @@ function updateLoopControls() {
         ? `${loopDef.rollingPlayerPick.status}/${pickSelection.minimumRareGoldCost} rare/${pickSelection.totalGoldCost} gold/${pickSelection.rewardMinRating}+/${loopDef.rollingPlayerPick.alternatives?.length || 0} alternate(s)`
         : loopDef.rollingPlayerPick?.status || 'unavailable';
       const storageSink = loopDef.rollingStorageSink;
+      const configuredStorageSink = storageSink?.mode === 'selected'
+        ? `${storageSink.selectedSetName || 'unnamed'} (Set #${storageSink.selectedSetId || '?'})`
+        : storageSink?.mode || 'off';
+      const boundStorageSink = storageSink?.capability
+        ? `${storageSink.capability.setName || 'unnamed'} (Set #${storageSink.capability.setId || '?'})`
+        : 'none';
+      const storageSinkChallenges = (storageSink?.capability?.challenges || [])
+        .map((challenge) => `#${challenge.challengeId || '?'}@${challenge.targetRating || '?'}${challenge.completed ? '/complete' : '/incomplete'}`)
+        .join(', ') || 'none';
       const storageSinkSummary = storageSink?.status === 'resolved'
         ? `${storageSink.mode}/${storageSink.capability?.setName || `Set #${storageSink.capability?.setId || '?'}`}/${storageSink.capability?.rewardKind || '?'}`
         : `${storageSink?.mode || 'off'}/${storageSink?.status || 'unavailable'}`;
       log(`Dynamic SBC scan: added selectable Rolling Loop ${loopDef.name} (primary Set #${loopDef.sbcSetIds?.[0] || '?'}; TOTW:${loopDef.rollingTotwUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Provisions:${loopDef.rollingProvisionsUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Rare Gold Pick:${pickSummary}; Storage pressure SBC:${storageSinkSummary}; Gold sink:${loopDef.rollingGoldSinkUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'})`);
+      log(`Dynamic SBC scan: Storage pressure binding for ${loopDef.name}: configured ${configuredStorageSink}; status:${storageSink?.status || 'unavailable'}; bound ${boundStorageSink}; challenges ${storageSinkChallenges}; alternatives:${storageSink?.alternatives?.length || 0}`);
     }
     for (const activity of activitySession.activities) {
       const sink = activity.materialSink;
@@ -5904,6 +5914,12 @@ function updateLoopControls() {
         probeRequiredSpecialAllowanceMode(loopDef, challenge, entry)
       ),
     });
+  }
+
+  function resolveRatingSbcChallenge(loopDef, challenge) {
+    const model = parseRatingSbcChallenge(loopDef, challenge);
+    applyRequiredSpecialAllowanceModel(loopDef, model);
+    return model;
   }
 
   function validateRatingSbcModelAgainstItems(model, items = [], challenge = null, options = {}) {
@@ -7539,7 +7555,7 @@ function updateLoopControls() {
       };
     }
 
-    const model = parseRatingSbcChallenge(loopDef, challenge);
+    const model = resolveRatingSbcChallenge(loopDef, challenge);
     const groupMatcherErrors = (model.unsupported || []).filter((entry) => String(entry).startsWith('PLAYER_RARITY_GROUP'));
     const groupConstraints = eaRequiredSpecialConstraints(model);
     if (groupMatcherErrors.length || !groupConstraints.length) {
@@ -9565,7 +9581,7 @@ function updateLoopControls() {
       await refreshInventoryCaches(`${loopDef.name} rating SBC fill`, { includePacks: false, quiet: true });
       log(`${loopDef.name}: rating inventory refresh complete in ${Date.now() - startedAt}ms`);
     }
-    const model = parseRatingSbcChallenge(loopDef, opened.challenge);
+    const model = resolveRatingSbcChallenge(loopDef, opened.challenge);
     logRatingSbcModel(loopDef, model);
     const fodderPolicy = getSbcFodderPolicy(loopDef);
     log(`${loopDef.name}: rating-constrained fodder cap applies to every card at rating <= ${fodderPolicy.ratingSbcMaxCardRating}; FSU Gold rating range is ignored while other FSU protections remain active`);
@@ -13496,12 +13512,19 @@ function updateLoopControls() {
   }
 
   function applyRequiredSpecialAllowanceModel(loopDef, model) {
+    const requiredSpecialConstraints = (model.constraints || [])
+      .filter(isRequiredSpecialConstraint);
+    if (!requiredSpecialConstraints.length) return loopDef;
+    const requiredSpecialCount = requiredSpecialConstraints.reduce((total, constraint) => (
+      total + Math.max(0, Number(constraint.count || 0) || 0)
+    ), 0);
+    loopDef.requiredSpecialCount = requiredSpecialCount;
     loopDef.requiredSpecialAllowanceMode = model.requiredSpecialAllowanceMode;
     loopDef.requiredSpecialAllowanceDecisionSource = model.requiredSpecialAllowanceDecisionSource;
     loopDef.allowedSpecialCount = model.requiredSpecialAllowanceMode
       === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
       ? Number(model.requiredPlayerCount || loopDef.expectedPlayerCount || 0)
-      : Number(loopDef.requiredSpecialCount || 0);
+      : requiredSpecialCount;
     return loopDef;
   }
 
@@ -13841,8 +13864,7 @@ function updateLoopControls() {
       materializeDynamicUpgradeChallengeLoopDef(loopDef, challenge),
       loopDef,
     );
-    const model = parseRatingSbcChallenge(activeLoopDef, challenge);
-    applyRequiredSpecialAllowanceModel(activeLoopDef, model);
+    const model = resolveRatingSbcChallenge(activeLoopDef, challenge);
     logRollingRequiredSpecialContract(set, challenge, activeLoopDef, model);
     if (model.unsupported.length) {
       return {
@@ -14412,7 +14434,7 @@ function updateLoopControls() {
       : await loadRatingSbcChallenge(challengeContext.challenge, definition.name, { force: true });
     if (!challenge) return { status: 'unavailable', reason: `${definition.name} challenge could not be loaded` };
     const activeLoopDef = materializeDynamicUpgradeChallengeLoopDef(definition, challenge);
-    const model = parseRatingSbcChallenge(activeLoopDef, challenge);
+    const model = resolveRatingSbcChallenge(activeLoopDef, challenge);
     if (model.unsupported.length || !model.targetRating || !model.requiredPlayerCount) {
       return {
         status: 'blocked',
@@ -16663,7 +16685,7 @@ function updateLoopControls() {
         ...materializeDynamicUpgradeChallengeLoopDef(pickDef, challenge),
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
       }, loopDef);
-      const model = parseRatingSbcChallenge(activeLoopDef, challenge);
+      const model = resolveRatingSbcChallenge(activeLoopDef, challenge);
       if (model.unsupported.length || !model.targetRating || !model.requiredPlayerCount) {
         return {
           status: 'blocked',
@@ -17775,10 +17797,6 @@ function updateLoopControls() {
 
     const contexts = [];
     for (const sourceChallenge of incomplete) {
-      const snapshot = eaSbcAdapter().snapshotDiscoverySet(set, [sourceChallenge])?.challenges?.[0] || {};
-      const snapshotRating = Number((snapshot.eligibilityRequirements || [])
-        .find((requirement) => requirement?.key === 'TEAM_RATING')?.values?.[0] || 0);
-      if (snapshotRating < ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING) continue;
       const challenge = sinkDef.dryRun
         ? sourceChallenge
         : await loadRatingSbcChallengeForSet(set, sourceChallenge, sinkDef.name);
@@ -17793,7 +17811,7 @@ function updateLoopControls() {
         ...materializeDynamicUpgradeChallengeLoopDef(sinkDef, challenge),
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
       }, loopDef);
-      const model = parseRatingSbcChallenge(activeLoopDef, challenge);
+      const model = resolveRatingSbcChallenge(activeLoopDef, challenge);
       if (model.unsupported.length || !model.targetRating || !model.requiredPlayerCount) {
         return {
           status: 'blocked',
@@ -17801,7 +17819,6 @@ function updateLoopControls() {
           reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
         };
       }
-      if (Number(model.targetRating) < ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING) continue;
       contexts.push({
         set,
         challenge,
@@ -17810,11 +17827,12 @@ function updateLoopControls() {
         model,
         targetRating: Number(model.targetRating || 0),
       });
+      break;
     }
     if (!contexts.length) {
       return {
         status: 'unavailable',
-        reason: `${sinkDef.name} has no incomplete ${ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING}+ rating squad`,
+        reason: `${sinkDef.name} has no supported incomplete rating squad`,
         reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
       };
     }
@@ -18163,6 +18181,75 @@ function updateLoopControls() {
     return Number(capability.setId || capability.loop?.sbcSetIds?.[0] || 0);
   }
 
+  function rollingStorageSinkSelectedIdentity(loopDef = {}, definition = {}) {
+    const setId = Number(
+      loopDef.rollingStorageSinkSetId
+        || definition.selectedSetId
+        || rollingStorageSinkCapabilitySetId(definition.capability)
+        || 0,
+    );
+    const setName = String(
+      loopDef.rollingStorageSinkSetName
+        || definition.selectedSetName
+        || definition.capability?.setName
+        || '',
+    ).trim();
+    return { setId, setName };
+  }
+
+  function rollingStorageSinkBindingDiagnostic(loopDef = {}, definition = {}) {
+    const mode = loopDef.rollingStorageSinkMode || definition.mode || 'automatic';
+    const selected = rollingStorageSinkSelectedIdentity(loopDef, definition);
+    const bound = rollingStorageSinkCapabilities(definition).map((capability) => ({
+      setId: rollingStorageSinkCapabilitySetId(capability),
+      setName: capability.setName || '',
+    }));
+    const matching = mode === 'selected'
+      ? bound.filter((capability) => capability.setId === selected.setId)
+      : bound;
+    return {
+      mode,
+      selected,
+      bound,
+      matching,
+      valid: mode !== 'selected'
+        || (selected.setId > 0 && bound.length === 1 && matching.length === 1),
+    };
+  }
+
+  function rollingStorageSinkAttemptFingerprint(runtime = {}) {
+    const summary = runtime.coordinator?.getLedger?.()?.summary?.();
+    const inventoryVersion = Number(summary?.inventoryVersion);
+    if (!Number.isFinite(inventoryVersion)) return null;
+    const itemKey = (item) => `${Number(item?.id || 0)}:${Number(item?.definitionId || 0)}`;
+    const pendingStorage = (runtime.openRouting?.storageItems || [])
+      .map(itemKey)
+      .sort()
+      .join(',');
+    const primaryDuplicates = (runtime.primaryDuplicateRefs || [])
+      .map(itemKey)
+      .sort()
+      .join(',');
+    return [
+      inventoryVersion,
+      Number(summary?.capacities?.storage?.free ?? -1),
+      pendingStorage,
+      primaryDuplicates,
+      runtime.duplicateSwapEnabled === true ? 'swap:on' : 'swap:off',
+      String(runtime.duplicateSwapMode || ''),
+    ].join('|');
+  }
+
+  function rollingStorageSinkStateBoundFailure(result = {}) {
+    return new Set([
+      'RECOVERY_STORAGE_PRESSURE_INFEASIBLE',
+      'RECOVERY_STORAGE_HEADROOM_INSUFFICIENT',
+      'RECOVERY_MATERIAL_SHORTAGE',
+      'SQUAD_RATING_SHORTAGE',
+      'REQUIRED_SPECIAL_SHORTAGE',
+    ]).has(String(result.reasonCode || result.missing?.code || ''));
+  }
+
   function rollingStorageSinkFailure(unavailable = [], options = {}) {
     const failureCodes = [...new Set(unavailable.map(({ result }) => result?.reasonCode).filter(Boolean))];
     const specificFailure = unavailable.length && failureCodes.length === 1
@@ -18223,6 +18310,19 @@ function updateLoopControls() {
         status: 'unavailable',
         reason: 'live SBC metadata refresh found no validated Storage pressure SBC capability',
         reasonCode: 'NO_STORAGE_SINK_AVAILABLE',
+      };
+    }
+    const binding = rollingStorageSinkBindingDiagnostic(loopDef, definition);
+    if (!binding.valid) {
+      const selectedName = binding.selected.setName || `Set #${binding.selected.setId || '?'}`;
+      const bound = binding.bound.map(({ setId, setName }) => (
+        `${setName || 'unnamed'} (Set #${setId || '?'})`
+      )).join(', ') || 'none';
+      return {
+        status: 'unavailable',
+        reason: `live SBC metadata did not bind selected ${selectedName} to Set #${binding.selected.setId || '?'}; bound:${bound}`,
+        reasonCode: 'STORAGE_SINK_BINDING_MISMATCH',
+        details: binding,
       };
     }
     const exhaustedSetIds = runtime.storageSinkExhaustedSetIds || new Set();
@@ -18420,6 +18520,8 @@ function updateLoopControls() {
   async function runRollingStorageSinkRecovery(loopDef, runtime, definition, options = {}) {
     const exhaustedSetIds = runtime.storageSinkExhaustedSetIds
       || (runtime.storageSinkExhaustedSetIds = new Set());
+    const failedAttempts = runtime.storageSinkFailedAttempts
+      || (runtime.storageSinkFailedAttempts = new Map());
     const runCapability = options.runCapability || (async (capability) => (
       capability.legacy95
         ? runRollingLegacyStorageSinkRecovery(
@@ -18429,10 +18531,61 @@ function updateLoopControls() {
           )
         : runRollingGenericStorageSinkRecovery(loopDef, runtime, capability)
     ));
+    let binding = rollingStorageSinkBindingDiagnostic(loopDef, definition);
+    if (binding.mode === 'selected' && !binding.valid) {
+      const selectedName = binding.selected.setName || `Set #${binding.selected.setId || '?'}`;
+      const bound = binding.bound.map(({ setId, setName }) => (
+        `${setName || 'unnamed'} (Set #${setId || '?'})`
+      )).join(', ') || 'none';
+      log(`${loopDef.name}: Storage pressure binding mismatch: configured ${selectedName} (Set #${binding.selected.setId || '?'}); bound ${bound}`);
+      if (options.allowRefresh !== false && runtime.storageSinkRefreshAttempted !== true) {
+        runtime.storageSinkRefreshAttempted = true;
+        const refreshCapabilities = options.refreshCapabilities || refreshRollingStorageSinkCapabilities;
+        const refreshed = await refreshCapabilities(loopDef, runtime);
+        if (refreshed?.status === 'stopped') return refreshed;
+        if (refreshed?.status === 'ready') {
+          return runRollingStorageSinkRecovery(
+            loopDef,
+            runtime,
+            refreshed.definition,
+            { ...options, allowRefresh: false },
+          );
+        }
+        const reason = `${selectedName} (Set #${binding.selected.setId || '?'}) is not bound to an executable live Storage pressure challenge; choose another Storage pressure SBC in Settings`;
+        log(`${loopDef.name}: ${reason}`);
+        return {
+          status: 'blocked',
+          reason,
+          reasonCode: 'STORAGE_SINK_SELECTION_REQUIRED',
+          details: {
+            selectedSetId: binding.selected.setId || null,
+            selectedSetName: binding.selected.setName || selectedName,
+            boundCapabilities: binding.bound,
+            previousReason: refreshed?.reason || null,
+            previousReasonCode: refreshed?.reasonCode || 'STORAGE_SINK_BINDING_UNAVAILABLE',
+            runtimeRefreshAttempted: true,
+          },
+        };
+      }
+      const reason = `${selectedName} (Set #${binding.selected.setId || '?'}) is not bound to an executable live Storage pressure challenge; choose another Storage pressure SBC in Settings`;
+      return {
+        status: 'blocked',
+        reason,
+        reasonCode: 'STORAGE_SINK_SELECTION_REQUIRED',
+        details: {
+          selectedSetId: binding.selected.setId || null,
+          selectedSetName: binding.selected.setName || selectedName,
+          boundCapabilities: binding.bound,
+          previousReasonCode: 'STORAGE_SINK_BINDING_MISMATCH',
+          runtimeRefreshAttempted: runtime.storageSinkRefreshAttempted === true,
+        },
+      };
+    }
     const unavailable = [];
     for (const capability of rollingStorageSinkCapabilities(definition)) {
       const setId = rollingStorageSinkCapabilitySetId(capability);
       if (setId && exhaustedSetIds.has(setId)) {
+        log(`${loopDef.name}: Storage pressure candidate ${capability.setName || `Set #${setId}`} (Set #${setId}) is already exhausted for this session`);
         unavailable.push({
           capability,
           result: {
@@ -18444,20 +18597,74 @@ function updateLoopControls() {
         if (definition?.mode === 'selected') break;
         continue;
       }
+      const attemptFingerprint = rollingStorageSinkAttemptFingerprint(runtime);
+      const previousFailure = setId ? failedAttempts.get(setId) : null;
+      if (attemptFingerprint && previousFailure?.fingerprint === attemptFingerprint) {
+        const result = {
+          status: 'unavailable',
+          reason: `${capability.setName || `Set #${setId}`} is unchanged since its last infeasible Storage pressure plan; trying another candidate`,
+          reasonCode: 'STORAGE_SINK_STATE_UNCHANGED',
+          details: {
+            setId,
+            previousReason: previousFailure.reason || null,
+            previousReasonCode: previousFailure.reasonCode || null,
+          },
+        };
+        log(`${loopDef.name}: skipped unchanged infeasible Storage pressure candidate ${capability.setName || `Set #${setId}`} (Set #${setId})`);
+        unavailable.push({ capability, result });
+        if (definition?.mode === 'selected') break;
+        continue;
+      }
       const result = await runCapability(capability);
+      if (result?.status === 'unavailable') {
+        log(`${loopDef.name}: Storage pressure candidate ${capability.setName || `Set #${setId || '?'}`} (Set #${setId || '?'}) unavailable [${result.reasonCode || result.missing?.code || 'unknown'}]: ${result.reason || 'no reason reported'}`);
+      }
       if (result?.reasonCode === 'STORAGE_SINK_COMPLETED' && setId) {
         exhaustedSetIds.add(setId);
         log(`${loopDef.name}: Storage pressure SBC exhausted for this session: ${capability.setName || `Set #${setId}`} (Set #${setId})`);
+      }
+      if (setId && attemptFingerprint && result?.status === 'unavailable'
+        && rollingStorageSinkStateBoundFailure(result)) {
+        failedAttempts.set(setId, {
+          fingerprint: attemptFingerprint,
+          reason: result.reason || null,
+          reasonCode: result.reasonCode || result.missing?.code || null,
+        });
+      } else if (setId && result?.status !== 'unavailable') {
+        failedAttempts.delete(setId);
       }
       if (result?.status !== 'unavailable') return result;
       unavailable.push({ capability, result });
       if (definition?.mode === 'selected') break;
     }
     if (definition?.mode === 'selected') {
-      return rollingStorageSinkFailure(unavailable, {
+      const failure = rollingStorageSinkFailure(unavailable, {
         exhaustedSetIds,
         preserveSpecific: true,
       });
+      if (!['STORAGE_SINK_COMPLETED', 'LIVE_REQUIREMENT_UNAVAILABLE']
+        .includes(failure.reasonCode)) return failure;
+      const selected = definition.capability || rollingStorageSinkCapabilities(definition)[0] || {};
+      binding = rollingStorageSinkBindingDiagnostic(loopDef, definition);
+      const selectedSetId = binding.selected.setId || rollingStorageSinkCapabilitySetId(selected);
+      const selectedSetName = binding.selected.setName || selected.setName || `Set #${selectedSetId || '?'}`;
+      const reason = failure.reasonCode === 'STORAGE_SINK_COMPLETED'
+        ? `${selectedSetName} is exhausted; choose another Storage pressure SBC in Settings`
+        : `${selectedSetName} has no executable live Storage pressure challenge; choose another Storage pressure SBC in Settings`;
+      log(`${loopDef.name}: ${reason}`);
+      return {
+        ...failure,
+        status: 'blocked',
+        reason,
+        reasonCode: 'STORAGE_SINK_SELECTION_REQUIRED',
+        details: {
+          ...(failure.details || {}),
+          selectedSetId: selectedSetId || null,
+          selectedSetName,
+          previousReason: failure.reason || null,
+          previousReasonCode: failure.reasonCode,
+        },
+      };
     }
     if (options.allowRefresh !== false && runtime.storageSinkRefreshAttempted !== true) {
       runtime.storageSinkRefreshAttempted = true;
@@ -20216,18 +20423,45 @@ function updateLoopControls() {
       rounds = quantity?.mode === 'user'
         ? Math.max(quantity.min, Math.min(quantity.max, Number(input?.value || quantity.default) || quantity.default))
         : 1;
-      applyLoopRuntimeOptions(loopDef, {
+      const runtimeOptions = {
         rounds,
         openRewardPacks: isOpenRewardPacksEnabled(),
         inventoryOnly: document.querySelector('#bronze-loop-daily-inventory-only')?.checked === true,
         pickOptions: getPickRuntimeOptions(),
         sbcFodderPolicy: getSbcFodderRuntimeOptions(),
-      });
+      };
+      applyLoopRuntimeOptions(loopDef, runtimeOptions);
+      let storageSinkBinding = rollingStorageSinkBindingDiagnostic(
+        loopDef,
+        loopDef.rollingStorageSink,
+      );
+      if (loopDef.strategy === 'rollingUpgrade'
+        && loopDef.rollingStorageSinkEnabled === true
+        && storageSinkBinding.mode === 'selected'
+        && !storageSinkBinding.valid) {
+        const selectedName = storageSinkBinding.selected.setName
+          || `Set #${storageSinkBinding.selected.setId || '?'}`;
+        const bound = storageSinkBinding.bound.map(({ setId, setName }) => (
+          `${setName || 'unnamed'} (Set #${setId || '?'})`
+        )).join(', ') || 'none';
+        log(`${loopDef.name}: selected Storage pressure binding is stale before start; configured ${selectedName} (Set #${storageSinkBinding.selected.setId || '?'}), bound ${bound}; refreshing live metadata once`);
+        await scanAvailableDynamicSbcs({ forceFull: true, updateUi: false });
+        loopDef = getSelectedLoopDef();
+        applyLoopRuntimeOptions(loopDef, runtimeOptions);
+        storageSinkBinding = rollingStorageSinkBindingDiagnostic(
+          loopDef,
+          loopDef.rollingStorageSink,
+        );
+        const refreshedBound = storageSinkBinding.bound.map(({ setId, setName }) => (
+          `${setName || 'unnamed'} (Set #${setId || '?'})`
+        )).join(', ') || 'none';
+        log(`${loopDef.name}: selected Storage pressure binding after refresh: configured ${storageSinkBinding.selected.setName || 'unnamed'} (Set #${storageSinkBinding.selected.setId || '?'}); bound ${refreshedBound}; status:${storageSinkBinding.valid ? 'ready' : 'unavailable'}`);
+      }
       assertRollingRuntimePreflight(loopDef);
       const fodderPolicy = getSbcFodderPolicy(loopDef);
       if (loopDef.strategy === 'rollingUpgrade') {
         const storageSinkSummary = loopDef.rollingStorageSinkEnabled
-          ? `${loopDef.rollingStorageSink?.mode || 'automatic'}/${loopDef.rollingStorageSink?.capability?.setName || 'unavailable'}`
+          ? `${loopDef.rollingStorageSink?.mode || 'automatic'}/configured:${loopDef.rollingStorageSinkSetName || `Set #${loopDef.rollingStorageSinkSetId || '?'}`}/bound:${loopDef.rollingStorageSink?.capability?.setName || 'unavailable'} (Set #${loopDef.rollingStorageSink?.capability?.setId || '?'})`
           : 'off';
         log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Storage recovery priority ${loopDef.rollingStorageRecoveryPriority === 'provisions' ? 'Provisions-first' : 'Storage-Pressure-first'}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Club current-pool Provisions ${loopDef.rollingAllowClubCurrentPoolSpecialsForProvisions && !loopDef.rollingProtectAllClubNonTotwSpecials ? 'last-resort allowed' : 'off'}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || 'special-only'})` : 'off; Storage route only'}; Storage pressure SBC ${storageSinkSummary}`);
       } else {

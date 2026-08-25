@@ -1,6 +1,9 @@
 import { cloneLoopDef, isPlainObject } from '../domain/objects.js';
 import {
   REQUIRED_SPECIAL_ALLOWANCE_MODES,
+  REQUIRED_SPECIAL_ALLOWANCE_SOURCES,
+  isRequiredSpecialEligibilityRequirement,
+  requiredSpecialAllowanceMode,
   resolvedRequiredSpecialAllowanceMode,
 } from '../domain/required-special.js';
 import {
@@ -242,11 +245,40 @@ function storageSinkNameMatches(set = {}, reward = {}) {
 }
 
 function challengeSnapshot(challenge = {}) {
+  const requiredPlayerCount = positiveInteger(challenge.requiredPlayerCount);
+  const eligibilityRequirements = (challenge.eligibilityRequirements || challenge.requirements || [])
+    .map((requirement) => {
+      const key = eligibilityKey(requirement);
+      const values = eligibilityValues(requirement);
+      const rawCount = Number(requirement?.count);
+      const count = rawCount === -1 || !Number.isFinite(rawCount)
+        ? requiredPlayerCount
+        : Math.max(0, rawCount);
+      return {
+        ...clone(requirement),
+        key,
+        values,
+        count,
+      };
+    });
+  const requiredSpecialRequirements = eligibilityRequirements
+    .filter(isRequiredSpecialEligibilityRequirement);
+  const specialCount = requiredSpecialRequirements.reduce((total, requirement) => (
+    total + Math.max(0, Number(requirement.count || 0) || 0)
+  ), 0);
+  const specialAllowanceMode = requiredSpecialAllowanceMode(eligibilityRequirements);
   return {
     ...clone(challenge),
     challengeId: positiveInteger(challenge.id),
-    requiredPlayerCount: positiveInteger(challenge.requiredPlayerCount),
+    requiredPlayerCount,
     targetRating: challengeTargetRating(challenge),
+    specialCount,
+    requiredSpecialAllowanceMode: specialAllowanceMode,
+    requiredSpecialAllowanceDecisionSource: specialAllowanceMode
+      === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
+      ? REQUIRED_SPECIAL_ALLOWANCE_SOURCES.EXPLICIT_METADATA
+      : REQUIRED_SPECIAL_ALLOWANCE_SOURCES.FAIL_CLOSED,
+    eligibilityRequirements,
   };
 }
 
@@ -406,13 +438,19 @@ export function parseRollingStorageSinkSnapshot(input = {}) {
     input.minimumChallengeRating || ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING,
   ) || ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING);
   const allChallenges = (set.challenges || []).map(challengeSnapshot);
-  const challenges = allChallenges.filter((challenge) => Number(challenge.targetRating || 0) >= minimumTarget);
-  if (!challenges.length) {
+  const qualifyingChallenges = allChallenges.filter(
+    (challenge) => Number(challenge.targetRating || 0) >= minimumTarget,
+  );
+  if (!qualifyingChallenges.length) {
     return { status: 'ignored', setId, diagnostics: [`no Challenge has a target rating of ${minimumTarget}+`] };
   }
+  // The threshold admits a Set as a Storage Sink. Once admitted, every remaining
+  // rating squad in that Set must stay executable so a lower-rated final squad
+  // cannot make a partially completed Set look exhausted.
+  const challenges = allChallenges;
   const actionableChallenges = challenges.filter((challenge) => !completedChallenge(challenge));
   if (!actionableChallenges.length) {
-    return { status: 'ignored', setId, diagnostics: [`no incomplete Challenge has a target rating of ${minimumTarget}+`] };
+    return { status: 'ignored', setId, diagnostics: ['no incomplete Challenge remains'] };
   }
   const diagnostics = [];
   if (!setId) diagnostics.push('stable SBC Set id is missing');
@@ -420,6 +458,7 @@ export function parseRollingStorageSinkSnapshot(input = {}) {
     if (completedChallenge(challenge)) return;
     if (!challenge.challengeId) diagnostics.push(`challenge ${index + 1}: stable Challenge id is missing`);
     if (!challenge.requiredPlayerCount) diagnostics.push(`challenge ${index + 1}: required player count is missing`);
+    if (!challenge.targetRating) diagnostics.push(`challenge ${index + 1}: target rating is missing`);
     if (!Array.isArray(challenge.eligibilityRequirements) || !challenge.eligibilityRequirements.length) {
       diagnostics.push(`challenge ${index + 1}: eligibility requirements are missing`);
     }
@@ -477,6 +516,10 @@ export function resolveRollingStorageSinkCapability(sets = [], selection = {}) {
     : 'automatic';
   if (mode === 'off') return { status: 'disabled', mode, alternatives: [], results: [] };
   const selectedSetId = positiveInteger(selection.setId);
+  const selectedSetName = normalizedText(selection.setName);
+  const selectedIdentity = mode === 'selected'
+    ? { selectedSetId, selectedSetName }
+    : {};
   const sourceSets = mode === 'selected'
     ? (sets || []).filter((set) => positiveInteger(set?.id) === selectedSetId)
     : sets || [];
@@ -488,10 +531,19 @@ export function resolveRollingStorageSinkCapability(sets = [], selection = {}) {
     .filter((result) => result.status === 'supported')
     .map((result) => result.capability)
     .sort(storageSinkCapabilityRank);
-  if (!capabilities.length) return { status: 'unavailable', mode, alternatives: [], results };
+  if (!capabilities.length) {
+    return {
+      status: 'unavailable',
+      mode,
+      ...selectedIdentity,
+      alternatives: [],
+      results,
+    };
+  }
   return {
     status: 'resolved',
     mode,
+    ...selectedIdentity,
     capability: capabilities[0],
     alternatives: capabilities.slice(1),
     results,
@@ -795,6 +847,10 @@ export function bindRollingStorageSinkCapability(loopDef = {}, sets = [], select
     status: resolution.status,
     required: false,
     mode: resolution.mode,
+    ...(resolution.mode === 'selected' ? {
+      selectedSetId: resolution.selectedSetId,
+      selectedSetName: resolution.selectedSetName,
+    } : {}),
   };
   if (resolution.capability) result.rollingStorageSink.capability = clone(resolution.capability);
   if (resolution.alternatives?.length) {

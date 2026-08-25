@@ -2052,7 +2052,11 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.planPrimarySquad).not.toHaveBeenCalled();
   });
 
-  it('reports an exhausted selected Storage Sink instead of the original Storage block', async () => {
+  it('stops for a new Storage Sink selection instead of falling back to Provisions', async () => {
+    const recoverProvisions = vi.fn(async () => ({
+      status: 'submitted',
+      submitted: true,
+    }));
     const options = harness({
       storageSinkEnabled: true,
       resolveProtectedStorage: vi.fn(async () => ({
@@ -2060,26 +2064,34 @@ describe('10x85+ Rolling workflow', () => {
         reason: 'SBC storage has 0 free slots, but 2 protected cards require storage',
         reasonCode: 'PROTECTED_STORAGE_BLOCKED',
       })),
-      recoverProvisions: vi.fn(async () => ({
-        status: 'unavailable',
-        reasonCode: 'RECOVERY_STORAGE_HEADROOM_INSUFFICIENT',
-      })),
+      recoverProvisions,
       recoverStorageSink: vi.fn(async () => ({
-        status: 'unavailable',
-        reason: '1 of 4 95+ Player Pick is already complete and has no incomplete Storage pressure challenge',
-        reasonCode: 'STORAGE_SINK_COMPLETED',
-        details: { completedCount: 2, totalChallengeCount: 2 },
+        status: 'blocked',
+        reason: '1 of 4 95+ Player Pick is exhausted; choose another Storage pressure SBC in Settings',
+        reasonCode: 'STORAGE_SINK_SELECTION_REQUIRED',
+        details: {
+          completedCount: 2,
+          totalChallengeCount: 2,
+          selectedSetId: 1378,
+          previousReasonCode: 'STORAGE_SINK_COMPLETED',
+        },
       })),
     });
 
     expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
-      status: 'unavailable',
-      reason: '1 of 4 95+ Player Pick is already complete and has no incomplete Storage pressure challenge',
-      reasonCode: 'STORAGE_SINK_COMPLETED',
-      details: { completedCount: 2, totalChallengeCount: 2 },
+      status: 'blocked',
+      reason: '1 of 4 95+ Player Pick is exhausted; choose another Storage pressure SBC in Settings',
+      reasonCode: 'STORAGE_SINK_SELECTION_REQUIRED',
+      details: {
+        completedCount: 2,
+        totalChallengeCount: 2,
+        selectedSetId: 1378,
+        previousReasonCode: 'STORAGE_SINK_COMPLETED',
+      },
       recoveries: { storageSink: 0 },
     });
     expect(options.recoverStorageSink).toHaveBeenCalledOnce();
+    expect(recoverProvisions).not.toHaveBeenCalled();
     expect(options.planPrimarySquad).not.toHaveBeenCalled();
   });
 

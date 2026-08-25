@@ -649,4 +649,36 @@ describe('loop runtime option projection', () => {
       strategy: 'playerPickSbc',
     });
   });
+
+  it('fails Rolling preflight when the selected Storage pressure Set is absent or stale', () => {
+    const base = {
+      strategy: 'rollingUpgrade',
+      openRewardPacks: true,
+      rollingWorkflowEnabled: true,
+      rollingStorageSinkEnabled: true,
+      rollingStorageSinkMode: 'selected',
+      rollingStorageSinkSetId: 1382,
+      rollingStorageSinkSetName: 'Maxwel Cornet',
+    };
+    expect(() => assertRollingRuntimePreflight({
+      ...base,
+      rollingStorageSink: { mode: 'selected', status: 'unavailable' },
+    })).toThrow('Maxwel Cornet (Set #1382) is not bound');
+    expect(() => assertRollingRuntimePreflight({
+      ...base,
+      rollingStorageSink: {
+        mode: 'selected',
+        status: 'resolved',
+        capability: { setId: 1381, setName: 'Christopher Nkunku' },
+      },
+    })).toThrow('current binding is Christopher Nkunku (Set #1381)');
+    expect(assertRollingRuntimePreflight({
+      ...base,
+      rollingStorageSink: {
+        mode: 'selected',
+        status: 'resolved',
+        capability: { setId: 1382, setName: 'Maxwel Cornet' },
+      },
+    })).toMatchObject({ rollingStorageSinkSetId: 1382 });
+  });
 });

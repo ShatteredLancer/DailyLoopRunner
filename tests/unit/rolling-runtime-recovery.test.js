@@ -3176,6 +3176,88 @@ describe('Rolling runtime recovery helpers', () => {
     });
   });
 
+  it('selects Cornet 86 from live state when the cached 87 squad is already complete', async () => {
+    const { api, window } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const set = { id: 1382, name: 'Maxwel Cornet' };
+    const challenges = [{
+      id: 3939,
+      status: 'COMPLETED',
+      completed: true,
+      requiredPlayerCount: 11,
+      eligibilityRequirements: [{ key: 'TEAM_RATING', values: [87], count: -1 }],
+    }, {
+      id: 3938,
+      status: 'IN_PROGRESS',
+      completed: false,
+      requiredPlayerCount: 11,
+      eligibilityRequirements: [
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+        { key: 'TEAM_RATING', values: [86], count: -1 },
+      ],
+    }];
+    window.services.SBC.repository = { sets: { _collection: [set] } };
+    window.services.SBC.requestChallengesForSet = vi.fn(() => successfulObservable({
+      success: true,
+      status: 200,
+      data: { challenges },
+    }));
+
+    const loaded = await api.loadRollingGenericStorageSinkContexts(
+      { name: '10x85+ Rolling Loop', dryRun: true },
+      {
+        setId: 1382,
+        setName: 'Maxwel Cornet',
+        loop: {
+          name: 'Maxwel Cornet',
+          strategy: 'storagePressureSbc',
+          sbcSetIds: [1382],
+          sbcNames: ['Maxwel Cornet'],
+        },
+      },
+    );
+
+    expect(loaded).toMatchObject({
+      status: 'ready',
+      totalChallengeCount: 2,
+      completedCount: 1,
+      incompleteCount: 1,
+      contexts: [{ challengeId: 3938, targetRating: 86 }],
+    });
+  });
+
+  it('marks Cornet exhausted only when both live challenges are complete', async () => {
+    const { api, window } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const set = { id: 1382, name: 'Maxwel Cornet' };
+    window.services.SBC.repository = { sets: { _collection: [set] } };
+    window.services.SBC.requestChallengesForSet = vi.fn(() => successfulObservable({
+      success: true,
+      status: 200,
+      data: {
+        challenges: [
+          { id: 3938, status: 'COMPLETED', completed: true },
+          { id: 3939, status: 'COMPLETED', completed: true },
+        ],
+      },
+    }));
+
+    await expect(api.loadRollingGenericStorageSinkContexts(
+      { name: '10x85+ Rolling Loop', dryRun: true },
+      {
+        loop: {
+          name: 'Maxwel Cornet',
+          strategy: 'storagePressureSbc',
+          sbcSetIds: [1382],
+          sbcNames: ['Maxwel Cornet'],
+        },
+      },
+    )).resolves.toMatchObject({
+      status: 'unavailable',
+      reasonCode: 'STORAGE_SINK_COMPLETED',
+      completedCount: 2,
+      incompleteCount: 0,
+    });
+  });
+
   it('falls back from an exhausted automatic Storage Sink to the next cached candidate', async () => {
     const { api } = await loadUserscript();
     const first = { setId: 1401, setName: 'Limited 95+ Pick', loop: {} };
@@ -3199,6 +3281,62 @@ describe('Rolling runtime recovery helpers', () => {
     )).toMatchObject({ status: 'submitted', submitted: true });
     expect(runCapability.mock.calls.map(([capability]) => capability.setId)).toEqual([1401, 1402]);
     expect([...runtime.storageSinkExhaustedSetIds]).toEqual([1401]);
+  });
+
+  it('does not rerun an infeasible Storage Sink until inventory or pending state changes', async () => {
+    const { api } = await loadUserscript();
+    let inventoryVersion = 10;
+    const candidate = { setId: 1405, setName: 'Large Player SBC', loop: {} };
+    const runCapability = vi.fn(async () => ({
+      status: 'unavailable',
+      reason: 'no exact 89-rated squad can release the required Storage cards',
+      reasonCode: 'RECOVERY_STORAGE_PRESSURE_INFEASIBLE',
+    }));
+    const runtime = {
+      openRouting: { storageItems: [{ id: 9001, definitionId: 8001 }] },
+      primaryDuplicateRefs: [{ id: 9001, definitionId: 8001 }],
+      coordinator: {
+        getLedger: () => ({
+          summary: () => ({
+            inventoryVersion,
+            capacities: { storage: { free: 2 } },
+          }),
+        }),
+      },
+    };
+    const definition = { mode: 'automatic', capability: candidate, alternatives: [] };
+
+    await api.runRollingStorageSinkRecovery(
+      { name: 'Rolling Loop' },
+      runtime,
+      definition,
+      { runCapability, allowRefresh: false },
+    );
+    const unchanged = await api.runRollingStorageSinkRecovery(
+      { name: 'Rolling Loop' },
+      runtime,
+      definition,
+      { runCapability, allowRefresh: false },
+    );
+    expect(runCapability).toHaveBeenCalledOnce();
+    expect(unchanged).toMatchObject({
+      status: 'unavailable',
+      details: {
+        capabilityFailures: [{
+          setId: 1405,
+          reasonCode: 'STORAGE_SINK_STATE_UNCHANGED',
+        }],
+      },
+    });
+
+    inventoryVersion = 11;
+    await api.runRollingStorageSinkRecovery(
+      { name: 'Rolling Loop' },
+      runtime,
+      definition,
+      { runCapability, allowRefresh: false },
+    );
+    expect(runCapability).toHaveBeenCalledTimes(2);
   });
 
   it('skips session-exhausted candidates and retries once with a newly scanned automatic Sink', async () => {
@@ -3228,7 +3366,7 @@ describe('Rolling runtime recovery helpers', () => {
     expect(runtime.storageSinkRefreshAttempted).toBe(true);
   });
 
-  it('does not replace an explicitly selected exhausted Storage Sink', async () => {
+  it('requires a new user selection when an explicitly selected Storage Sink is exhausted', async () => {
     const { api } = await loadUserscript();
     const selected = { setId: 1421, setName: 'Selected Limited Pick', loop: {} };
     const refreshCapabilities = vi.fn();
@@ -3246,11 +3384,128 @@ describe('Rolling runtime recovery helpers', () => {
         refreshCapabilities,
       },
     )).toMatchObject({
-      status: 'unavailable',
-      reasonCode: 'STORAGE_SINK_COMPLETED',
-      details: { exhaustedSetIds: [1421], runtimeRefreshAttempted: false },
+      status: 'blocked',
+      reason: expect.stringContaining('choose another Storage pressure SBC'),
+      reasonCode: 'STORAGE_SINK_SELECTION_REQUIRED',
+      details: {
+        exhaustedSetIds: [1421],
+        runtimeRefreshAttempted: false,
+        selectedSetId: 1421,
+        selectedSetName: 'Selected Limited Pick',
+        previousReasonCode: 'STORAGE_SINK_COMPLETED',
+      },
     });
     expect(refreshCapabilities).not.toHaveBeenCalled();
+  });
+
+  it('requires a new user selection when the selected Sink has no executable live challenge', async () => {
+    const { api } = await loadUserscript();
+    const selected = { setId: 1422, setName: 'Stale Selected Pick', loop: {} };
+    const refreshCapabilities = vi.fn();
+
+    expect(await api.runRollingStorageSinkRecovery(
+      { name: 'Rolling Loop' },
+      {},
+      { mode: 'selected', capability: selected, alternatives: [] },
+      {
+        runCapability: vi.fn(async () => ({
+          status: 'unavailable',
+          reason: 'Stale Selected Pick has no incomplete 85+ rating squad',
+          reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+        })),
+        refreshCapabilities,
+      },
+    )).toMatchObject({
+      status: 'blocked',
+      reason: expect.stringContaining('choose another Storage pressure SBC'),
+      reasonCode: 'STORAGE_SINK_SELECTION_REQUIRED',
+      details: {
+        exhaustedSetIds: [],
+        runtimeRefreshAttempted: false,
+        selectedSetId: 1422,
+        selectedSetName: 'Stale Selected Pick',
+        previousReason: 'Stale Selected Pick has no incomplete 85+ rating squad',
+        previousReasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      },
+    });
+    expect(refreshCapabilities).not.toHaveBeenCalled();
+  });
+
+  it('refreshes an unbound selected Sink once and stops without falling back anonymously', async () => {
+    const { api } = await loadUserscript();
+    const refreshCapabilities = vi.fn(async () => ({
+      status: 'unavailable',
+      reason: 'selected Set is absent from the current live scan',
+      reasonCode: 'NO_STORAGE_SINK_AVAILABLE',
+    }));
+
+    expect(await api.runRollingStorageSinkRecovery(
+      {
+        name: 'Rolling Loop',
+        rollingStorageSinkMode: 'selected',
+        rollingStorageSinkSetId: 1382,
+        rollingStorageSinkSetName: 'Maxwel Cornet',
+      },
+      {},
+      {
+        mode: 'selected',
+        status: 'unavailable',
+        selectedSetId: 1382,
+        selectedSetName: 'Maxwel Cornet',
+      },
+      { refreshCapabilities },
+    )).toMatchObject({
+      status: 'blocked',
+      reason: expect.stringContaining('Maxwel Cornet (Set #1382)'),
+      reasonCode: 'STORAGE_SINK_SELECTION_REQUIRED',
+      details: {
+        selectedSetId: 1382,
+        selectedSetName: 'Maxwel Cornet',
+        boundCapabilities: [],
+        previousReasonCode: 'NO_STORAGE_SINK_AVAILABLE',
+        runtimeRefreshAttempted: true,
+      },
+    });
+    expect(refreshCapabilities).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a stale Nkunku binding when Cornet is the selected Storage Sink', async () => {
+    const { api } = await loadUserscript();
+    const runCapability = vi.fn();
+    const refreshCapabilities = vi.fn(async () => ({
+      status: 'unavailable',
+      reason: 'live binding still does not match',
+      reasonCode: 'STORAGE_SINK_BINDING_MISMATCH',
+    }));
+
+    expect(await api.runRollingStorageSinkRecovery(
+      {
+        name: 'Rolling Loop',
+        rollingStorageSinkMode: 'selected',
+        rollingStorageSinkSetId: 1382,
+        rollingStorageSinkSetName: 'Maxwel Cornet',
+      },
+      {},
+      {
+        mode: 'selected',
+        status: 'resolved',
+        selectedSetId: 1381,
+        selectedSetName: 'Christopher Nkunku',
+        capability: { setId: 1381, setName: 'Christopher Nkunku', loop: {} },
+      },
+      { runCapability, refreshCapabilities },
+    )).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'STORAGE_SINK_SELECTION_REQUIRED',
+      details: {
+        selectedSetId: 1382,
+        selectedSetName: 'Maxwel Cornet',
+        boundCapabilities: [{ setId: 1381, setName: 'Christopher Nkunku' }],
+        previousReasonCode: 'STORAGE_SINK_BINDING_MISMATCH',
+      },
+    });
+    expect(runCapability).not.toHaveBeenCalled();
+    expect(refreshCapabilities).toHaveBeenCalledOnce();
   });
 
   it('stops automatic recovery explicitly after its one live refresh finds no Sink', async () => {
