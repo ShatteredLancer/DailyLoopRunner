@@ -16,6 +16,10 @@ All notable user-facing changes are documented here. This project follows
 
 ### Fixed
 
+- Continue Rolling when a deferred primary-pack duplicate has already become a
+  normal Club item because another recovery SBC consumed its duplicate
+  counterpart. The Runner verifies the exact item ID and definition and still
+  blocks if a matching duplicate remains in Unassigned.
 - Route an opened current-pool special duplicate to Storage when its exact
   submission entity is a Club non-TOTW special, including EA runtime items
   whose group metadata exists only under nested static data. Expanded live

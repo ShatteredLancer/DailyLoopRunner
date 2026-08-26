@@ -96,6 +96,139 @@ function installInventoryRecoveryService(window, inventoryPiles, onMove) {
 }
 
 describe('Rolling runtime recovery helpers', () => {
+  it('settles a deferred primary duplicate already normalized to Club', async () => {
+    const normalizedClubItem = makePlayer({
+      id: 931725349159,
+      definitionId: 50564491,
+      rating: 76,
+      rareflag: 1,
+      duplicate: false,
+      name: 'Rahman Baba',
+    });
+    normalizedClubItem.pile = 'club';
+    const { api, window, inventoryPiles } = await loadUserscript({
+      club: [normalizedClubItem],
+      pageReady: true,
+      fastTimers: true,
+    });
+    const move = vi.fn();
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const deferredRef = {
+      id: normalizedClubItem.id,
+      definitionId: normalizedClubItem.definitionId,
+      pile: 'unassigned',
+    };
+    const runtime = {
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ classifiedEntries: () => [] }),
+      },
+    };
+
+    const result = await api.routeRollingDeferredPrimaryStorage(
+      { name: '10x 85+ Upgrade Rolling Loop' },
+      runtime,
+      [deferredRef],
+    );
+
+    expect(result).toMatchObject({ status: 'ready', moved: 0 });
+    expect(move).not.toHaveBeenCalled();
+    expect(runtime.coordinator.reconcile).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps blocking a deferred primary duplicate that is still duplicate in Club', async () => {
+    const unresolvedClubItem = makePlayer({
+      id: 931725349159,
+      definitionId: 50564491,
+      rating: 76,
+      rareflag: 1,
+      duplicateId: 731725349159,
+      name: 'Rahman Baba',
+    });
+    unresolvedClubItem.pile = 'club';
+    const { api, window, inventoryPiles } = await loadUserscript({
+      club: [unresolvedClubItem],
+      pageReady: true,
+      fastTimers: true,
+    });
+    const move = vi.fn();
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const runtime = {
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ classifiedEntries: () => [] }),
+      },
+    };
+
+    const result = await api.routeRollingDeferredPrimaryStorage(
+      { name: '10x 85+ Upgrade Rolling Loop' },
+      runtime,
+      [{
+        id: unresolvedClubItem.id,
+        definitionId: unresolvedClubItem.definitionId,
+        pile: 'unassigned',
+      }],
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
+    });
+    expect(move).not.toHaveBeenCalled();
+    expect(runtime.coordinator.reconcile).not.toHaveBeenCalled();
+  });
+
+  it('keeps blocking a normalized Club item while its definition still has an Unassigned duplicate', async () => {
+    const normalizedClubItem = makePlayer({
+      id: 931725349159,
+      definitionId: 50564491,
+      rating: 76,
+      rareflag: 1,
+      name: 'Rahman Baba',
+    });
+    normalizedClubItem.pile = 'club';
+    const remainingDuplicate = makePlayer({
+      id: 931725349171,
+      definitionId: normalizedClubItem.definitionId,
+      rating: 76,
+      rareflag: 1,
+      duplicateId: normalizedClubItem.id,
+      name: 'Rahman Baba',
+    });
+    remainingDuplicate.pile = 'unassigned';
+    const { api, window, inventoryPiles } = await loadUserscript({
+      club: [normalizedClubItem],
+      unassigned: [remainingDuplicate],
+      pageReady: true,
+      fastTimers: true,
+    });
+    const move = vi.fn();
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const runtime = {
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({ classifiedEntries: () => [] }),
+      },
+    };
+
+    const result = await api.routeRollingDeferredPrimaryStorage(
+      { name: '10x 85+ Upgrade Rolling Loop' },
+      runtime,
+      [{
+        id: normalizedClubItem.id,
+        definitionId: normalizedClubItem.definitionId,
+        pile: 'unassigned',
+      }],
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
+    });
+    expect(move).not.toHaveBeenCalled();
+    expect(runtime.coordinator.reconcile).not.toHaveBeenCalled();
+  });
+
   it('counts only confirmed Storage Pressure and TOTW SBC submissions', async () => {
     const { api } = await loadUserscript({ pageReady: true, fastTimers: true });
     const runtime = {

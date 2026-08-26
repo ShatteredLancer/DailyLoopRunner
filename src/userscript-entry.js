@@ -16492,13 +16492,47 @@ function updateLoopControls() {
         },
       };
     }
-    const unexpected = resolved.filter(({ live }) => !['unassigned', 'storage'].includes(live.pileName));
+    const identityChanged = resolved.filter(({ ref, live }) => (
+      live && !rollingExactItemMatchesRef(live.item, ref)
+    ));
+    if (identityChanged.length) {
+      return {
+        status: 'blocked',
+        reason: `${identityChanged.length} deferred primary-pack duplicate(s) changed identity before routing`,
+        reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
+        details: {
+          identityChanged: identityChanged.map(({ ref, live }) => ({
+            expected: ref,
+            actual: liveItemRef(live.item, live.pileName),
+          })),
+        },
+      };
+    }
+    const unassignedDuplicateDefinitions = new Set(
+      getPileItemsByName('unassigned')
+        .filter((item) => isDuplicate(item))
+        .map((item) => Number(item?.definitionId || 0))
+        .filter(Boolean),
+    );
+    const normalizedClub = resolved.filter(({ ref, live }) => (
+      live.pileName === 'club'
+        && !isDuplicate(live.item)
+        && !unassignedDuplicateDefinitions.has(Number(ref.definitionId || 0))
+    ));
+    const normalizedClubIds = new Set(normalizedClub.map(({ ref }) => Number(ref.id || 0)));
+    const unexpected = resolved.filter(({ ref, live }) => (
+      !['unassigned', 'storage'].includes(live.pileName)
+        && !normalizedClubIds.has(Number(ref.id || 0))
+    ));
     if (unexpected.length) {
       return {
         status: 'blocked',
         reason: `${unexpected.length} deferred primary-pack duplicate(s) moved to an unexpected pile`,
         reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
       };
+    }
+    if (normalizedClub.length) {
+      log(`${loopDef.name}: ${normalizedClub.length} deferred primary-pack item(s) already normalized to Club after their duplicate counterpart was consumed`);
     }
     const pending = resolved
       .filter(({ live }) => live.pileName === 'unassigned')
