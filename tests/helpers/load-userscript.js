@@ -131,6 +131,7 @@ export async function loadUserscript(options = {}) {
       persistMaterializedRollingDuplicateTransaction,
       completeRollingDuplicateTransaction,
       finalizeRollingDuplicateMaterialization,
+      routeRollingDeferredPrimaryStorage,
       rollingDuplicateTransactionPlanningContext,
       readPersistedRollingDuplicateTransaction,
       cancelPriorRunRollingDuplicateTransaction,

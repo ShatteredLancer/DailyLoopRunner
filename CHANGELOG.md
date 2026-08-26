@@ -14,6 +14,24 @@ All notable user-facing changes are documented here. This project follows
   FSU locks, Evolutions, Active Squad conflicts, protection ratings, and all
   other submission guards in force.
 
+### Fixed
+
+- Continue Rolling when a deferred primary-pack duplicate has already become a
+  normal Club item because another recovery SBC consumed its duplicate
+  counterpart. The Runner verifies the exact item ID and definition and still
+  blocks if a matching duplicate remains in Unassigned.
+- Route an opened current-pool special duplicate to Storage when its exact
+  submission entity is a Club non-TOTW special, including EA runtime items
+  whose group metadata exists only under nested static data. Expanded live
+  group-83 quantity no longer lets that exact duplicate target become a
+  mandatory primary-squad item that is then rejected by the source filter,
+  while the explicit Club current-pool Provisions fallback remains available.
+- Complete a Rolling duplicate transaction when EA has already returned the
+  exact protected counterpart to Club before finalization. The Runner now
+  verifies that exact ID and value fingerprint through refreshed inventory
+  reconciliation instead of repeatedly blocking because it is no longer in
+  Unassigned.
+
 ## [0.8.48] - 2026-08-25
 
 ### Fixed
