@@ -22,6 +22,11 @@ All notable user-facing changes are documented here. This project follows
   group-83 quantity no longer lets that exact duplicate target become a
   mandatory primary-squad item that is then rejected by the source filter,
   while the explicit Club current-pool Provisions fallback remains available.
+- Complete a Rolling duplicate transaction when EA has already returned the
+  exact protected counterpart to Club before finalization. The Runner now
+  verifies that exact ID and value fingerprint through refreshed inventory
+  reconciliation instead of repeatedly blocking because it is no longer in
+  Unassigned.
 
 ## [0.8.48] - 2026-08-25
 

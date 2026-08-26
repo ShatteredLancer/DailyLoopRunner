@@ -15339,27 +15339,61 @@ function updateLoopControls() {
       runtime.duplicateMaterializationTransaction = transaction;
       journalWriteFailed = !persistRollingDuplicateTransaction(transaction);
     }
-    const protectedLocations = transaction.pairs.map((pair) => (
-      findCachedItemById(pair.protectedCounterpartRef.id, ['unassigned']) || null
-    ));
+    const findProtectedLocation = (pair, options = {}) => {
+      const direct = findCachedItemById(
+        pair.protectedCounterpartRef.id,
+        ['unassigned', 'club'],
+      );
+      if (direct) return direct;
+      if (options.allowReconciledClub !== true) return null;
+      const ledger = runtime.coordinator?.getLedger?.() || null;
+      const reconciled = typeof ledger?.resolveItem === 'function'
+        ? ledger.resolveItem({ id: pair.protectedCounterpartRef.id }) || null
+        : null;
+      const pileName = normalizedRuntimePileName(reconciled?.pile || reconciled?.ref?.pile);
+      return reconciled && pileName === 'club'
+        ? { item: reconciled, pileName }
+        : null;
+    };
+    const protectedLocations = transaction.pairs.map((pair) => findProtectedLocation(pair));
     if (protectedLocations.some((location) => !location)) {
       await refreshInventoryCaches(`${label} duplicate counterpart lookup`, {
         includePacks: false,
         quiet: true,
       });
+      let lookupReconciliation;
+      try {
+        lookupReconciliation = await runtime.coordinator.reconcile(
+          `${label} duplicate counterpart lookup`,
+          { refreshUnassigned: true },
+        );
+      } catch (error) {
+        lookupReconciliation = { ok: false, reason: error?.message || String(error) };
+      }
+      if (!lookupReconciliation?.ok) {
+        const reason = `inventory reconciliation failed before duplicate counterpart lookup: ${lookupReconciliation?.reason || 'unknown'}`;
+        transaction = transitionDuplicateMaterializationTransaction(transaction, 'recovery-required', { reason });
+        runtime.duplicateMaterializationTransaction = transaction;
+        persistRollingDuplicateTransaction(transaction);
+        return {
+          ok: false,
+          reason,
+          reasonCode: 'INVENTORY_RECONCILIATION_FAILED',
+        };
+      }
     }
     const liveProtectedLocations = transaction.pairs.map((pair) => (
-      findCachedItemById(pair.protectedCounterpartRef.id, ['unassigned']) || null
+      findProtectedLocation(pair, { allowReconciledClub: true })
     ));
     if (liveProtectedLocations.some((location) => !location)) {
       transaction = transitionDuplicateMaterializationTransaction(transaction, 'recovery-required', {
-        reason: 'a protected duplicate counterpart is missing from Unassigned',
+        reason: 'a protected duplicate counterpart is missing from Unassigned and Club',
       });
       runtime.duplicateMaterializationTransaction = transaction;
       persistRollingDuplicateTransaction(transaction);
       return {
         ok: false,
-        reason: 'a protected duplicate counterpart is missing from Unassigned',
+        reason: 'a protected duplicate counterpart is missing from Unassigned and Club',
         reasonCode: 'DUPLICATE_COUNTERPART_MISSING',
       };
     }
@@ -15367,7 +15401,7 @@ function updateLoopControls() {
       const location = liveProtectedLocations[index];
       const item = location?.item;
       return !rollingExactItemMatchesRef(item, pair.protectedCounterpartRef)
-        || location?.pileName !== 'unassigned'
+        || !['unassigned', 'club'].includes(location?.pileName)
         || !duplicateCardValueFingerprintMatches(pair.counterpartFingerprint, item);
     });
     if (changedProtectedPair) {
@@ -15382,8 +15416,16 @@ function updateLoopControls() {
         reasonCode: 'DUPLICATE_COUNTERPART_IDENTITY_CHANGED',
       };
     }
-    const liveProtectedItems = liveProtectedLocations.map((location) => location.item);
-    log(`${label}: returning ${liveProtectedItems.length} protected duplicate counterpart(s) to Club for transaction ${transaction.transactionId}`);
+    const liveProtectedItems = liveProtectedLocations
+      .filter((location) => location.pileName === 'unassigned')
+      .map((location) => location.item);
+    const alreadyRestoredCount = liveProtectedLocations.length - liveProtectedItems.length;
+    if (liveProtectedItems.length) {
+      log(`${label}: returning ${liveProtectedItems.length} protected duplicate counterpart(s) to Club for transaction ${transaction.transactionId}`);
+    }
+    if (alreadyRestoredCount) {
+      log(`${label}: ${alreadyRestoredCount} protected duplicate counterpart(s) already reconciled in Club for transaction ${transaction.transactionId}`);
+    }
     try {
       for (const item of liveProtectedItems) {
         await moveSingleItem(item, inventoryPile('club'));

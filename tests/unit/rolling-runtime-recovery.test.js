@@ -1610,6 +1610,76 @@ describe('Rolling runtime recovery helpers', () => {
     expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
   });
 
+  it('completes a confirmed duplicate transaction when the protected counterpart is already back in Club', async () => {
+    const { transaction, displaced } = materializedDuplicateTransaction();
+    displaced.pile = 'club';
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [displaced],
+      unassigned: [],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const move = vi.fn();
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({
+          resolveItem: ({ id }) => id === displaced.id ? displaced : null,
+        }),
+      },
+    };
+
+    const result = await api.finalizeRollingDuplicateMaterialization(
+      runtime,
+      'Already restored protected counterpart',
+      { submissionConfirmed: true },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(move).not.toHaveBeenCalled();
+    expect(runtime.duplicateMaterializationTransaction).toMatchObject({ status: 'completed' });
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
+  it('uses reconciled Club state when the protected counterpart is absent from stale Repositories', async () => {
+    const { transaction, displaced } = materializedDuplicateTransaction();
+    displaced.pile = 'club';
+    const { api, window, userscriptValues, inventoryPiles } = await loadUserscript({
+      club: [],
+      unassigned: [],
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_DUPLICATE_TRANSACTION_KEY]: transaction },
+    });
+    const move = vi.fn();
+    installInventoryRecoveryService(window, inventoryPiles, move);
+    const reconcile = vi.fn(async () => ({ ok: true }));
+    const runtime = {
+      duplicateMaterializationTransaction: transaction,
+      coordinator: {
+        reconcile,
+        getLedger: () => ({
+          resolveItem: ({ id }) => id === displaced.id ? displaced : null,
+        }),
+      },
+    };
+
+    const result = await api.finalizeRollingDuplicateMaterialization(
+      runtime,
+      'Reconciled restored protected counterpart',
+      { submissionConfirmed: true },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(reconcile).toHaveBeenCalledTimes(2);
+    expect(move).not.toHaveBeenCalled();
+    expect(runtime.duplicateMaterializationTransaction).toMatchObject({ status: 'completed' });
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
   it('restores a protected counterpart from the Unassigned Repository when its EA pile scalar is stale', async () => {
     const { transaction, consume, displaced } = materializedDuplicateTransaction();
     displaced.pile = 'club';
