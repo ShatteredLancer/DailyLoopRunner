@@ -5725,7 +5725,8 @@
         if (!["player-pick", "player"].includes(capability.rewardKind)) {
           errors.push(`${path}.capability.rewardKind must be player-pick or player`);
         }
-        if (!Array.isArray(capability.challengeRatings) || !capability.challengeRatings.length || capability.challengeRatings.some((rating) => Number(rating) < 87)) {
+        const challengeRatings = Array.isArray(capability.challengeRatings) ? capability.challengeRatings.map(Number) : [];
+        if (!challengeRatings.length || challengeRatings.some((rating) => !Number.isInteger(rating) || rating < 1 || rating > 99) || !challengeRatings.some((rating) => rating >= 87)) {
           errors.push(`${path}.capability.challengeRatings must contain one or more ratings of 87+`);
         }
       }

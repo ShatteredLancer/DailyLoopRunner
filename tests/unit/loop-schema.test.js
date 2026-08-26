@@ -23,6 +23,57 @@ function validLoop(overrides = {}) {
   };
 }
 
+function validRollingLoop(challengeRatings = [86, 87]) {
+  return {
+    id: 'rolling-upgrade',
+    name: '10x 85+ Upgrade Rolling Loop',
+    strategy: 'rollingUpgrade',
+    dynamicSbcFamily: 'high-rated-x10',
+    dynamicRewardCount: 10,
+    sbcNames: ['10x 85+ Upgrade'],
+    sbcSetIds: [1356],
+    rewardPackIds: [1082],
+    requiredSpecialCount: 1,
+    allowedSpecialCount: 1,
+    rollingTotwUpgrade: { activityBinding: { family: 'totw-upgrade' } },
+    rollingProvisionsUpgrade: { activityBinding: { family: 'provisions-upgrade' } },
+    rollingGoldSinkUpgrade: { activityBinding: { family: '5x80-upgrade' } },
+    rollingPlayerPick: {
+      status: 'resolved',
+      required: true,
+      selector: {
+        material: 'gold-with-required-rare',
+        selectionCount: 1,
+        maxChallenges: 1,
+        repeatability: 'unlimited',
+        preference: 'rare-cost-first',
+      },
+      loop: { strategy: 'playerPickSbc' },
+    },
+    rollingStorageSinkPick: {
+      status: 'unavailable',
+      required: false,
+      selector: {
+        rewardMinRating: 95,
+        candidateCount: 3,
+        selectionCount: 1,
+        challengeRatings: [88, 89],
+      },
+    },
+    rollingStorageSink: {
+      status: 'resolved',
+      required: false,
+      mode: 'automatic',
+      capability: {
+        setId: 1382,
+        rewardKind: 'player',
+        challengeRatings,
+      },
+    },
+    runtimeQuantity: { allowZero: true },
+  };
+}
+
 describe('loop configuration schema', () => {
   it('normalizes legacy arrays and object containers with the built-in recovery defaults', () => {
     const loops = [validLoop()];
@@ -186,6 +237,17 @@ describe('loop configuration schema', () => {
       'dynamicChallenges[0].eligibilityRequirements[0].values must be a non-empty array',
       'dynamicChallenges[0].eligibilityRequirements[0].count must be a positive integer',
     ]));
+  });
+
+  it('admits a Storage Sink Set when one challenge is 87+ and preserves strict rating validation', () => {
+    const diagnostic = 'rollingStorageSink.capability.challengeRatings must contain one or more ratings of 87+';
+
+    expect(validateLoopDef(validRollingLoop([86, 87]))).not.toContain(diagnostic);
+    expect(validateLoopDef(validRollingLoop([86]))).toContain(diagnostic);
+
+    for (const challengeRatings of [[], [86, 'not-a-rating'], [0, 87], [86.5, 87], [87, 100]]) {
+      expect(validateLoopDef(validRollingLoop(challengeRatings))).toContain(diagnostic);
+    }
   });
 
   it('preserves list reference and duplicate-id validation', () => {
