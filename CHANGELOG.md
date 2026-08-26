@@ -17,9 +17,11 @@ All notable user-facing changes are documented here. This project follows
 ### Fixed
 
 - Route an opened current-pool special duplicate to Storage when its exact
-  submission entity is a Club non-TOTW special. Expanded live group-83
-  quantity no longer lets that protected Club entity become a mandatory
-  primary-squad item that is then rejected by the source filter.
+  submission entity is a Club non-TOTW special, including EA runtime items
+  whose group metadata exists only under nested static data. Expanded live
+  group-83 quantity no longer lets that exact duplicate target become a
+  mandatory primary-squad item that is then rejected by the source filter,
+  while the explicit Club current-pool Provisions fallback remains available.
 
 ## [0.8.48] - 2026-08-25
 

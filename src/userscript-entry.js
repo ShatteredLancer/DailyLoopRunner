@@ -12809,7 +12809,7 @@ function updateLoopControls() {
       .map(Number)
       .filter(Number.isFinite));
     if (requiredGroups.size) {
-      return (item.groups || []).some((group) => requiredGroups.has(Number(group)));
+      return itemGroupNumbers(item).some((group) => requiredGroups.has(group));
     }
     if (requiredSpecialRequirements.some((requirement) => (
       ['PLAYER_QUALITY', 'PLAYER_LEVEL'].includes(String(requirement?.key || ''))
@@ -13593,6 +13593,7 @@ function updateLoopControls() {
     if (strictClubSpecial) reasons.push('rolling-club-non-totw-special-strict');
     const protectedClubEventSpecial = pile === 'club'
       && !isTotwItem(item)
+      && !allowsAllMatchingSpecials(loopDef)
       && (
         rollingSnapshotMatchesRequiredSpecial(item, loopDef)
           || isTotsItem(item)
@@ -13628,7 +13629,17 @@ function updateLoopControls() {
         targetPile = resolved.pileName;
         return resolved.item;
       },
-      protectionReasons: (target) => rollingBaseProtectionReasons(target, loopDef, targetPile),
+      protectionReasons: (target) => {
+        const reasons = rollingBaseProtectionReasons(target, loopDef, targetPile);
+        const protectedClubRequiredSpecialTarget = targetPile === 'club'
+          && isSbcSpecialItem(target)
+          && !isTotwItem(target)
+          && rollingSnapshotMatchesRequiredSpecial(target, loopDef);
+        if (protectedClubRequiredSpecialTarget) {
+          reasons.push('rolling-club-non-totw-required-special');
+        }
+        return [...new Set(reasons)];
+      },
     });
   }
 

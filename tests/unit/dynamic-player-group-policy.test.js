@@ -397,9 +397,11 @@ describe('dynamic EA player-group policy', () => {
       definitionId: 84141734,
       rating: 96,
       rareflag: 151,
-      groups: [6, 19, 33, 83],
+      groups: [],
       name: 'Kalulu',
     });
+    delete clubTarget.groups;
+    clubTarget._staticData = { groups: [6, 19, 33, 83] };
     const unassignedDuplicate = makePlayer({
       id: 931645793385,
       definitionId: 84141734,
@@ -424,7 +426,7 @@ describe('dynamic EA player-group policy', () => {
         { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
       ],
     };
-    expect(api.rollingBaseProtectionReasons(clubTarget, expandedLoop, 'club')).toContain(
+    expect(api.rollingBaseProtectionReasons(clubTarget, expandedLoop, 'club')).not.toContain(
       'rolling-club-non-totw-required-special',
     );
     expect(api.rollingOpenedDuplicateTargetProtectionReasons(

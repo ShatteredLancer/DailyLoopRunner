@@ -50696,7 +50696,7 @@
       const requiredSpecialRequirements = dynamicRequiredSpecialRequirements(loopDef);
       const requiredGroups = new Set(requiredSpecialRequirements.filter((requirement2) => String(requirement2?.key || "") === "PLAYER_RARITY_GROUP").flatMap((requirement2) => requirement2.values || []).map(Number).filter(Number.isFinite));
       if (requiredGroups.size) {
-        return (item.groups || []).some((group) => requiredGroups.has(Number(group)));
+        return itemGroupNumbers(item).some((group) => requiredGroups.has(group));
       }
       if (requiredSpecialRequirements.some((requirement2) => ["PLAYER_QUALITY", "PLAYER_LEVEL"].includes(String(requirement2?.key || "")) && (requirement2.values || []).map(Number).includes(4))) {
         return isSbcSpecialItem(item);
@@ -51357,7 +51357,7 @@
       }
       const strictClubSpecial = loopDef.rollingProtectAllClubNonTotwSpecials === true && pile === "club" && isSbcSpecialItem(item) && !isTotwItem(item);
       if (strictClubSpecial) reasons.push("rolling-club-non-totw-special-strict");
-      const protectedClubEventSpecial = pile === "club" && !isTotwItem(item) && (rollingSnapshotMatchesRequiredSpecial(item, loopDef) || isTotsItem(item) || isFofItem(item) || isFuttiesItem(item));
+      const protectedClubEventSpecial = pile === "club" && !isTotwItem(item) && !allowsAllMatchingSpecials(loopDef) && (rollingSnapshotMatchesRequiredSpecial(item, loopDef) || isTotsItem(item) || isFofItem(item) || isFuttiesItem(item));
       if (protectedClubEventSpecial) reasons.push("rolling-club-non-totw-required-special");
       return [...new Set(reasons)];
     }
@@ -51376,7 +51376,14 @@
           targetPile = resolved.pileName;
           return resolved.item;
         },
-        protectionReasons: (target) => rollingBaseProtectionReasons(target, loopDef, targetPile)
+        protectionReasons: (target) => {
+          const reasons = rollingBaseProtectionReasons(target, loopDef, targetPile);
+          const protectedClubRequiredSpecialTarget = targetPile === "club" && isSbcSpecialItem(target) && !isTotwItem(target) && rollingSnapshotMatchesRequiredSpecial(target, loopDef);
+          if (protectedClubRequiredSpecialTarget) {
+            reasons.push("rolling-club-non-totw-required-special");
+          }
+          return [...new Set(reasons)];
+        }
       });
     }
     function rollingItemRef(item, pile) {
