@@ -50692,7 +50692,7 @@
       return rollingProvisionsReserveRatings(loopDef).at(-1) || ROLLING_PROVISIONS_RATING_RANGE.max;
     }
     function rollingSnapshotMatchesRequiredSpecial(item, loopDef = {}) {
-      if (item?.special !== true) return false;
+      if (item?.special !== true && !isSbcSpecialItem(item)) return false;
       const requiredSpecialRequirements = dynamicRequiredSpecialRequirements(loopDef);
       const requiredGroups = new Set(requiredSpecialRequirements.filter((requirement2) => String(requirement2?.key || "") === "PLAYER_RARITY_GROUP").flatMap((requirement2) => requirement2.values || []).map(Number).filter(Number.isFinite));
       if (requiredGroups.size) {
@@ -51357,7 +51357,7 @@
       }
       const strictClubSpecial = loopDef.rollingProtectAllClubNonTotwSpecials === true && pile === "club" && isSbcSpecialItem(item) && !isTotwItem(item);
       if (strictClubSpecial) reasons.push("rolling-club-non-totw-special-strict");
-      const protectedClubEventSpecial = pile === "club" && !isTotwItem(item) && !allowsAllMatchingSpecials(loopDef) && (rollingSnapshotMatchesRequiredSpecial(item, loopDef) || isTotsItem(item) || isFofItem(item) || isFuttiesItem(item));
+      const protectedClubEventSpecial = pile === "club" && !isTotwItem(item) && (rollingSnapshotMatchesRequiredSpecial(item, loopDef) || isTotsItem(item) || isFofItem(item) || isFuttiesItem(item));
       if (protectedClubEventSpecial) reasons.push("rolling-club-non-totw-required-special");
       return [...new Set(reasons)];
     }

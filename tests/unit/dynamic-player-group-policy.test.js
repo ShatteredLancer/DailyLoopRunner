@@ -391,6 +391,48 @@ describe('dynamic EA player-group policy', () => {
       .not.toContain('rolling-any-special-cosmetics');
   });
 
+  it('keeps an expanded group-83 duplicate out of the primary squad when its real card is a Club non-TOTW special', async () => {
+    const clubTarget = makePlayer({
+      id: 931034238050,
+      definitionId: 84141734,
+      rating: 96,
+      rareflag: 151,
+      groups: [6, 19, 33, 83],
+      name: 'Kalulu',
+    });
+    const unassignedDuplicate = makePlayer({
+      id: 931645793385,
+      definitionId: 84141734,
+      rating: 96,
+      rareflag: 151,
+      groups: [6, 19, 33, 83],
+      duplicate: true,
+      duplicateId: clubTarget.id,
+      name: 'Kalulu',
+    });
+    clubTarget.pile = 7;
+    unassignedDuplicate.pile = 6;
+    const { api } = await loadUserscript({
+      club: [clubTarget],
+      unassigned: [unassignedDuplicate],
+    });
+    const expandedLoop = {
+      expectedPlayerCount: 11,
+      requiredSpecialAllowanceMode: 'all-matching-specials',
+      dynamicActiveEligibilityRequirements: [
+        { key: 'TEAM_RATING', values: [84], count: 11 },
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+    };
+    expect(api.rollingBaseProtectionReasons(clubTarget, expandedLoop, 'club')).toContain(
+      'rolling-club-non-totw-required-special',
+    );
+    expect(api.rollingOpenedDuplicateTargetProtectionReasons(
+      unassignedDuplicate,
+      expandedLoop,
+    )).toContain('duplicate-target-rolling-club-non-totw-required-special');
+  });
+
   it('selects only one Required Special for a non-83 player group', async () => {
     const players = [
       makePlayer({ id: 9010, definitionId: 19010, rating: 84, rareflag: 3, groups: [44] }),

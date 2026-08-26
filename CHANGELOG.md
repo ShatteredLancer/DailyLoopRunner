@@ -14,6 +14,13 @@ All notable user-facing changes are documented here. This project follows
   FSU locks, Evolutions, Active Squad conflicts, protection ratings, and all
   other submission guards in force.
 
+### Fixed
+
+- Route an opened current-pool special duplicate to Storage when its exact
+  submission entity is a Club non-TOTW special. Expanded live group-83
+  quantity no longer lets that protected Club entity become a mandatory
+  primary-squad item that is then rejected by the source filter.
+
 ## [0.8.48] - 2026-08-25
 
 ### Fixed

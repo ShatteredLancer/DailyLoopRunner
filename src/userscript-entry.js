@@ -12801,7 +12801,7 @@ function updateLoopControls() {
   }
 
   function rollingSnapshotMatchesRequiredSpecial(item, loopDef = {}) {
-    if (item?.special !== true) return false;
+    if (item?.special !== true && !isSbcSpecialItem(item)) return false;
     const requiredSpecialRequirements = dynamicRequiredSpecialRequirements(loopDef);
     const requiredGroups = new Set(requiredSpecialRequirements
       .filter((requirement) => String(requirement?.key || '') === 'PLAYER_RARITY_GROUP')
@@ -13593,7 +13593,6 @@ function updateLoopControls() {
     if (strictClubSpecial) reasons.push('rolling-club-non-totw-special-strict');
     const protectedClubEventSpecial = pile === 'club'
       && !isTotwItem(item)
-      && !allowsAllMatchingSpecials(loopDef)
       && (
         rollingSnapshotMatchesRequiredSpecial(item, loopDef)
           || isTotsItem(item)
