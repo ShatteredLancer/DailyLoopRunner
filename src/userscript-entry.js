@@ -11879,6 +11879,7 @@ function updateLoopControls() {
           itemDisplayName,
           formatPrice: formatCompactPrice,
           resolveFutbinPlayerId: resolveManualPickFutbinPlayerId,
+          resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
           scheduleStopCheck: setInterval,
           cancelStopCheck: clearInterval,
           isStopping: () => state.stopping,

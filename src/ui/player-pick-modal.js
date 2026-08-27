@@ -1,4 +1,4 @@
-import { createFutbinPlayerUrl } from '../reward/recap.js';
+import { createFutbinPlayerUrl, resolveRecapCardTheme } from '../reward/recap.js';
 import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 function applyStyles(element, styles) {
@@ -10,12 +10,24 @@ function candidateName(candidate, fallback, itemDisplayName) {
   return String(value || 'Unknown player');
 }
 
-function candidateDetails(candidate) {
-  return [
-    `rating:${Number(candidate?.rating || 0) || '?'}`,
-    candidate?.special ? 'special' : 'normal',
-    candidate?.duplicate ? 'duplicate' : 'new',
-  ].join(', ');
+function candidateTheme(candidate, resolveNativeTheme) {
+  const item = candidate?.item || {};
+  const nativeTheme = typeof resolveNativeTheme === 'function'
+    ? resolveNativeTheme(item)
+    : null;
+  const theme = resolveRecapCardTheme({
+    rating: Number(candidate?.rating || item.rating || 0),
+    special: candidate?.special === true,
+    rare: candidate?.rare === true,
+    tier: item.tier,
+  }, nativeTheme || undefined);
+  return {
+    accent: theme.accent,
+    background: theme.background,
+    foreground: theme.foreground,
+    rating: theme.rating,
+    muted: theme.muted,
+  };
 }
 
 function candidatePrice(candidate, formatPrice) {
@@ -80,8 +92,7 @@ export function waitForManualPlayerPickSelection(options = {}) {
 
     const refresh = () => {
       cards.forEach(({ card, candidate }) => {
-        card.style.borderColor = selected.has(candidate) ? '#64d77a' : '#536171';
-        card.style.background = selected.has(candidate) ? '#243c2b' : '#202731';
+        card.style.boxShadow = selected.has(candidate) ? '0 0 0 2px #64d77a' : 'none';
       });
       confirm.disabled = selected.size !== pickCount;
     };
@@ -92,10 +103,12 @@ export function waitForManualPlayerPickSelection(options = {}) {
       card.tabIndex = 0;
       const description = String(options.describeCandidate(candidate) || '');
       card.title = description;
+      const theme = candidateTheme(candidate, options.resolveNativeTheme);
       applyStyles(card, {
-        minHeight: '68px', textAlign: 'left', color: '#f3f5f7', background: '#202731', border: '1px solid #536171',
-        padding: '9px', cursor: 'pointer', lineHeight: '1.35', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto',
-        gridTemplateRows: 'auto auto', gap: '4px 8px', alignItems: 'center',
+        minHeight: '72px', textAlign: 'left', color: theme.foreground, background: theme.background,
+        borderLeft: `4px solid ${theme.accent}`, padding: '8px 10px', cursor: 'pointer', lineHeight: '1.3',
+        display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'auto auto',
+        rowGap: '4px', alignItems: 'center', boxSizing: 'border-box',
       });
       const futbinUrl = candidateFutbinUrl(candidate, options.resolveFutbinPlayerId);
       const name = options.dom.create(futbinUrl ? 'a' : 'span');
@@ -110,21 +123,36 @@ export function waitForManualPlayerPickSelection(options = {}) {
       }
       applyStyles(name, {
         gridColumn: '1', gridRow: '1', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        fontWeight: '700', color: futbinUrl ? '#9EC5FF' : '#F3F5F7', textDecoration: futbinUrl ? 'underline' : 'none',
+        fontWeight: '700', color: theme.foreground, textDecoration: futbinUrl ? 'underline' : 'none',
       });
-      const details = options.dom.create('span');
-      details.textContent = candidateDetails(candidate);
-      details.title = details.textContent;
-      applyStyles(details, {
-        gridColumn: '1', gridRow: '2', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#B7C2D0', fontSize: '12px',
+      const tagRow = options.dom.create('div');
+      applyStyles(tagRow, {
+        gridColumn: '1', gridRow: '2', display: 'flex', alignItems: 'center', gap: '6px', minWidth: '0',
+      });
+      const ratingBadge = options.dom.create('span');
+      ratingBadge.textContent = String(Number(candidate?.rating || 0) || '?');
+      ratingBadge.title = `Rating ${ratingBadge.textContent}`;
+      applyStyles(ratingBadge, {
+        minWidth: '34px', padding: '2px 6px', boxSizing: 'border-box', textAlign: 'center', lineHeight: '18px',
+        color: theme.rating, background: theme.accent, borderRadius: '2px', fontWeight: '700', fontSize: '13px',
+        flex: '0 0 auto',
+      });
+      const status = options.dom.create('span');
+      status.textContent = candidate?.duplicate ? 'dupe' : 'new';
+      status.title = candidate?.duplicate ? 'Duplicate card (already owned)' : 'New card';
+      applyStyles(status, {
+        color: theme.muted, fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.04em',
+        flex: '0 0 auto',
       });
       const price = options.dom.create('span');
       price.textContent = candidatePrice(candidate, options.formatPrice);
       price.title = price.textContent;
       applyStyles(price, {
-        gridColumn: '2', gridRow: '1 / span 2', alignSelf: 'center', whiteSpace: 'nowrap', color: '#FFD27A', fontWeight: '700', fontSize: '12px',
+        marginLeft: 'auto', whiteSpace: 'nowrap', color: theme.accent, fontWeight: '700', fontSize: '12px',
+        flex: '0 0 auto',
       });
-      card.append(name, details, price);
+      tagRow.append(ratingBadge, status, price);
+      card.append(name, tagRow);
       const toggle = () => {
         if (selected.has(candidate)) selected.delete(candidate);
         else if (selected.size < pickCount) selected.add(candidate);
