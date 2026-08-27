@@ -104,12 +104,24 @@ export function waitForManualPlayerPickSelection(options = {}) {
       const description = String(options.describeCandidate(candidate) || '');
       card.title = description;
       const theme = candidateTheme(candidate, options.resolveNativeTheme);
+      const isNew = candidate?.duplicate !== true;
       applyStyles(card, {
-        minHeight: '72px', textAlign: 'left', color: theme.foreground, background: theme.background,
+        position: 'relative', minHeight: '72px', textAlign: 'left', color: theme.foreground, background: theme.background,
         borderLeft: `4px solid ${theme.accent}`, padding: '8px 10px', cursor: 'pointer', lineHeight: '1.3',
         display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'auto auto',
         rowGap: '4px', alignItems: 'center', boxSizing: 'border-box',
       });
+      if (isNew) {
+        const ribbon = options.dom.create('span');
+        ribbon.textContent = 'NEW';
+        ribbon.title = 'New card (not yet owned)';
+        applyStyles(ribbon, {
+          position: 'absolute', top: '4px', right: '6px', padding: '2px 7px', borderRadius: '9px',
+          background: '#64d77a', color: '#0a1d10', fontSize: '10px', fontWeight: '800',
+          letterSpacing: '0.08em', boxShadow: '0 0 8px rgba(100, 215, 122, 0.45)',
+        });
+        card.appendChild(ribbon);
+      }
       const futbinUrl = candidateFutbinUrl(candidate, options.resolveFutbinPlayerId);
       const name = options.dom.create(futbinUrl ? 'a' : 'span');
       name.textContent = candidateName(candidate, description, options.itemDisplayName);
@@ -124,6 +136,7 @@ export function waitForManualPlayerPickSelection(options = {}) {
       applyStyles(name, {
         gridColumn: '1', gridRow: '1', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         fontWeight: '700', color: theme.foreground, textDecoration: futbinUrl ? 'underline' : 'none',
+        paddingRight: isNew ? '42px' : '0',
       });
       const tagRow = options.dom.create('div');
       applyStyles(tagRow, {

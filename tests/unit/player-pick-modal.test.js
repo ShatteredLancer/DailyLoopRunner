@@ -142,4 +142,27 @@ describe('manual Player Pick modal', () => {
       expect(cancelStopCheck).toHaveBeenCalledWith(11);
     });
   });
+
+  it('adds a green NEW ribbon only on non-duplicate candidates', () => {
+    const harness = createUiHarness();
+    waitForManualPlayerPickSelection({
+      dom: harness.dom,
+      ranked: [
+        { item: { id: 1, name: 'New Card' }, rating: 95, special: true, duplicate: false, price: 100000 },
+        { item: { id: 2, name: 'Owned Card' }, rating: 96, special: true, duplicate: true, price: 50000 },
+      ],
+      pickCount: 1,
+      reason: 'special',
+      describeCandidate: () => '',
+      scheduleStopCheck: () => 13,
+      cancelStopCheck: vi.fn(),
+      isStopping: () => false,
+    });
+    const ribbons = harness.created.filter((element) => element.textContent === 'NEW' && element.style?.position === 'absolute');
+    expect(ribbons).toHaveLength(1);
+    expect(ribbons[0]).toMatchObject({ style: expect.objectContaining({ background: '#64d77a', fontWeight: '800' }) });
+    const dupeCard = harness.created.filter((element) => element.role === 'button')[1];
+    expect(dupeCard.style.opacity).toBeFalsy();
+    expect(dupeCard.style.filter).toBeFalsy();
+  });
 });
