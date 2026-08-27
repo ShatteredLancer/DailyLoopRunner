@@ -583,6 +583,30 @@ describe('current direct side-effect call baseline', () => {
     expect(autoTotwDefinition).toMatch(/\.\.\.createTotwUpgradePolicy\(\),[\s\S]*?\.\.\.override,/);
   });
 
+  it('keeps Batch Open Rare Gold recovery bound to live dynamic Pick metadata and the triggering duplicate', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const start = source.indexOf('async function trySubmitUnassignedRecoveryPlayerPick');
+    const end = source.indexOf('function buildUnassignedRecoveryResolvers', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const recovery = source.slice(start, end);
+    expect(recovery).toContain('resolveRareGoldPlayerPickCandidates(selector, scanned');
+    expect(recovery).toContain('includeExhaustedBounded: true');
+    expect(recovery).toContain('loadDynamicSbcDiscoveryChallenges(set, candidate, {');
+    expect(recovery).toContain('cachedSnapshot: true');
+    expect(recovery).toContain('snapshotDiscoverySet(set, challenges)');
+    expect(recovery).toContain('preferredSignalRefs: triggerRefs');
+    expect(recovery).toContain('requirePreferredSignal: true');
+    expect(recovery).toContain('await openSbcSet(set, {');
+    expect(recovery).toContain('challenge: incomplete[0].challenge');
+    expect(recovery).toContain('ensureRegisteredChallenge: true');
+    expect(recovery).toMatch(/submitPlayerPickChallenge\([\s\S]*?opened,/);
+    expect(recovery).toMatch(/findUnassignedPlayerPick\(pickDef, 10, \{[\s\S]*?forceFresh: true/);
+    expect(recovery).toMatch(/findUnassignedPlayerPick\(pendingDefinition, 1, \{[\s\S]*?forceFresh: true/);
+    expect(recovery).toContain('redeemAndSelectPlayerPick(pickItem, pickDef');
+    expect(recovery).toContain("enableRecovery: false");
+  });
+
   it('keeps dynamic EA player groups opaque instead of expanding named card types', async () => {
     const discoverySource = await readFile(path.join(root, 'src', 'config', 'upgrade-discovery.js'), 'utf8');
     const policySource = await readFile(path.join(root, 'src', 'config', 'upgrade-policies.js'), 'utf8');

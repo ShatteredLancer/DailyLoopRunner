@@ -306,6 +306,22 @@ function renderPickSelector(path, value = {}, context) {
   </div></section>`;
 }
 
+function renderRecoveryPlayerPickSelector(path, value = {}, context) {
+  const enabled = value?.material === 'rare-gold';
+  const order = Array.isArray(value?.repeatabilityOrder) ? value.repeatabilityOrder : ['bounded', 'unlimited'];
+  const unlimitedFirst = order[0] === 'unlimited';
+  return `<section class="dlr-builder-form-section"><h3>Dynamic Player Pick recovery</h3><div class="dlr-builder-form-grid">
+    ${fieldRow('Material', selectInput(`${path}.material`, value?.material, [
+      { value: '', label: 'Disabled' },
+      { value: 'rare-gold', label: 'Rare Gold recovery' },
+    ], context.readOnly))}
+    ${fieldRow('Minimum reward rating', textInput(`${path}.minRewardRating`, value?.minRewardRating ?? (enabled ? 85 : ''), 'number', context.readOnly))}
+    ${fieldRow('Maximum challenges', textInput(`${path}.maxChallenges`, value?.maxChallenges ?? (enabled ? 1 : ''), 'number', context.readOnly))}
+    ${fieldRow('Minimum Rare Gold cost', textInput(`${path}.minRareGoldCost`, value?.minRareGoldCost ?? (enabled ? 1 : ''), 'number', context.readOnly))}
+    ${fieldRow('Pick preference', `<select data-builder-field="${escapeHtml(`${path}.repeatabilityOrder`)}" data-builder-value-type="recovery-pick-order"${disabled(context.readOnly)}><option value="bounded-first"${selected(unlimitedFirst, false)}>Limited uses first</option><option value="unlimited-first"${selected(unlimitedFirst, true)}>Unlimited uses first</option></select>`)}
+  </div></section>`;
+}
+
 function renderUpgrade(path, value = {}, context, options = {}) {
   return `<div class="dlr-builder-subsection">
     <div class="dlr-builder-section-head"><h4>${escapeHtml(options.label || value.name || 'Upgrade')}</h4>${options.removable ? `<button data-builder-action="remove-list" data-path="${escapeHtml(options.listPath)}" data-index="${options.index}"${disabled(context.readOnly)}>Remove</button>` : ''}</div>
@@ -528,6 +544,7 @@ function renderRecoveryEditor(object, kind, context) {
         ${fieldRow('Insufficient', selectInput('onInsufficient', object.onInsufficient, [{ value: '', label: 'Default' }, { value: 'continue', label: 'Continue' }, { value: 'stop', label: 'Stop' }], context.readOnly))}
         ${fieldRow('Blocked', selectInput('onBlocked', object.onBlocked, [{ value: '', label: 'Default (stop)' }, { value: 'stop', label: 'Stop' }], context.readOnly))}
       </div></section>
+      ${renderRecoveryPlayerPickSelector('playerPickSelector', object.playerPickSelector, context)}
       ${renderActivityBinding('activityBinding', object.activityBinding, context)}
       ${renderList('sbcNames', 'SBC aliases', object.sbcNames, 'text', context)}
       ${renderRequirements('requirements', 'Requirements', object.requirements, context)}

@@ -66,6 +66,17 @@ function click(root, dataset) {
   root.listeners.get('click')({ target });
 }
 
+function change(root, dataset, value, options = {}) {
+  root.listeners.get('change')({
+    target: {
+      dataset,
+      value,
+      type: options.type || 'select-one',
+      tagName: options.tagName || 'SELECT',
+    },
+  });
+}
+
 describe('Workflow and Loop Builder controller', () => {
   it('opens and closes without modifying the active runtime configuration', () => {
     const { builder, root, applyConfig } = harness();
@@ -87,6 +98,35 @@ describe('Workflow and Loop Builder controller', () => {
     expect(root.innerHTML).toContain('data-mobile-section="details"');
     click(root, { builderAction: 'select-mobile-section', section: 'library' });
     expect(root.innerHTML).toContain('data-mobile-section="library"');
+  });
+
+  it('configures the dynamic Rare Gold recovery Pick with safe defaults and a selectable preference order', () => {
+    const base = config();
+    base.recoveryRecipes = [{
+      id: 'recovery', name: 'Recovery', sbcNames: ['SBC'], requirements: [{ tier: 'gold', count: 1 }],
+      maxSubmissions: 1, mustConsumeTrigger: true, onUnavailable: 'continue', onInsufficient: 'continue', onBlocked: 'stop',
+    }];
+    const { builder, root } = harness(null, base);
+    builder.open('recovery');
+
+    change(root, { builderField: 'playerPickSelector.material' }, 'rare-gold');
+    expect(builder.getStore().profiles[0].draftConfig.recoveryRecipes[0].playerPickSelector).toEqual({
+      material: 'rare-gold',
+      minRewardRating: 85,
+      maxChallenges: 1,
+      minRareGoldCost: 1,
+      repeatabilityOrder: ['bounded', 'unlimited'],
+    });
+
+    change(root, {
+      builderField: 'playerPickSelector.repeatabilityOrder',
+      builderValueType: 'recovery-pick-order',
+    }, 'unlimited-first');
+    expect(builder.getStore().profiles[0].draftConfig.recoveryRecipes[0].playerPickSelector.repeatabilityOrder)
+      .toEqual(['unlimited', 'bounded']);
+
+    change(root, { builderField: 'playerPickSelector.material' }, '');
+    expect(builder.getStore().profiles[0].draftConfig.recoveryRecipes[0]).not.toHaveProperty('playerPickSelector');
   });
 
   it('shows an unbound scanned Pick in the Dynamic Picks library', () => {

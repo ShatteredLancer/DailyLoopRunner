@@ -6,6 +6,7 @@ import {
   mergeScannedPlayerPickMetadata,
   parsePlayerPickSbcSnapshot,
   readPlayerPickRewardCounts,
+  resolveRareGoldPlayerPickCandidates,
   resolvePlayerPickLoopReference,
   resolvePlayerPickLoopSelector,
 } from '../../src/config/player-pick-discovery.js';
@@ -503,6 +504,148 @@ describe('dynamic Player Pick SBC discovery', () => {
       .toMatchObject({ status: 'matched', loop: { id: 'common' } });
     expect(resolvePlayerPickLoopSelector({ material: 'common-gold' }, [common, { ...common, id: 'other', sbcSetIds: [3], pickItemResourceIds: [30] }]))
       .toMatchObject({ status: 'ambiguous', loop: null });
+  });
+
+  it('prioritizes usable bounded rare-Gold recovery Picks before unlimited alternatives without fixed identities', () => {
+    const selector = {
+      material: 'rare-gold',
+      minRewardRating: 85,
+      maxChallenges: 1,
+      minRareGoldCost: 1,
+      repeatabilityOrder: ['bounded', 'unlimited'],
+    };
+    const rareGoldRequirements = [{
+      tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false,
+    }];
+    const unlimited = {
+      id: 'future-unlimited-set',
+      strategy: 'playerPickSbc',
+      discovered: true,
+      sbcSetIds: [901],
+      pickItemResourceIds: [1901],
+      challengeRequirements: [rareGoldRequirements],
+      challengesPerPick: 1,
+      pickCandidateCount: 2,
+      pickCount: 1,
+      dynamicRewardMinRating: 85,
+      repeatability: 'unlimited',
+      remainingCompletions: null,
+    };
+    const bounded = {
+      ...unlimited,
+      id: 'future-bounded-set',
+      sbcSetIds: [902],
+      pickItemResourceIds: [1902],
+      pickCount: 2,
+      pickCandidateCount: 3,
+      dynamicRewardMinRating: 86,
+      repeatability: 'bounded',
+      remainingCompletions: 3,
+    };
+
+    const result = resolveRareGoldPlayerPickCandidates(selector, [unlimited, bounded]);
+
+    expect(result.status).toBe('matched');
+    expect(result.matches.map((loop) => loop.id)).toEqual(['future-bounded-set', 'future-unlimited-set']);
+  });
+
+  it('accepts a live 1 of 3 85+ Pick that consumes six Rare Gold players for recovery', () => {
+    const selector = {
+      material: 'rare-gold',
+      minRewardRating: 85,
+      maxChallenges: 1,
+      minRareGoldCost: 1,
+      repeatabilityOrder: ['bounded', 'unlimited'],
+    };
+    const parsed = parsePlayerPickSbcSnapshot({
+      set: {
+        id: 1385,
+        name: '1 of 3 85+ Player Pick',
+        timesCompleted: 0,
+        repeats: 5,
+        rewards: [{
+          type: 'PLAYER_PICK',
+          name: '1 of 3 85+ Player Pick',
+          resourceId: 501385,
+          candidateCount: 3,
+          selectionCount: 1,
+        }],
+        challenges: [{
+          id: 4385,
+          requiredPlayerCount: 6,
+          eligibilityRequirements: [
+            { key: 'PLAYER_QUALITY', values: [3], count: 6 },
+            { key: 'PLAYER_RARITY', values: [1], count: 6 },
+          ],
+        }],
+      },
+    });
+
+    expect(parsed).toMatchObject({
+      status: 'supported',
+      loop: {
+        requirements: [{ tier: 'gold', rarity: 'rare', count: 6, allowSpecial: false }],
+        challengesPerPick: 1,
+        dynamicRewardMinRating: 85,
+      },
+    });
+    expect(resolveRareGoldPlayerPickCandidates(selector, [parsed.loop])).toMatchObject({
+      status: 'matched',
+      loop: { sbcSetIds: [1385] },
+    });
+  });
+
+  it('fails closed for exhausted, unknown, multi-challenge, incomplete, or non-rare recovery Pick metadata', () => {
+    const selector = {
+      material: 'rare-gold',
+      minRewardRating: 85,
+      maxChallenges: 1,
+      minRareGoldCost: 1,
+      repeatabilityOrder: ['bounded', 'unlimited'],
+    };
+    const safe = {
+      id: 'safe',
+      strategy: 'playerPickSbc',
+      scannedMetadata: true,
+      sbcSetIds: [1],
+      pickItemResourceIds: [10],
+      requirements: [{ tier: 'gold', rarity: 'rare', count: 3, playerOnly: true, allowSpecial: false }],
+      challengesPerPick: 1,
+      pickCandidateCount: 2,
+      pickCount: 1,
+      dynamicRewardMinRating: 85,
+      repeatability: 'bounded',
+      remainingCompletions: 1,
+    };
+    const rejected = [
+      { ...safe, id: 'exhausted', remainingCompletions: 0 },
+      { ...safe, id: 'unknown', repeatability: 'unknown', remainingCompletions: null },
+      { ...safe, id: 'two-challenges', challengesPerPick: 2, challengeRequirements: [safe.requirements, safe.requirements] },
+      { ...safe, id: 'missing-rating', dynamicRewardMinRating: null },
+      { ...safe, id: 'common-only', requirements: [{ tier: 'gold', rarity: 'common', count: 3, playerOnly: true, allowSpecial: false }] },
+      { ...safe, id: 'not-scanned', scannedMetadata: false, discovered: false },
+    ];
+
+    expect(resolveRareGoldPlayerPickCandidates(selector, rejected)).toEqual({
+      status: 'missing', loop: null, matches: [],
+    });
+    expect(resolveRareGoldPlayerPickCandidates(selector, [rejected[0]], {
+      includeExhaustedBounded: true,
+    })).toMatchObject({ status: 'matched', loop: { id: 'exhausted' } });
+  });
+
+  it('rejects invalid rare-Gold recovery selector options rather than guessing a candidate', () => {
+    expect(resolveRareGoldPlayerPickCandidates({ material: 'rare-gold' }, [])).toEqual({
+      status: 'invalid', loop: null, matches: [],
+    });
+    expect(resolveRareGoldPlayerPickCandidates({
+      material: 'rare-gold', minRewardRating: 84, maxChallenges: 1, minRareGoldCost: 1,
+      repeatabilityOrder: ['bounded', 'unlimited'],
+    }, [])).toEqual({ status: 'invalid', loop: null, matches: [] });
+    expect(resolveRareGoldPlayerPickCandidates({
+      material: 'rare-gold', minRewardRating: 85, maxChallenges: 1, minRareGoldCost: 1,
+      repeatabilityOrder: ['unknown'],
+    }, [])).toEqual({ status: 'invalid', loop: null, matches: [] });
   });
 
   it('builds a replaceable session list without duplicating static Picks', async () => {

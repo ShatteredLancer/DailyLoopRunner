@@ -331,6 +331,57 @@ describe('loop configuration schema', () => {
     );
   });
 
+  it('validates dynamic rare-Gold Player Pick recovery selectors fail closed', () => {
+    const base = {
+      id: 'rare-gold-player-pick',
+      name: 'Rare Gold Player Pick recovery',
+      playerPickSelector: {
+        material: 'rare-gold',
+        minRewardRating: 85,
+        maxChallenges: 1,
+        minRareGoldCost: 1,
+        repeatabilityOrder: ['bounded', 'unlimited'],
+      },
+      requirements: [{ tier: 'gold', rarity: 'rare', count: 1, playerOnly: true, allowSpecial: false }],
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      maxSubmissions: 1,
+      mustConsumeTrigger: true,
+    };
+    const config = {
+      loops: [{
+        id: 'recipe-test-loop',
+        name: 'Recipe test loop',
+        strategy: 'fillAndVerifySbc',
+        sbcNames: ['Recipe test SBC'],
+        requirements: [{ tier: 'gold', count: 1 }],
+      }],
+      recoveryRecipes: [base],
+      unassignedRecoveryPolicies: [{
+        id: 'rare-gold-overflow',
+        match: { tier: 'gold', rarity: 'rare', playerOnly: true, allowSpecial: false, maxRating: 82 },
+        steps: [{ recipeId: base.id }],
+      }],
+      defaultUnassignedRecoveryPolicyIds: ['rare-gold-overflow'],
+    };
+    expect(() => validateLoopConfig(config, 'rare-pick')).not.toThrow();
+    expect(() => validateLoopConfig({
+      ...config,
+      recoveryRecipes: [{ ...base, playerPickSelector: { ...base.playerPickSelector, maxChallenges: 2 } }],
+    }, 'rare-pick')).toThrow(/playerPickSelector\.maxChallenges must be 1/);
+    expect(() => validateLoopConfig({
+      ...config,
+      recoveryRecipes: [{ ...base, playerPickSelector: { ...base.playerPickSelector, minRewardRating: 84 } }],
+    }, 'rare-pick')).toThrow(/playerPickSelector\.minRewardRating must be an integer between 85 and 99/);
+    expect(() => validateLoopConfig({
+      ...config,
+      recoveryRecipes: [{ ...base, playerPickSelector: { ...base.playerPickSelector, repeatabilityOrder: ['bounded'] } }],
+    }, 'rare-pick')).toThrow(/playerPickSelector\.repeatabilityOrder must contain bounded and unlimited once each/);
+    expect(() => validateLoopConfig({
+      ...config,
+      recoveryRecipes: [{ ...base, playerPickSelector: { ...base.playerPickSelector, unsupported: true } }],
+    }, 'rare-pick')).toThrow(/playerPickSelector\.unsupported is not supported/);
+  });
+
   it('validates rating and Player Pick limits without runtime dependencies', () => {
     expect(validateLoopDef({
       id: 'rating-loop',

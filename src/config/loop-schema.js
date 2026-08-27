@@ -1109,6 +1109,50 @@ function validateRecoveryAction(value, path, errors) {
   }
 }
 
+function validateRecoveryPlayerPickSelector(selector, path, errors) {
+  if (!isPlainObject(selector)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  const allowedFields = new Set([
+    'material',
+    'minRewardRating',
+    'maxChallenges',
+    'minRareGoldCost',
+    'repeatabilityOrder',
+  ]);
+  Object.keys(selector).forEach((field) => {
+    if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
+  });
+  if (selector.material !== 'rare-gold') errors.push(`${path}.material must be rare-gold`);
+  const minRewardRating = Number(selector.minRewardRating);
+  if (!Number.isInteger(minRewardRating) || minRewardRating < 85 || minRewardRating > 99) {
+    errors.push(`${path}.minRewardRating must be an integer between 85 and 99`);
+  }
+  if (Number(selector.maxChallenges) !== 1) errors.push(`${path}.maxChallenges must be 1`);
+  const minRareGoldCost = Number(selector.minRareGoldCost);
+  if (!Number.isInteger(minRareGoldCost) || minRareGoldCost < 1 || minRareGoldCost > 11) {
+    errors.push(`${path}.minRareGoldCost must be an integer between 1 and 11`);
+  }
+  const order = Array.isArray(selector.repeatabilityOrder) ? selector.repeatabilityOrder : [];
+  if (order.length !== 2
+    || new Set(order).size !== 2
+    || !order.includes('bounded')
+    || !order.includes('unlimited')) {
+    errors.push(`${path}.repeatabilityOrder must contain bounded and unlimited once each`);
+  }
+}
+
+function validateDynamicPlayerPickRecoveryRecipe(recipe, path, errors) {
+  validateRecoveryPlayerPickSelector(recipe.playerPickSelector, `${path}.playerPickSelector`, errors);
+  validateSbcFodderPolicy(recipe.sbcFodderPolicy, `${path}.sbcFodderPolicy`, errors);
+  validateRequirements(recipe.requirements, `${path}.requirements`, errors, true);
+  validatePileList(recipe.priorityPiles, `${path}.priorityPiles`, errors);
+  if (recipe.sbcNames !== undefined) errors.push(`${path}.sbcNames is not supported with playerPickSelector`);
+  if (recipe.activityBinding !== undefined) errors.push(`${path}.activityBinding is not supported with playerPickSelector`);
+  if (recipe.challengeRequirements !== undefined) errors.push(`${path}.challengeRequirements is not supported with playerPickSelector`);
+}
+
 function validateRecoveryRecipeList(recipes, label = 'recoveryRecipes') {
   if (!Array.isArray(recipes)) fail(`${label} must be an array`);
   const seen = new Set();
@@ -1119,7 +1163,11 @@ function validateRecoveryRecipeList(recipes, label = 'recoveryRecipes') {
     if (typeof recipe.id !== 'string' || !recipe.id.trim()) errors.push(`${path}.id is required`);
     if (seen.has(recipe.id)) errors.push(`${label} has duplicate id: ${recipe.id}`);
     seen.add(recipe.id);
-    validateUpgradeDef(recipe, path, errors);
+    if (recipe.playerPickSelector !== undefined) {
+      validateDynamicPlayerPickRecoveryRecipe(recipe, path, errors);
+    } else {
+      validateUpgradeDef(recipe, path, errors);
+    }
     if (recipe.maxSubmissions !== undefined && Number(recipe.maxSubmissions) !== 1) {
       errors.push(`${path}.maxSubmissions must be 1`);
     }

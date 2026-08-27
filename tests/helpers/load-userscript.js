@@ -178,6 +178,8 @@ export async function loadUserscript(options = {}) {
       runRollingStorageSinkRecovery,
       createRecapItemHydrator,
       synchronizeCachedSbcChallengeSquad,
+      loadDynamicSbcDiscoveryChallenges,
+      resolveSbcChallengeForScreen,
       getDailyChallengeRemaining,
       getDailySetRemaining,
       getPackInventorySnapshot,

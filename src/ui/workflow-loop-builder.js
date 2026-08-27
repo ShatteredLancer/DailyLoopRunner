@@ -91,6 +91,9 @@ function normalizeFieldValue(element) {
   if (valueType === 'string-list') {
     return [...(element?.selectedOptions || [])].map((option) => option.value).filter(Boolean);
   }
+  if (valueType === 'recovery-pick-order') {
+    return raw === 'unlimited-first' ? ['unlimited', 'bounded'] : ['bounded', 'unlimited'];
+  }
   if (valueType === 'number') return raw === '' ? undefined : Number(raw);
   if (element?.tagName === 'SELECT' && raw === '') return undefined;
   if (raw === '' && ['special-kind', 'loop-reference'].includes(valueType)) return undefined;
@@ -392,6 +395,23 @@ export function createWorkflowLoopBuilder(options = {}) {
       setDraftConfig(renamed.config);
       selectedId = renamed.id;
       render();
+      return;
+    }
+    if (selectedKind === 'recoveryRecipes' && path === 'playerPickSelector.material') {
+      updateSelectedObject((object) => {
+        if (value !== 'rare-gold') return setBuilderPath(object, 'playerPickSelector', undefined);
+        return {
+          ...object,
+          playerPickSelector: {
+            material: 'rare-gold',
+            minRewardRating: 85,
+            maxChallenges: 1,
+            minRareGoldCost: 1,
+            repeatabilityOrder: ['bounded', 'unlimited'],
+            ...(object.playerPickSelector || {}),
+          },
+        };
+      });
       return;
     }
     updateSelectedObject((object) => setBuilderPath(object, path, value));

@@ -338,6 +338,47 @@
       "onBlocked": "stop"
     },
     {
+      "id": "rare-gold-player-pick",
+      "name": "Dynamic Rare Gold Player Pick",
+      "sbcFodderPolicy": { "mode": "low-gold" },
+      "playerPickSelector": {
+        "material": "rare-gold",
+        "minRewardRating": 85,
+        "maxChallenges": 1,
+        "minRareGoldCost": 1,
+        "repeatabilityOrder": [
+          "bounded",
+          "unlimited"
+        ]
+      },
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "rare",
+          "count": 1,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        }
+      ],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
+      "maxSubmissions": 1,
+      "mustConsumeTrigger": true,
+      "onUnavailable": "continue",
+      "onInsufficient": "continue",
+      "onBlocked": "stop"
+    },
+    {
       "id": "2x84-upgrade",
       "name": "Rare Gold Recycling Upgrade",
       "sbcFodderPolicy": { "mode": "low-gold" },
@@ -453,6 +494,9 @@
         "maxRating": 82
       },
       "steps": [
+        {
+          "recipeId": "rare-gold-player-pick"
+        },
         {
           "recipeId": "2x84-upgrade"
         }

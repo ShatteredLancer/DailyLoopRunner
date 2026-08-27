@@ -195,6 +195,25 @@ describe('opened item materialization', () => {
     expect(result.aliasRoutes).toEqual([{ item: opened, destination: { pile: 'transfer', item: landed } }]);
   });
 
+  it('keeps the newly opened item routed when EA swaps it into Club and sends the old Club counterpart to Transfer', () => {
+    const opened = { id: 101, definitionId: 501, type: 'player', rating: 80, rareflag: 1, duplicateId: 201 };
+    const formerClubCounterpart = { id: 201, definitionId: 501, type: 'player', rating: 80, rareflag: 1 };
+    const routingBaseline = createOpenedItemRoutingBaseline({ club: [formerClubCounterpart] });
+
+    const result = classifyOpenedItemRouting({
+      items: [opened],
+      piles: {
+        club: [opened],
+        transfer: [formerClubCounterpart],
+      },
+      routingBaseline,
+    });
+
+    expect(result.routedItems).toEqual([opened]);
+    expect(result.pendingItems).toEqual([]);
+    expect(result.aliasRoutes).toEqual([]);
+  });
+
   it('routes a remapped destination entity when EA hydrates tradeability after the response', () => {
     const opened = { id: 101, definitionId: 501, type: 'player', rating: 84, rareflag: 1 };
     const existing = { id: 201, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: true };

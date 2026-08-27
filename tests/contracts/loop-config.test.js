@@ -220,7 +220,21 @@ describe('loop configuration contracts', () => {
       'fof-glory-hunters-crafting-upgrade',
       'gold-upgrade',
     ]);
-    expect(builtInPolicies['rare-gold-duplicate-overflow'].steps.map((step) => step.recipeId)).toEqual(['2x84-upgrade']);
+    expect(builtInPolicies['rare-gold-duplicate-overflow'].steps.map((step) => step.recipeId)).toEqual([
+      'rare-gold-player-pick',
+      '2x84-upgrade',
+    ]);
+
+    expect(api.RECOVERY_RECIPES.find((recipe) => recipe.id === 'rare-gold-player-pick'))
+      .toMatchObject({
+        playerPickSelector: {
+          material: 'rare-gold',
+          minRewardRating: 85,
+          maxChallenges: 1,
+          minRareGoldCost: 1,
+          repeatabilityOrder: ['bounded', 'unlimited'],
+        },
+      });
 
     const protectedRecipes = api.RECOVERY_RECIPES.filter((recipe) =>
       recipe.requirements.some((requirement) => requirement.tier === 'gold')

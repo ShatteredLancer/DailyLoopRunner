@@ -335,6 +335,8 @@ describe('Workflow and Loop Builder view', () => {
     expect(recoveryHtml).toContain('data-builder-field="maxSubmissions"');
     expect(recoveryHtml).toContain('data-builder-field="mustConsumeTrigger"');
     expect(recoveryHtml).toContain('data-builder-field="onBlocked"');
+    expect(recoveryHtml).toContain('data-builder-field="playerPickSelector.material"');
+    expect(recoveryHtml).toContain('data-builder-field="playerPickSelector.repeatabilityOrder"');
   });
 
   it('defines stable desktop and narrow responsive layouts', () => {

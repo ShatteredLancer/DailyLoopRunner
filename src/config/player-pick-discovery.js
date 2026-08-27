@@ -553,6 +553,82 @@ export function resolvePlayerPickLoopSelector(selector = {}, loops = []) {
   };
 }
 
+function normalizeRareGoldRecoverySelector(selector = {}) {
+  if (selector?.material !== 'rare-gold') return null;
+  const minRewardRating = positiveInteger(selector.minRewardRating);
+  const maxChallenges = positiveInteger(selector.maxChallenges);
+  const minRareGoldCost = positiveInteger(selector.minRareGoldCost);
+  const repeatabilityOrder = Array.isArray(selector.repeatabilityOrder)
+    ? selector.repeatabilityOrder.map(normalizedText)
+    : [];
+  if (!minRewardRating || minRewardRating < 85 || minRewardRating > 99 || maxChallenges !== 1 || !minRareGoldCost
+    || repeatabilityOrder.length !== 2
+    || new Set(repeatabilityOrder).size !== 2
+    || !repeatabilityOrder.includes('bounded')
+    || !repeatabilityOrder.includes('unlimited')) {
+    return null;
+  }
+  return { minRewardRating, maxChallenges, minRareGoldCost, repeatabilityOrder };
+}
+
+function normalRareGoldRecoveryPick(loop = {}, selector = {}) {
+  const groups = playerPickRequirementGroups(loop);
+  if (groups.length !== selector.maxChallenges
+    || Number(loop.challengesPerPick || 0) !== selector.maxChallenges
+    || !Number.isInteger(Number(loop.pickCandidateCount))
+    || !Number.isInteger(Number(loop.pickCount))
+    || Number(loop.pickCandidateCount) < Number(loop.pickCount)
+    || Number(loop.pickCount) < 1
+    || Number(loop.dynamicRewardMinRating) < selector.minRewardRating
+    || !loopSetIds(loop).size
+    || !loopRewardIds(loop).size
+    || !(loop.discovered === true || loop.scannedMetadata === true)) {
+    return false;
+  }
+  const requirements = groups[0];
+  if (!Array.isArray(requirements) || !requirements.length) return false;
+  let rareGoldCost = 0;
+  for (const requirement of requirements) {
+    if (requirement?.tier !== 'gold'
+      || requirement?.playerOnly !== true
+      || requirement?.allowSpecial !== false
+      || requirement?.special === true
+      || !positiveInteger(requirement?.count)) {
+      return false;
+    }
+    if (requirement.rarity === 'rare') rareGoldCost += Number(requirement.count);
+  }
+  return rareGoldCost >= selector.minRareGoldCost;
+}
+
+/**
+ * Resolves dynamically scanned Player Picks suitable for unassigned Rare Gold recovery.
+ * Candidate identity is the live Set/reward identity, never a display name or fixed ID.
+ */
+export function resolveRareGoldPlayerPickCandidates(selector = {}, loops = [], options = {}) {
+  const normalizedSelector = normalizeRareGoldRecoverySelector(selector);
+  if (!normalizedSelector) return { status: 'invalid', loop: null, matches: [] };
+  const order = new Map(normalizedSelector.repeatabilityOrder.map((value, index) => [value, index]));
+  const matches = (loops || [])
+    .filter((loop) => {
+      if (!normalRareGoldRecoveryPick(loop, normalizedSelector)) return false;
+      if (loop.repeatability === 'bounded') {
+        return options.includeExhaustedBounded === true || Number(loop.remainingCompletions) > 0;
+      }
+      return loop.repeatability === 'unlimited';
+    })
+    .sort((left, right) => (
+      Number(order.get(left.repeatability)) - Number(order.get(right.repeatability))
+      || Number(right.dynamicRewardMinRating) - Number(left.dynamicRewardMinRating)
+      || String(left.id || '').localeCompare(String(right.id || ''))
+    ));
+  return {
+    status: matches.length ? 'matched' : 'missing',
+    loop: matches[0] || null,
+    matches,
+  };
+}
+
 export function collectScannedPlayerPickLoopDefs(results = []) {
   const loops = [];
   const seen = new Set();

@@ -89,6 +89,18 @@ export const RECOVERY_RECIPES = Object.freeze([
     requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'common', count: 11 })],
   }),
   recipe({
+    id: 'rare-gold-player-pick',
+    name: 'Dynamic Rare Gold Player Pick',
+    playerPickSelector: Object.freeze({
+      material: 'rare-gold',
+      minRewardRating: 85,
+      maxChallenges: 1,
+      minRareGoldCost: 1,
+      repeatabilityOrder: Object.freeze(['bounded', 'unlimited']),
+    }),
+    requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'rare', count: 1 })],
+  }),
+  recipe({
     id: '2x84-upgrade',
     name: 'Rare Gold Recycling Upgrade',
     activityBinding: {
@@ -135,6 +147,7 @@ export const UNASSIGNED_RECOVERY_POLICIES = Object.freeze([
     id: 'rare-gold-duplicate-overflow',
     match: Object.freeze({ tier: 'gold', rarity: 'rare', playerOnly: true, allowSpecial: false, maxRating: 82 }),
     steps: Object.freeze([
+      Object.freeze({ recipeId: 'rare-gold-player-pick' }),
       Object.freeze({ recipeId: '2x84-upgrade' }),
     ]),
   }),

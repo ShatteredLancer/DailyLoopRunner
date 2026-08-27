@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.50
+// @version      0.8.51
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.50",
+    version: "0.8.51",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -2115,6 +2115,50 @@
     return {
       status: matches.length ? "ambiguous" : "missing",
       loop: null,
+      matches
+    };
+  }
+  function normalizeRareGoldRecoverySelector(selector = {}) {
+    if (selector?.material !== "rare-gold") return null;
+    const minRewardRating = positiveInteger(selector.minRewardRating);
+    const maxChallenges = positiveInteger(selector.maxChallenges);
+    const minRareGoldCost = positiveInteger(selector.minRareGoldCost);
+    const repeatabilityOrder = Array.isArray(selector.repeatabilityOrder) ? selector.repeatabilityOrder.map(normalizedText) : [];
+    if (!minRewardRating || minRewardRating < 85 || minRewardRating > 99 || maxChallenges !== 1 || !minRareGoldCost || repeatabilityOrder.length !== 2 || new Set(repeatabilityOrder).size !== 2 || !repeatabilityOrder.includes("bounded") || !repeatabilityOrder.includes("unlimited")) {
+      return null;
+    }
+    return { minRewardRating, maxChallenges, minRareGoldCost, repeatabilityOrder };
+  }
+  function normalRareGoldRecoveryPick(loop = {}, selector = {}) {
+    const groups = playerPickRequirementGroups(loop);
+    if (groups.length !== selector.maxChallenges || Number(loop.challengesPerPick || 0) !== selector.maxChallenges || !Number.isInteger(Number(loop.pickCandidateCount)) || !Number.isInteger(Number(loop.pickCount)) || Number(loop.pickCandidateCount) < Number(loop.pickCount) || Number(loop.pickCount) < 1 || Number(loop.dynamicRewardMinRating) < selector.minRewardRating || !loopSetIds(loop).size || !loopRewardIds(loop).size || !(loop.discovered === true || loop.scannedMetadata === true)) {
+      return false;
+    }
+    const requirements = groups[0];
+    if (!Array.isArray(requirements) || !requirements.length) return false;
+    let rareGoldCost = 0;
+    for (const requirement2 of requirements) {
+      if (requirement2?.tier !== "gold" || requirement2?.playerOnly !== true || requirement2?.allowSpecial !== false || requirement2?.special === true || !positiveInteger(requirement2?.count)) {
+        return false;
+      }
+      if (requirement2.rarity === "rare") rareGoldCost += Number(requirement2.count);
+    }
+    return rareGoldCost >= selector.minRareGoldCost;
+  }
+  function resolveRareGoldPlayerPickCandidates(selector = {}, loops = [], options = {}) {
+    const normalizedSelector = normalizeRareGoldRecoverySelector(selector);
+    if (!normalizedSelector) return { status: "invalid", loop: null, matches: [] };
+    const order = new Map(normalizedSelector.repeatabilityOrder.map((value, index) => [value, index]));
+    const matches = (loops || []).filter((loop) => {
+      if (!normalRareGoldRecoveryPick(loop, normalizedSelector)) return false;
+      if (loop.repeatability === "bounded") {
+        return options.includeExhaustedBounded === true || Number(loop.remainingCompletions) > 0;
+      }
+      return loop.repeatability === "unlimited";
+    }).sort((left, right) => Number(order.get(left.repeatability)) - Number(order.get(right.repeatability)) || Number(right.dynamicRewardMinRating) - Number(left.dynamicRewardMinRating) || String(left.id || "").localeCompare(String(right.id || "")));
+    return {
+      status: matches.length ? "matched" : "missing",
+      loop: matches[0] || null,
       matches
     };
   }
@@ -4367,6 +4411,18 @@
       requirements: [lowFodderRequirement({ tier: "gold", rarity: "common", count: 11 })]
     }),
     recipe({
+      id: "rare-gold-player-pick",
+      name: "Dynamic Rare Gold Player Pick",
+      playerPickSelector: Object.freeze({
+        material: "rare-gold",
+        minRewardRating: 85,
+        maxChallenges: 1,
+        minRareGoldCost: 1,
+        repeatabilityOrder: Object.freeze(["bounded", "unlimited"])
+      }),
+      requirements: [lowFodderRequirement({ tier: "gold", rarity: "rare", count: 1 })]
+    }),
+    recipe({
       id: "2x84-upgrade",
       name: "Rare Gold Recycling Upgrade",
       activityBinding: {
@@ -4412,6 +4468,7 @@
       id: "rare-gold-duplicate-overflow",
       match: Object.freeze({ tier: "gold", rarity: "rare", playerOnly: true, allowSpecial: false, maxRating: 82 }),
       steps: Object.freeze([
+        Object.freeze({ recipeId: "rare-gold-player-pick" }),
         Object.freeze({ recipeId: "2x84-upgrade" })
       ])
     })
@@ -6174,6 +6231,45 @@
       errors.push(`${path} must be continue or stop`);
     }
   }
+  function validateRecoveryPlayerPickSelector(selector, path, errors) {
+    if (!isPlainObject(selector)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    const allowedFields = /* @__PURE__ */ new Set([
+      "material",
+      "minRewardRating",
+      "maxChallenges",
+      "minRareGoldCost",
+      "repeatabilityOrder"
+    ]);
+    Object.keys(selector).forEach((field5) => {
+      if (!allowedFields.has(field5)) errors.push(`${path}.${field5} is not supported`);
+    });
+    if (selector.material !== "rare-gold") errors.push(`${path}.material must be rare-gold`);
+    const minRewardRating = Number(selector.minRewardRating);
+    if (!Number.isInteger(minRewardRating) || minRewardRating < 85 || minRewardRating > 99) {
+      errors.push(`${path}.minRewardRating must be an integer between 85 and 99`);
+    }
+    if (Number(selector.maxChallenges) !== 1) errors.push(`${path}.maxChallenges must be 1`);
+    const minRareGoldCost = Number(selector.minRareGoldCost);
+    if (!Number.isInteger(minRareGoldCost) || minRareGoldCost < 1 || minRareGoldCost > 11) {
+      errors.push(`${path}.minRareGoldCost must be an integer between 1 and 11`);
+    }
+    const order = Array.isArray(selector.repeatabilityOrder) ? selector.repeatabilityOrder : [];
+    if (order.length !== 2 || new Set(order).size !== 2 || !order.includes("bounded") || !order.includes("unlimited")) {
+      errors.push(`${path}.repeatabilityOrder must contain bounded and unlimited once each`);
+    }
+  }
+  function validateDynamicPlayerPickRecoveryRecipe(recipe2, path, errors) {
+    validateRecoveryPlayerPickSelector(recipe2.playerPickSelector, `${path}.playerPickSelector`, errors);
+    validateSbcFodderPolicy(recipe2.sbcFodderPolicy, `${path}.sbcFodderPolicy`, errors);
+    validateRequirements(recipe2.requirements, `${path}.requirements`, errors, true);
+    validatePileList(recipe2.priorityPiles, `${path}.priorityPiles`, errors);
+    if (recipe2.sbcNames !== void 0) errors.push(`${path}.sbcNames is not supported with playerPickSelector`);
+    if (recipe2.activityBinding !== void 0) errors.push(`${path}.activityBinding is not supported with playerPickSelector`);
+    if (recipe2.challengeRequirements !== void 0) errors.push(`${path}.challengeRequirements is not supported with playerPickSelector`);
+  }
   function validateRecoveryRecipeList(recipes, label = "recoveryRecipes") {
     if (!Array.isArray(recipes)) fail(`${label} must be an array`);
     const seen = /* @__PURE__ */ new Set();
@@ -6184,7 +6280,11 @@
       if (typeof recipe2.id !== "string" || !recipe2.id.trim()) errors.push(`${path}.id is required`);
       if (seen.has(recipe2.id)) errors.push(`${label} has duplicate id: ${recipe2.id}`);
       seen.add(recipe2.id);
-      validateUpgradeDef(recipe2, path, errors);
+      if (recipe2.playerPickSelector !== void 0) {
+        validateDynamicPlayerPickRecoveryRecipe(recipe2, path, errors);
+      } else {
+        validateUpgradeDef(recipe2, path, errors);
+      }
       if (recipe2.maxSubmissions !== void 0 && Number(recipe2.maxSubmissions) !== 1) {
         errors.push(`${path}.maxSubmissions must be 1`);
       }
@@ -7206,6 +7306,33 @@
       });
     }
     return activities;
+  }
+
+  // src/sbc/challenge-context.js
+  function collectionValues(collection) {
+    if (!collection) return [];
+    if (typeof collection.values === "function") return Array.from(collection.values());
+    if (Array.isArray(collection._collection)) return collection._collection;
+    if (collection._collection && typeof collection._collection === "object") {
+      return Object.values(collection._collection);
+    }
+    if (Array.isArray(collection)) return collection;
+    if (typeof collection === "object") return Object.values(collection);
+    return [];
+  }
+  function findRegisteredSbcChallenge(set, challengeId) {
+    const expectedId = Number(challengeId || 0);
+    if (!set || !expectedId) return null;
+    try {
+      const challenge = set.getChallenge?.(expectedId) || null;
+      if (Number(challenge?.id || 0) === expectedId) return challenge;
+    } catch {
+    }
+    const candidates = [
+      ...collectionValues(set.challenges),
+      ...collectionValues(set._challenges)
+    ];
+    return candidates.find((challenge) => Number(challenge?.id || 0) === expectedId) || null;
   }
 
   // src/sbc/set-identity.js
@@ -8309,7 +8436,7 @@
   }
 
   // src/adapters/ea/inventory.js
-  function collectionValues(collection) {
+  function collectionValues2(collection) {
     if (!collection) return [];
     if (typeof collection.values === "function") return Array.from(collection.values());
     if (Array.isArray(collection._collection)) return collection._collection;
@@ -8321,7 +8448,7 @@
     const merged = [];
     const seenIds = /* @__PURE__ */ new Set();
     const seenObjects = /* @__PURE__ */ new Set();
-    for (const item of collections.flatMap((collection) => collectionValues(collection))) {
+    for (const item of collections.flatMap((collection) => collectionValues2(collection))) {
       if (!item || typeof item !== "object") continue;
       const id = Number(item.id || 0);
       if (id ? seenIds.has(id) : seenObjects.has(item)) continue;
@@ -8455,8 +8582,8 @@
       }
       return {
         repositoryGetter,
-        repositoryCollection: collectionValues(repository?.unassigned),
-        daoCollection: collectionValues(service?.itemDao?.itemRepo?.unassigned)
+        repositoryCollection: collectionValues2(repository?.unassigned),
+        daoCollection: collectionValues2(service?.itemDao?.itemRepo?.unassigned)
       };
     }
     function unassignedState() {
@@ -8485,11 +8612,11 @@
         }
         try {
           if (typeof repository.getStorage === "function") {
-            return collectionValues(repository.getStorage());
+            return collectionValues2(repository.getStorage());
           }
         } catch {
         }
-        return collectionValues(repository.storage);
+        return collectionValues2(repository.storage);
       }
       if (pile === "transfer") {
         try {
@@ -8498,7 +8625,7 @@
           }
         } catch {
         }
-        return collectionValues(repository.transfer);
+        return collectionValues2(repository.transfer);
       }
       if (pile === "club") {
         return mergeInventoryEntities(
@@ -9023,7 +9150,7 @@
   }
 
   // src/adapters/ea/pack.js
-  function collectionValues2(collection) {
+  function collectionValues3(collection) {
     if (!collection) return [];
     if (typeof collection.values === "function") return Array.from(collection.values());
     if (Array.isArray(collection._collection)) return collection._collection;
@@ -9037,7 +9164,7 @@
   function createEaPackAdapter(runtime) {
     function list() {
       const repository = runtime?.repositories?.Store?.myPacks || runtime?.services?.Store?.storeDao?.storeRepo?.myPacks;
-      return collectionValues2(repository);
+      return collectionValues3(repository);
     }
     function resolve(ref = {}) {
       const id = Number(ref.id || 0);
@@ -9064,7 +9191,7 @@
   function createEaPlayerPickAdapter(runtime) {
     const service = runtime?.services?.Item;
     if (!service) throw new Error("EA Item service is unavailable");
-    function collectionValues4(collection) {
+    function collectionValues5(collection) {
       if (!collection) return [];
       if (typeof collection.values === "function") return Array.from(collection.values());
       if (Array.isArray(collection._collection)) return collection._collection;
@@ -9088,11 +9215,11 @@
       }
       try {
         if (typeof runtime?.repositories?.Item?.getStorage === "function") {
-          return collectionValues4(runtime.repositories.Item.getStorage());
+          return collectionValues5(runtime.repositories.Item.getStorage());
         }
       } catch {
       }
-      return collectionValues4(runtime?.repositories?.Item?.storage);
+      return collectionValues5(runtime?.repositories?.Item?.storage);
     }
     function transferItems() {
       try {
@@ -9101,10 +9228,10 @@
         }
       } catch {
       }
-      return collectionValues4(runtime?.repositories?.Item?.transfer);
+      return collectionValues5(runtime?.repositories?.Item?.transfer);
     }
     function clubItems() {
-      return collectionValues4(runtime?.repositories?.Item?.club?.items).concat(collectionValues4(service?.itemDao?.itemRepo?.club?.items));
+      return collectionValues5(runtime?.repositories?.Item?.club?.items).concat(collectionValues5(service?.itemDao?.itemRepo?.club?.items));
     }
     function uniqueOwnedItems() {
       const seen = /* @__PURE__ */ new Set();
@@ -9244,7 +9371,7 @@
   function createEaSbcAdapter(runtime) {
     const service = runtime?.services?.SBC;
     if (!service) throw new Error("EA SBC service is unavailable");
-    function collectionValues4(collection) {
+    function collectionValues5(collection) {
       if (!collection) return [];
       if (typeof collection.values === "function") return Array.from(collection.values());
       if (Array.isArray(collection._collection)) return collection._collection;
@@ -9254,7 +9381,7 @@
       return [];
     }
     function listSets() {
-      return collectionValues4(service?.repository?.sets?._collection);
+      return collectionValues5(service?.repository?.sets?._collection);
     }
     function requestSets() {
       if (typeof service.requestSets !== "function") throw new Error("EA SBC set request is unavailable");
@@ -9558,22 +9685,22 @@
     function categoriesFromRoot(root) {
       const candidates = [];
       try {
-        if (typeof root?.getCategories === "function") candidates.push(...collectionValues4(root.getCategories()));
+        if (typeof root?.getCategories === "function") candidates.push(...collectionValues5(root.getCategories()));
       } catch {
       }
       try {
-        candidates.push(...collectionValues4(root?.categoriesIterator));
+        candidates.push(...collectionValues5(root?.categoriesIterator));
       } catch {
       }
       try {
-        candidates.push(...collectionValues4(root?.categories));
+        candidates.push(...collectionValues5(root?.categories));
       } catch {
       }
-      candidates.push(...collectionValues4(root));
+      candidates.push(...collectionValues5(root));
       return candidates;
     }
     function normalizeDiscoveryCategory(category) {
-      const setIds = collectionValues4(
+      const setIds = collectionValues5(
         category?.setIds || category?.sets || category?.data?.setIds || category?.data?.sets
       ).map((entry) => positiveInteger16(entry?.id || entry)).filter(Boolean);
       return {
@@ -9602,7 +9729,7 @@
     }
     function discoveryCategoryMembership(set, refreshResult = null) {
       const setId = positiveInteger16(set?.id);
-      const directCategories = collectionValues4(
+      const directCategories = collectionValues5(
         set?.categoryIds || set?.categories || set?.data?.categoryIds || set?.data?.categories
       ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger16(entry), name: "", setIds: [] });
       const directIds = directCategories.map((category) => category.id).filter(Boolean);
@@ -9629,7 +9756,7 @@
         set?.challenges,
         set?._challenges
       ];
-      return [...new Set(sources.flatMap((source) => collectionValues4(source)).map((entry) => positiveInteger16(entry?.id || entry)).filter(Boolean))];
+      return [...new Set(sources.flatMap((source) => collectionValues5(source)).map((entry) => positiveInteger16(entry?.id || entry)).filter(Boolean))];
     }
     function discoveryRequiredPlayerCount(challenge) {
       const explicit = firstPositiveInteger2([
@@ -9683,7 +9810,7 @@
       };
     }
     function snapshotDiscoveryIndex(set, refreshResult = null) {
-      const rawAwards = collectionValues4(set?.awards || set?.data?.awards);
+      const rawAwards = collectionValues5(set?.awards || set?.data?.awards);
       const category = discoveryCategoryMembership(set, refreshResult);
       return {
         id: positiveInteger16(set?.id),
@@ -9708,7 +9835,7 @@
     }
     function snapshotDiscoverySet(set, challenges = null, refreshResult = null) {
       const index = snapshotDiscoveryIndex(set, refreshResult);
-      const rawChallenges = challenges === null ? collectionValues4(set?.challenges || set?._challenges) : collectionValues4(challenges);
+      const rawChallenges = challenges === null ? collectionValues5(set?.challenges || set?._challenges) : collectionValues5(challenges);
       return {
         ...index,
         challenges: rawChallenges.map(normalizeDiscoveryChallenge)
@@ -10723,7 +10850,7 @@
     "relistExpiredAuctions",
     "requestTransferItems"
   ]);
-  function collectionValues3(collection) {
+  function collectionValues4(collection) {
     if (!collection) return [];
     if (typeof collection.values === "function") return Array.from(collection.values());
     if (Array.isArray(collection._collection)) return collection._collection;
@@ -10908,7 +11035,7 @@
     }
     if (used === null && repository) {
       try {
-        used = collectionValues3(repository?.transfer).length;
+        used = collectionValues4(repository?.transfer).length;
       } catch {
       }
     }
@@ -10928,17 +11055,17 @@
       try {
         return Array.from(repository.getStorageItems?.() || []);
       } catch {
-        return collectionValues3(repository.storage);
+        return collectionValues4(repository.storage);
       }
     }
     if (pile === "transfer") {
       try {
         return Array.from(repository.getTransferItems?.() || []);
       } catch {
-        return collectionValues3(repository.transfer);
+        return collectionValues4(repository.transfer);
       }
     }
-    return collectionValues3(repository.club?.items).concat(collectionValues3(runtime?.services?.Item?.itemDao?.itemRepo?.club?.items));
+    return collectionValues4(repository.club?.items).concat(collectionValues4(runtime?.services?.Item?.itemDao?.itemRepo?.club?.items));
   }
   function repositoryPile(runtime, pile) {
     const items = rawRepositoryPile(runtime, pile);
@@ -26189,6 +26316,82 @@
     const number = Number(value);
     return Math.max(1, Math.min(10, Number.isFinite(number) ? Math.floor(number) : fallback));
   }
+  function itemKey2(item) {
+    const id = Number(item?.id || item?.ref?.id || 0);
+    if (id) return `id:${id}`;
+    const definition = Number(item?.definitionId || item?.ref?.definitionId || 0);
+    const pile = String(item?.pile || item?.ref?.pile || "unknown");
+    return definition ? `definition:${definition}:${pile}` : null;
+  }
+  function exactPileContainsId(items, id) {
+    return (items || []).some((item) => Number(item?.id || 0) === id);
+  }
+  function collectNativeSwapRoutingEvidence(actionState, trackedItemIds = []) {
+    if (actionState?.action?.type !== "swap") return [];
+    const tracked = new Set((trackedItemIds || []).map(Number).filter(Boolean));
+    if (!tracked.size) return [];
+    const evidence2 = [];
+    for (const location of actionState?.exactLocations || []) {
+      const id = Number(location?.ref?.id || 0);
+      if (!id || !tracked.has(id)) continue;
+      const piles = location?.piles || {};
+      if (!exactPileContainsId(piles.club, id)) continue;
+      if (["unassigned", "storage", "transfer"].some((pile) => exactPileContainsId(piles[pile], id))) continue;
+      evidence2.push({
+        itemId: id,
+        destination: "club",
+        source: "native-swap-exact-location"
+      });
+    }
+    return evidence2;
+  }
+  function applyConfirmedRouteEvidence(routing, cleanup) {
+    const current = routing || { reservedItems: [], routedItems: [], pendingItems: [] };
+    const safeIds = new Set((cleanup?.routeEvidence || []).filter((entry) => entry?.source === "native-swap-exact-location" && entry?.destination === "club").map((entry) => Number(entry?.itemId || 0)).filter(Boolean));
+    if (!safeIds.size) return current;
+    const confirmed = (current.pendingItems || []).filter((item) => safeIds.has(Number(item?.id || 0)));
+    if (!confirmed.length) return current;
+    const routed = new Map((current.routedItems || []).map((item) => [itemKey2(item), item]));
+    for (const item of confirmed) routed.set(itemKey2(item), item);
+    return {
+      ...current,
+      routedItems: [...routed.values()],
+      pendingItems: (current.pendingItems || []).filter((item) => !safeIds.has(Number(item?.id || 0)))
+    };
+  }
+  function mergeRoutingProgress(routing, settled) {
+    const current = routing || { reservedItems: [], routedItems: [], pendingItems: [] };
+    const remember = (items, kind) => {
+      for (const item of items || []) {
+        const key = itemKey2(item);
+        if (!key) continue;
+        const previous = settled.get(key) || {};
+        if (previous.reserved || previous.routed) continue;
+        settled.set(key, {
+          ...previous,
+          [kind]: item
+        });
+      }
+    };
+    remember(current.reservedItems, "reserved");
+    remember(current.routedItems, "routed");
+    const reservedItems = [];
+    const routedItems = [];
+    for (const entry of settled.values()) {
+      if (entry.reserved) reservedItems.push(entry.reserved);
+      if (entry.routed) routedItems.push(entry.routed);
+    }
+    const settledKeys = new Set(settled.keys());
+    const pendingItems = (current.pendingItems || []).filter((item) => !settledKeys.has(itemKey2(item)));
+    const aliasRoutes = (current.aliasRoutes || []).filter((route) => !settledKeys.has(itemKey2(route?.item)));
+    return {
+      ...current,
+      reservedItems,
+      routedItems,
+      pendingItems,
+      aliasRoutes
+    };
+  }
   async function settleOpenedItems(options = {}) {
     if (typeof options.materialize !== "function") throw new TypeError("materialize is required");
     if (typeof options.cleanup !== "function") throw new TypeError("cleanup is required");
@@ -26197,9 +26400,18 @@
     const materialized = await options.materialize();
     let cleanup = null;
     let routing = { reservedItems: [], routedItems: [], pendingItems: [] };
+    const settled = /* @__PURE__ */ new Map();
+    let pendingItems = null;
     for (let attempt = 1; attempt <= attempts; attempt++) {
-      cleanup = await options.cleanup({ attempt, materialized });
-      routing = await options.confirmRouting({ attempt, materialized, cleanup }) || routing;
+      cleanup = await options.cleanup({ attempt, materialized, routing, pendingItems });
+      routing = mergeRoutingProgress(
+        applyConfirmedRouteEvidence(
+          await options.confirmRouting({ attempt, materialized, cleanup, pendingItems }) || routing,
+          cleanup
+        ),
+        settled
+      );
+      pendingItems = routing.pendingItems || [];
       if (!(routing.pendingItems || []).length) {
         return { status: cleanup?.status || "resolved", attempts: attempt, materialized, cleanup, routing };
       }
@@ -26804,9 +27016,9 @@
     }
     return refs;
   }
-  function explicitRefs(result, itemKey2, refKey3, defaultPile) {
+  function explicitRefs(result, itemKey3, refKey3, defaultPile) {
     if (Array.isArray(result?.[refKey3])) return uniqueRefs2(result[refKey3], defaultPile);
-    return uniqueRefs2(result?.[itemKey2] || [], defaultPile);
+    return uniqueRefs2(result?.[itemKey3] || [], defaultPile);
   }
   function createOpenedItemPolicy(handler, options = {}) {
     if (typeof handler !== "function") throw new TypeError("opened item policy handler is required");
@@ -33045,6 +33257,21 @@
     ], context.readOnly))}
   </div></section>`;
   }
+  function renderRecoveryPlayerPickSelector(path, value = {}, context) {
+    const enabled = value?.material === "rare-gold";
+    const order = Array.isArray(value?.repeatabilityOrder) ? value.repeatabilityOrder : ["bounded", "unlimited"];
+    const unlimitedFirst = order[0] === "unlimited";
+    return `<section class="dlr-builder-form-section"><h3>Dynamic Player Pick recovery</h3><div class="dlr-builder-form-grid">
+    ${fieldRow("Material", selectInput(`${path}.material`, value?.material, [
+      { value: "", label: "Disabled" },
+      { value: "rare-gold", label: "Rare Gold recovery" }
+    ], context.readOnly))}
+    ${fieldRow("Minimum reward rating", textInput(`${path}.minRewardRating`, value?.minRewardRating ?? (enabled ? 85 : ""), "number", context.readOnly))}
+    ${fieldRow("Maximum challenges", textInput(`${path}.maxChallenges`, value?.maxChallenges ?? (enabled ? 1 : ""), "number", context.readOnly))}
+    ${fieldRow("Minimum Rare Gold cost", textInput(`${path}.minRareGoldCost`, value?.minRareGoldCost ?? (enabled ? 1 : ""), "number", context.readOnly))}
+    ${fieldRow("Pick preference", `<select data-builder-field="${escapeHtml(`${path}.repeatabilityOrder`)}" data-builder-value-type="recovery-pick-order"${disabled(context.readOnly)}><option value="bounded-first"${selected(unlimitedFirst, false)}>Limited uses first</option><option value="unlimited-first"${selected(unlimitedFirst, true)}>Unlimited uses first</option></select>`)}
+  </div></section>`;
+  }
   function renderUpgrade(path, value = {}, context, options = {}) {
     return `<div class="dlr-builder-subsection">
     <div class="dlr-builder-section-head"><h4>${escapeHtml(options.label || value.name || "Upgrade")}</h4>${options.removable ? `<button data-builder-action="remove-list" data-path="${escapeHtml(options.listPath)}" data-index="${options.index}"${disabled(context.readOnly)}>Remove</button>` : ""}</div>
@@ -33278,6 +33505,7 @@
         ${fieldRow("Insufficient", selectInput("onInsufficient", object.onInsufficient, [{ value: "", label: "Default" }, { value: "continue", label: "Continue" }, { value: "stop", label: "Stop" }], context.readOnly))}
         ${fieldRow("Blocked", selectInput("onBlocked", object.onBlocked, [{ value: "", label: "Default (stop)" }, { value: "stop", label: "Stop" }], context.readOnly))}
       </div></section>
+      ${renderRecoveryPlayerPickSelector("playerPickSelector", object.playerPickSelector, context)}
       ${renderActivityBinding("activityBinding", object.activityBinding, context)}
       ${renderList("sbcNames", "SBC aliases", object.sbcNames, "text", context)}
       ${renderRequirements("requirements", "Requirements", object.requirements, context)}
@@ -33672,6 +33900,9 @@
     if (valueType2 === "string-list") {
       return [...element?.selectedOptions || []].map((option2) => option2.value).filter(Boolean);
     }
+    if (valueType2 === "recovery-pick-order") {
+      return raw === "unlimited-first" ? ["unlimited", "bounded"] : ["bounded", "unlimited"];
+    }
     if (valueType2 === "number") return raw === "" ? void 0 : Number(raw);
     if (element?.tagName === "SELECT" && raw === "") return void 0;
     if (raw === "" && ["special-kind", "loop-reference"].includes(valueType2)) return void 0;
@@ -33935,6 +34166,23 @@
         setDraftConfig(renamed.config);
         selectedId = renamed.id;
         render();
+        return;
+      }
+      if (selectedKind === "recoveryRecipes" && path === "playerPickSelector.material") {
+        updateSelectedObject((object) => {
+          if (value !== "rare-gold") return setBuilderPath(object, "playerPickSelector", void 0);
+          return {
+            ...object,
+            playerPickSelector: {
+              material: "rare-gold",
+              minRewardRating: 85,
+              maxChallenges: 1,
+              minRareGoldCost: 1,
+              repeatabilityOrder: ["bounded", "unlimited"],
+              ...object.playerPickSelector || {}
+            }
+          };
+        });
         return;
       }
       updateSelectedObject((object) => setBuilderPath(object, path, value));
@@ -42096,7 +42344,7 @@
       const rating = Number(item?.rating || 0);
       return isGold(item) && rating >= Number(range[0] || 75) && rating <= Number(range[1] || 83);
     }
-    function collectionValues4(collection) {
+    function collectionValues5(collection) {
       if (!collection) return [];
       if (typeof collection.values === "function") return Array.from(collection.values());
       if (Array.isArray(collection._collection)) return collection._collection;
@@ -42313,6 +42561,8 @@
       let reservedIds = /* @__PURE__ */ new Set();
       let initialLogged = false;
       let activeActionItems = [];
+      const routeEvidenceItemIds = new Set((options.routeEvidenceItemIds || []).map(Number).filter(Boolean));
+      const routeEvidenceByItemId = /* @__PURE__ */ new Map();
       const adapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
       const diagnosticPiles = () => ({
         unassigned: getUnassignedItems(),
@@ -42481,19 +42731,34 @@
           }
           log(`Unassigned move diagnostic result: ${diagnosticJson(captureMoveResult(moveResult))}`);
           const refreshResult = await refreshUnassigned();
+          const actionState = captureActionState(action2, items);
+          const nativeSwapRouteEvidence = collectNativeSwapRoutingEvidence(
+            actionState,
+            [...routeEvidenceItemIds]
+          );
+          for (const evidence2 of nativeSwapRouteEvidence) {
+            routeEvidenceByItemId.set(evidence2.itemId, evidence2);
+          }
           log(`Unassigned move diagnostic after refresh: ${diagnosticJson({
             refresh: captureMoveResult(refreshResult),
-            state: captureActionState(action2, items)
+            state: actionState,
+            routeEvidence: nativeSwapRouteEvidence
           })}`);
         }
       });
-      if (result.status === "blocked") {
-        const blocked3 = result.plan?.blocked;
+      const resultWithRouteEvidence = {
+        ...result,
+        routeEvidence: [...routeEvidenceByItemId.values()]
+      };
+      if (resultWithRouteEvidence.status === "blocked") {
+        const blocked3 = resultWithRouteEvidence.plan?.blocked;
+        const terminalResolverFailure = (resultWithRouteEvidence.resolverResults || []).find((entry) => entry?.status === "blocked" && entry?.terminal === true && entry?.reason);
         const reasonCode2 = blocked3?.destination === "storage" ? "PROTECTED_STORAGE_BLOCKED" : blocked3?.destination === "transfer" ? "UNASSIGNED_TRANSFER_BLOCKED" : "UNASSIGNED_CLEANUP_BLOCKED";
-        const blockedReason = blocked3?.destination === "storage" ? `SBC storage has only ${blocked3.free} slot(s), but ${blocked3.required} item(s) need moving` : blocked3?.destination === "transfer" ? `Transfer list has only ${blocked3.free} slot(s), but ${blocked3.required} item(s) need moving` : result.reason || "Unassigned cleanup blocked";
+        const capacityReason = blocked3?.destination === "storage" ? `SBC storage has only ${blocked3.free} slot(s), but ${blocked3.required} item(s) need moving` : blocked3?.destination === "transfer" ? `Transfer list has only ${blocked3.free} slot(s), but ${blocked3.required} item(s) need moving` : resultWithRouteEvidence.reason || "Unassigned cleanup blocked";
+        const blockedReason = terminalResolverFailure ? `Unassigned recovery failed: ${terminalResolverFailure.reason}; ${capacityReason}` : capacityReason;
         if (options.returnBlockedResult === true) {
           return {
-            ...result,
+            ...resultWithRouteEvidence,
             reason: blockedReason,
             reasonCode: reasonCode2,
             details: {
@@ -42506,11 +42771,11 @@
         }
         fail2(blockedReason);
       }
-      const reservedCount = result.plan?.reservedItemRefs?.length || reservedIds.size;
-      if (initialLogged && (result.iterations > 1 || reservedCount || result.status === "preserved")) {
+      const reservedCount = resultWithRouteEvidence.plan?.reservedItemRefs?.length || reservedIds.size;
+      if (initialLogged && (resultWithRouteEvidence.iterations > 1 || reservedCount || resultWithRouteEvidence.status === "preserved")) {
         log(`Unassigned cleanup complete: ${reason}${reservedCount ? `; reserved ${reservedCount} item(s)` : ""}`);
       }
-      return result;
+      return resultWithRouteEvidence;
     }
     function getUnassignedStorageOverflow() {
       const storageCandidates = getUnassignedItems().filter((item) => {
@@ -42843,6 +43108,7 @@
       let routing = openedItemRoutingResult(items, options.reserveItem || null, {}, options.routingBaseline || null);
       for (let attempt = 1; attempt <= attempts && routing.pendingItems.length; attempt++) {
         await refreshUnassigned({ quiet: true });
+        await refreshPileCacheByCandidates("club", { quiet: true });
         await refreshPileCacheByCandidates("storage", { quiet: true });
         await refreshPileCacheByCandidates("transfer", { quiet: true });
         routing = openedItemRoutingResult(items, options.reserveItem || null, {}, options.routingBaseline || null);
@@ -43224,8 +43490,8 @@
     }
     function getCachedSbcChallenges(set) {
       const sources = [];
-      sources.push(...collectionValues4(set?.challenges));
-      sources.push(...collectionValues4(set?._challenges));
+      sources.push(...collectionValues5(set?.challenges));
+      sources.push(...collectionValues5(set?._challenges));
       const byId = /* @__PURE__ */ new Map();
       for (const challenge of sources) {
         const id = Number(challenge?.id || 0);
@@ -43406,25 +43672,47 @@
         return repositoryChallenges;
       }
       let challenges = null;
+      let daoError = null;
       if (eaSbcAdapter().hasDaoGetChallengesForSet()) {
-        const request = () => observeOnce(
-          eaSbcAdapter().getChallengesForSet(set?.id),
-          ctrl(),
-          2e4,
-          `sbcDAO.getChallengesForSet ${label}`
-        );
-        const result = context.runRequest ? await context.runRequest(`DAO Challenges ${label}`, request) : await request();
-        if (result?.success && Array.isArray(result?.response?.challenges)) {
-          challenges = result.response.challenges;
-        } else {
-          const detail = serviceResultErrorText(result) || "unknown";
-          throw new Error(`direct Challenge metadata unavailable: ${detail}`);
+        try {
+          const request = () => observeOnce(
+            eaSbcAdapter().getChallengesForSet(set?.id),
+            ctrl(),
+            2e4,
+            `sbcDAO.getChallengesForSet ${label}`
+          );
+          const result = context.runRequest ? await context.runRequest(`DAO Challenges ${label}`, request) : await request();
+          if (result?.success && Array.isArray(result?.response?.challenges)) {
+            challenges = result.response.challenges;
+          } else {
+            const detail = serviceResultErrorText(result) || "unknown";
+            const code = dynamicSbcLoadErrorCode(result);
+            if (code === 429) {
+              const error = new Error(`direct Challenge metadata unavailable: ${detail}`);
+              error.status = code;
+              throw error;
+            }
+            daoError = new Error(`direct Challenge metadata unavailable: ${detail}`);
+          }
+        } catch (error) {
+          if (dynamicSbcLoadErrorCode(error) === 429) throw error;
+          daoError = error;
         }
       }
-      if (!challenges) challenges = await requestSbcChallenges(set, label, {
-        attempts: 1,
-        runRequest: context.runRequest
-      });
+      if (!challenges) {
+        if (daoError) {
+          log(`${label}: DAO Challenge metadata failed (${daoError?.message || daoError}); retrying through the standard live Challenge request`);
+        }
+        try {
+          challenges = await requestSbcChallenges(set, label, {
+            attempts: 1,
+            runRequest: context.runRequest
+          });
+        } catch (error) {
+          if (!daoError) throw error;
+          throw new Error(`${daoError?.message || daoError}; standard Challenge request also failed: ${error?.message || error}`);
+        }
+      }
       const loaded = [];
       for (const challenge of challenges) {
         const metadata = eaSbcAdapter().snapshotDiscoverySet(set, [challenge])?.challenges?.[0] || null;
@@ -43878,11 +44166,26 @@
       const challenges = await requestSbcChallenges(set, label);
       return challenges.find((c) => !isCompletedChallenge(c)) || null;
     }
+    async function resolveSbcChallengeForScreen(set, challenge, label = set?.name || "SBC") {
+      const challengeId = Number(challenge?.id || 0);
+      if (!challengeId) fail2(`${label}: cannot open an SBC screen without a stable Challenge id`);
+      let registered = findRegisteredSbcChallenge(set, challengeId);
+      if (registered) return registered;
+      await requestSbcChallenges(set, `${label} registered Challenge`, { attempts: 1 });
+      registered = findRegisteredSbcChallenge(set, challengeId);
+      if (!registered) {
+        fail2(`${label}: Challenge #${challengeId} is not registered in Set #${set?.id || "?"} after a live refresh`);
+      }
+      return registered;
+    }
     async function openSbcSet(set, options = {}) {
-      const challenge = options.challenge || await findAvailableSbcChallenge(set, set.name);
+      let challenge = options.challenge || await findAvailableSbcChallenge(set, set.name);
       if (!challenge) {
         if (options.returnNullIfComplete) return null;
         fail2(`No available challenge for ${set.name}`);
+      }
+      if (options.ensureRegisteredChallenge === true) {
+        challenge = await resolveSbcChallengeForScreen(set, challenge, options.label || set.name);
       }
       const controller = ctrl();
       const load = await observeOnce(
@@ -46371,12 +46674,12 @@
     }
     function rewardPackIdFromSubmitResult(result, set, options = {}) {
       const awards = [
-        ...collectionValues4(result?.data?.grantedChallengeAwards),
-        ...collectionValues4(result?.response?.grantedChallengeAwards),
-        ...collectionValues4(result?.data?.grantedSetAwards),
-        ...collectionValues4(result?.response?.grantedSetAwards),
-        ...collectionValues4(result?.data?.awards),
-        ...collectionValues4(result?.response?.awards)
+        ...collectionValues5(result?.data?.grantedChallengeAwards),
+        ...collectionValues5(result?.response?.grantedChallengeAwards),
+        ...collectionValues5(result?.data?.grantedSetAwards),
+        ...collectionValues5(result?.response?.grantedSetAwards),
+        ...collectionValues5(result?.data?.awards),
+        ...collectionValues5(result?.response?.awards)
       ];
       for (const award of awards) {
         const values = [
@@ -47239,6 +47542,15 @@
       const parentLoopDef = state.loopStack[state.loopStack.length - 1] || null;
       recipe2 = inheritSbcFodderPolicy(cloneLoopDef(recipe2), parentLoopDef || {});
       const label = `Unassigned ${policy.id} -> ${recipe2.name}`;
+      if (recipe2.playerPickSelector) {
+        return trySubmitUnassignedRecoveryPlayerPick({
+          policy,
+          recipe: recipe2,
+          triggerRefs,
+          parentLoopDef,
+          label
+        });
+      }
       let set;
       try {
         set = await findSbcSetForDefIfPresent(recipe2);
@@ -47320,6 +47632,163 @@
         return { status, reason: attempt.result.reason || attempt.result.status };
       }
       return { status: "progress", consumedItemIds: attempt.result.consumedItemRefs.map((ref) => ref.id) };
+    }
+    function playerPickRecoveryDefinition(candidate, parentLoopDef) {
+      const definition = inheritSbcFodderPolicy(cloneLoopDef(candidate), parentLoopDef || {});
+      if (parentLoopDef?.dryRun === true) definition.dryRun = true;
+      return definition;
+    }
+    function matchingRecoveryPlayerPickCandidates(item, candidates = []) {
+      return candidates.filter((candidate) => playerPickMatchesReward(
+        item,
+        candidate.pickItemNames || [],
+        candidate.pickItemResourceIds || []
+      ));
+    }
+    async function trySubmitUnassignedRecoveryPlayerPick({ policy, recipe: recipe2, triggerRefs, parentLoopDef, label }) {
+      const selector = recipe2.playerPickSelector;
+      const scanned = getScannedDynamicSbcLoopDefs();
+      const known = resolveRareGoldPlayerPickCandidates(selector, scanned, {
+        includeExhaustedBounded: true
+      });
+      if (known.status === "invalid") {
+        return { status: "blocked", reason: "dynamic Rare Gold Player Pick selector is invalid" };
+      }
+      if (known.matches.length) {
+        const pendingDefinition = {
+          name: `${recipe2.name} pending reward`,
+          pickItemNames: [...new Set(known.matches.flatMap((candidate) => candidate.pickItemNames || []))],
+          pickItemResourceIds: [...new Set(known.matches.flatMap((candidate) => candidate.pickItemResourceIds || []))]
+        };
+        const pending = await findUnassignedPlayerPick(pendingDefinition, 1, {
+          quietMissing: true,
+          failOnUnexpected: true,
+          forceFresh: true
+        });
+        if (pending) {
+          const matches = matchingRecoveryPlayerPickCandidates(pending, known.matches);
+          if (matches.length !== 1) {
+            return {
+              status: "blocked",
+              reason: `pending Player Pick has ${matches.length} matching dynamic recovery definitions`
+            };
+          }
+          const pickDef = playerPickRecoveryDefinition(matches[0], parentLoopDef);
+          log(`${label}: redeeming pending ${pickDef.name} before submitting another recovery Pick`);
+          try {
+            await redeemAndSelectPlayerPick(pending, pickDef, {
+              cleanupOptions: {
+                loopDef: parentLoopDef,
+                blockedPolicy: "preserve",
+                enableRecovery: false
+              }
+            });
+          } catch (error) {
+            return { status: "blocked", reason: error?.message || String(error) };
+          }
+          return { status: "progress" };
+        }
+      }
+      const candidates = resolveRareGoldPlayerPickCandidates(selector, scanned);
+      if (candidates.status !== "matched") {
+        log(`${label}: no scanned dynamic Rare Gold Player Pick is currently eligible; trying the next configured recipe`);
+        return { status: "unavailable", reason: "no eligible dynamic Rare Gold Player Pick" };
+      }
+      const unavailable = [];
+      for (const candidate of candidates.matches) {
+        let set;
+        let challenges;
+        let livePick;
+        try {
+          set = await findSbcSetForDefIfPresent(candidate);
+          if (!set) {
+            unavailable.push(`${candidate.name}: Set is no longer available`);
+            continue;
+          }
+          challenges = await loadDynamicSbcDiscoveryChallenges(set, candidate, {
+            cachedSnapshot: true
+          });
+          const liveSnapshot = eaSbcAdapter().snapshotDiscoverySet(set, challenges);
+          const parsed = parsePlayerPickSbcSnapshot({
+            set: liveSnapshot,
+            pricePlatform: candidate.pricePlatform || "pc"
+          });
+          const live = parsed.status === "supported" ? resolveRareGoldPlayerPickCandidates(selector, [parsed.loop]) : { status: "missing", matches: [] };
+          if (live.status !== "matched") {
+            const diagnostics = Array.isArray(parsed.diagnostics) && parsed.diagnostics.length ? ` (${parsed.diagnostics.join("; ")})` : "";
+            unavailable.push(`${candidate.name}: live Set/Challenge metadata no longer matches the recovery selector${diagnostics}`);
+            continue;
+          }
+          livePick = live.loop;
+        } catch (error) {
+          unavailable.push(`${candidate.name}: live metadata read failed (${error?.message || error})`);
+          continue;
+        }
+        const incomplete = challenges.map((challenge, index) => ({ challenge, challengeNo: index + 1 })).filter(({ challenge }) => !isCompletedChallenge(challenge));
+        if (incomplete.length !== 1 || incomplete[0].challengeNo !== 1) {
+          unavailable.push(`${candidate.name}: expected exactly one incomplete Challenge`);
+          continue;
+        }
+        const pickDef = playerPickRecoveryDefinition(livePick, parentLoopDef);
+        let opened;
+        try {
+          opened = await openSbcSet(set, {
+            challenge: incomplete[0].challenge,
+            ensureRegisteredChallenge: true,
+            label: `${label}: ${candidate.name}`,
+            returnNullIfComplete: true
+          });
+        } catch (error) {
+          const reason = error?.message || String(error);
+          log(`${label}: ${candidate.name} recovery Pick screen load failed: ${reason}`);
+          unavailable.push(`${candidate.name}: recovery Pick screen load failed (${reason})`);
+          continue;
+        }
+        if (!opened) {
+          unavailable.push(`${candidate.name}: SBC has no available challenge`);
+          continue;
+        }
+        let submission;
+        try {
+          submission = await submitPlayerPickChallenge(pickDef, 1, 1, {
+            opened,
+            preferredSignalRefs: triggerRefs,
+            requirePreferredSignal: true,
+            missingStatus: "insufficient"
+          });
+        } catch (error) {
+          return { status: "blocked", reason: error?.message || String(error) };
+        }
+        if (submission.status === "unavailable" || submission.status === "insufficient") {
+          unavailable.push(`${candidate.name}: ${submission.reason || submission.status}`);
+          continue;
+        }
+        if (!submission.submitted) {
+          return { status: "blocked", reason: submission.reason || `${candidate.name} submission blocked` };
+        }
+        const pickItem = await findUnassignedPlayerPick(pickDef, 10, {
+          forceFresh: true,
+          failOnUnexpected: true
+        });
+        if (!pickItem) {
+          return { status: "blocked", reason: `${pickDef.name} submitted but its Player Pick reward was not found` };
+        }
+        try {
+          await redeemAndSelectPlayerPick(pickItem, pickDef, {
+            cleanupOptions: {
+              loopDef: parentLoopDef,
+              blockedPolicy: "preserve",
+              enableRecovery: false
+            }
+          });
+        } catch (error) {
+          return { status: "blocked", reason: error?.message || String(error) };
+        }
+        log(`${label}: completed, redeemed, and cleaned up ${pickDef.name}`);
+        return { status: "progress" };
+      }
+      log(`${label}: no dynamic Rare Gold Player Pick could consume the blocked duplicate (${unavailable.join("; ") || "no usable candidate"}); trying the next configured recipe`);
+      return { status: "unavailable", reason: unavailable.join("; ") || "no usable dynamic Rare Gold Player Pick" };
     }
     function buildUnassignedRecoveryResolvers(options = {}) {
       const policyIds = options.policyIds || [];
@@ -48280,24 +48749,37 @@
             await sleep(CFG.pauseMs);
             return materialized;
           },
-          cleanup: async ({ attempt }) => resolveRuntimeUnassigned(
+          cleanup: async ({ attempt, pendingItems }) => resolveRuntimeUnassigned(
             attempt === 1 ? cleanupReason : `${cleanupReason} delayed response retry ${attempt}/3`,
             {
               ...unassignedCleanupOptions,
-              beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label, {
-                routingBaseline: context.routingBaseline || null,
-                authoritativeMaterialization: materializedForSettlement?.freshMaterialization
-              })
+              routeEvidenceItemIds: (pendingItems?.length ? pendingItems : openedItems).map((item) => Number(item?.id || 0)).filter(Boolean),
+              beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(
+                pendingItems?.length ? pendingItems : openedItems,
+                label,
+                {
+                  routingBaseline: context.routingBaseline || null,
+                  authoritativeMaterialization: materializedForSettlement?.freshMaterialization
+                }
+              )
             }
           ),
-          confirmRouting: async () => confirmOpenedItemRouting(openedItems, label, {
-            routingBaseline: context.routingBaseline || null
-          }),
+          confirmRouting: async ({ pendingItems }) => confirmOpenedItemRouting(
+            pendingItems?.length ? pendingItems : openedItems,
+            label,
+            { routingBaseline: context.routingBaseline || null }
+          ),
           onRetry: async ({ attempt, routing: routing2, materialized }) => {
             log(`${label}: ${routing2.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
             await sleep(CFG.pauseMs);
+            const pendingIds = new Set((routing2.pendingItems || []).map((item) => Number(item?.id || 0)).filter(Boolean));
+            const pendingDuplicates = uniqueItems2((materialized?.deferredDuplicates || []).filter((item) => pendingIds.has(Number(item?.id || 0))));
+            if (!pendingDuplicates.length) {
+              log(`${label}: retry has no pending duplicate response entity to re-materialize; retaining confirmed routes`);
+              return;
+            }
             await materializeOpenedDuplicatesFresh(
-              materialized?.deferredDuplicates || [],
+              pendingDuplicates,
               `${label} delayed materialization retry ${attempt + 1}/3`,
               { routingBaseline: context.routingBaseline || null }
             );
@@ -49879,10 +50361,14 @@
       if (!selection.ok) {
         log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} missing ${selection.missing.count} ${selection.missing.rarity || selection.missing.tier || "player"}(s); stopping`);
         logSelectionDiagnostics(`${loopDef.name} challenge ${challengeNo}/${challengeTotal}`, selection, challengeDef.priorityPiles);
-        return { status: "blocked", submitted: false, reason: `missing ${selection.missing.count} player(s)` };
+        return {
+          status: options.missingStatus === "insufficient" ? "insufficient" : "blocked",
+          submitted: false,
+          reason: `missing ${selection.missing.count} player(s)`
+        };
       }
       if (options.requirePreferredSignal === true && preferredSignalRefs.length && !selectionConsumesSignalRefs(selection, preferredSignalRefs)) {
-        log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} did not consume a required recovery duplicate signal; preserving the primary 10x85+ fodder`);
+        log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} did not consume a required recovery duplicate signal; preserving the current recovery material`);
         return { status: "unavailable", submitted: false, reason: "recovery duplicate signal was not selected" };
       }
       if (options.dryRun === true) {
@@ -49895,6 +50381,7 @@
       const attempt = await submitInventorySbcAttempt(challengeDef, selection, {
         label,
         handleReward: false,
+        opened: options.opened || null,
         preSaveValidators: [({ players }) => {
           assertPlayerPickFodderProtection(challengeDef, players);
           return true;
@@ -55521,9 +56008,9 @@
       const summary = runtime.coordinator?.getLedger?.()?.summary?.();
       const inventoryVersion = Number(summary?.inventoryVersion);
       if (!Number.isFinite(inventoryVersion)) return null;
-      const itemKey2 = (item) => `${Number(item?.id || 0)}:${Number(item?.definitionId || 0)}`;
-      const pendingStorage = (runtime.openRouting?.storageItems || []).map(itemKey2).sort().join(",");
-      const primaryDuplicates = (runtime.primaryDuplicateRefs || []).map(itemKey2).sort().join(",");
+      const itemKey3 = (item) => `${Number(item?.id || 0)}:${Number(item?.definitionId || 0)}`;
+      const pendingStorage = (runtime.openRouting?.storageItems || []).map(itemKey3).sort().join(",");
+      const primaryDuplicates = (runtime.primaryDuplicateRefs || []).map(itemKey3).sort().join(",");
       return [
         inventoryVersion,
         Number(summary?.capacities?.storage?.free ?? -1),

@@ -100,6 +100,7 @@ import {
   classifyPlayerPickRepeatability,
   collectScannedPlayerPickLoopDefs,
   parsePlayerPickSbcSnapshot,
+  resolveRareGoldPlayerPickCandidates,
   resolvePlayerPickLoopReference,
   resolvePlayerPickLoopSelector,
 } from './config/player-pick-discovery.js';
@@ -132,6 +133,7 @@ import {
   createTwoBy84UpgradePolicy,
 } from './config/upgrade-policies.js';
 import { MATERIAL_SINK_BASELINES } from './config/material-sink.js';
+import { findRegisteredSbcChallenge } from './sbc/challenge-context.js';
 import { findSbcSetByPreferredId } from './sbc/set-identity.js';
 import {
   DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
@@ -356,7 +358,7 @@ import {
   planUnmaterializedDuplicateFallback,
 } from './pack/opened-item-materialization.js';
 import { createPackInstanceQueue } from './pack/instance-queue.js';
-import { settleOpenedItems } from './pack/opened-item-settlement.js';
+import { collectNativeSwapRoutingEvidence, settleOpenedItems } from './pack/opened-item-settlement.js';
 import { recoverPackOpenRetry } from './pack/retry-recovery.js';
 import {
   PACK_OPEN_RESPONSE_LOST,
@@ -3410,6 +3412,8 @@ function updateLoopControls() {
     let reservedIds = new Set();
     let initialLogged = false;
     let activeActionItems = [];
+    const routeEvidenceItemIds = new Set((options.routeEvidenceItemIds || []).map(Number).filter(Boolean));
+    const routeEvidenceByItemId = new Map();
     const adapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
     const diagnosticPiles = () => ({
       unassigned: getUnassignedItems(),
@@ -3573,28 +3577,51 @@ function updateLoopControls() {
         }
         log(`Unassigned move diagnostic result: ${diagnosticJson(captureMoveResult(moveResult))}`);
         const refreshResult = await refreshUnassigned();
+        const actionState = captureActionState(action, items);
+        const nativeSwapRouteEvidence = collectNativeSwapRoutingEvidence(
+          actionState,
+          [...routeEvidenceItemIds],
+        );
+        for (const evidence of nativeSwapRouteEvidence) {
+          routeEvidenceByItemId.set(evidence.itemId, evidence);
+        }
         log(`Unassigned move diagnostic after refresh: ${diagnosticJson({
           refresh: captureMoveResult(refreshResult),
-          state: captureActionState(action, items),
+          state: actionState,
+          routeEvidence: nativeSwapRouteEvidence,
         })}`);
       },
     });
 
-    if (result.status === 'blocked') {
-      const blocked = result.plan?.blocked;
+    const resultWithRouteEvidence = {
+      ...result,
+      routeEvidence: [...routeEvidenceByItemId.values()],
+    };
+
+    if (resultWithRouteEvidence.status === 'blocked') {
+      const blocked = resultWithRouteEvidence.plan?.blocked;
+      const terminalResolverFailure = (resultWithRouteEvidence.resolverResults || []).find((entry) => (
+        entry?.status === 'blocked' && entry?.terminal === true && entry?.reason
+      ));
       const reasonCode = blocked?.destination === 'storage'
         ? 'PROTECTED_STORAGE_BLOCKED'
         : blocked?.destination === 'transfer'
           ? 'UNASSIGNED_TRANSFER_BLOCKED'
           : 'UNASSIGNED_CLEANUP_BLOCKED';
-      const blockedReason = blocked?.destination === 'storage'
+      const capacityReason = blocked?.destination === 'storage'
         ? `SBC storage has only ${blocked.free} slot(s), but ${blocked.required} item(s) need moving`
         : blocked?.destination === 'transfer'
           ? `Transfer list has only ${blocked.free} slot(s), but ${blocked.required} item(s) need moving`
-          : result.reason || 'Unassigned cleanup blocked';
+          : resultWithRouteEvidence.reason || 'Unassigned cleanup blocked';
+      // A recovery failure is the first deviation from the expected path. Keep
+      // the original capacity context, but never mask that failure as a plain
+      // Storage/Transfer shortage.
+      const blockedReason = terminalResolverFailure
+        ? `Unassigned recovery failed: ${terminalResolverFailure.reason}; ${capacityReason}`
+        : capacityReason;
       if (options.returnBlockedResult === true) {
         return {
-          ...result,
+          ...resultWithRouteEvidence,
           reason: blockedReason,
           reasonCode,
           details: {
@@ -3608,11 +3635,11 @@ function updateLoopControls() {
       fail(blockedReason);
     }
 
-    const reservedCount = result.plan?.reservedItemRefs?.length || reservedIds.size;
-    if (initialLogged && (result.iterations > 1 || reservedCount || result.status === 'preserved')) {
+    const reservedCount = resultWithRouteEvidence.plan?.reservedItemRefs?.length || reservedIds.size;
+    if (initialLogged && (resultWithRouteEvidence.iterations > 1 || reservedCount || resultWithRouteEvidence.status === 'preserved')) {
       log(`Unassigned cleanup complete: ${reason}${reservedCount ? `; reserved ${reservedCount} item(s)` : ''}`);
     }
-    return result;
+    return resultWithRouteEvidence;
   }
 
   function getUnassignedStorageOverflow() {
@@ -3984,6 +4011,12 @@ function updateLoopControls() {
     let routing = openedItemRoutingResult(items, options.reserveItem || null, {}, options.routingBaseline || null);
     for (let attempt = 1; attempt <= attempts && routing.pendingItems.length; attempt++) {
       await refreshUnassigned({ quiet: true });
+      // An EA native Unassigned -> Club swap changes both sides of the pair.
+      // The response item is now a Club entity while its former Club
+      // counterpart is in Unassigned/Transfer, so a routing check that only
+      // refreshes Unassigned, Storage and Transfer can incorrectly lose the
+      // already-confirmed reward route to a stale Club cache.
+      await refreshPileCacheByCandidates('club', { quiet: true });
       await refreshPileCacheByCandidates('storage', { quiet: true });
       await refreshPileCacheByCandidates('transfer', { quiet: true });
       routing = openedItemRoutingResult(items, options.reserveItem || null, {}, options.routingBaseline || null);
@@ -4596,27 +4629,49 @@ function updateLoopControls() {
     }
 
     let challenges = null;
+    let daoError = null;
     if (eaSbcAdapter().hasDaoGetChallengesForSet()) {
-      const request = () => observeOnce(
-        eaSbcAdapter().getChallengesForSet(set?.id),
-        ctrl(),
-        20000,
-        `sbcDAO.getChallengesForSet ${label}`,
-      );
-      const result = context.runRequest
-        ? await context.runRequest(`DAO Challenges ${label}`, request)
-        : await request();
-      if (result?.success && Array.isArray(result?.response?.challenges)) {
-        challenges = result.response.challenges;
-      } else {
-        const detail = serviceResultErrorText(result) || 'unknown';
-        throw new Error(`direct Challenge metadata unavailable: ${detail}`);
+      try {
+        const request = () => observeOnce(
+          eaSbcAdapter().getChallengesForSet(set?.id),
+          ctrl(),
+          20000,
+          `sbcDAO.getChallengesForSet ${label}`,
+        );
+        const result = context.runRequest
+          ? await context.runRequest(`DAO Challenges ${label}`, request)
+          : await request();
+        if (result?.success && Array.isArray(result?.response?.challenges)) {
+          challenges = result.response.challenges;
+        } else {
+          const detail = serviceResultErrorText(result) || 'unknown';
+          const code = dynamicSbcLoadErrorCode(result);
+          if (code === 429) {
+            const error = new Error(`direct Challenge metadata unavailable: ${detail}`);
+            error.status = code;
+            throw error;
+          }
+          daoError = new Error(`direct Challenge metadata unavailable: ${detail}`);
+        }
+      } catch (error) {
+        if (dynamicSbcLoadErrorCode(error) === 429) throw error;
+        daoError = error;
       }
     }
-    if (!challenges) challenges = await requestSbcChallenges(set, label, {
-      attempts: 1,
-      runRequest: context.runRequest,
-    });
+    if (!challenges) {
+      if (daoError) {
+        log(`${label}: DAO Challenge metadata failed (${daoError?.message || daoError}); retrying through the standard live Challenge request`);
+      }
+      try {
+        challenges = await requestSbcChallenges(set, label, {
+          attempts: 1,
+          runRequest: context.runRequest,
+        });
+      } catch (error) {
+        if (!daoError) throw error;
+        throw new Error(`${daoError?.message || daoError}; standard Challenge request also failed: ${error?.message || error}`);
+      }
+    }
 
     const loaded = [];
     for (const challenge of challenges) {
@@ -5136,11 +5191,29 @@ function updateLoopControls() {
     return challenges.find((c) => !isCompletedChallenge(c)) || null;
   }
 
+  async function resolveSbcChallengeForScreen(set, challenge, label = set?.name || 'SBC') {
+    const challengeId = Number(challenge?.id || 0);
+    if (!challengeId) fail(`${label}: cannot open an SBC screen without a stable Challenge id`);
+
+    let registered = findRegisteredSbcChallenge(set, challengeId);
+    if (registered) return registered;
+
+    await requestSbcChallenges(set, `${label} registered Challenge`, { attempts: 1 });
+    registered = findRegisteredSbcChallenge(set, challengeId);
+    if (!registered) {
+      fail(`${label}: Challenge #${challengeId} is not registered in Set #${set?.id || '?'} after a live refresh`);
+    }
+    return registered;
+  }
+
   async function openSbcSet(set, options = {}) {
-    const challenge = options.challenge || await findAvailableSbcChallenge(set, set.name);
+    let challenge = options.challenge || await findAvailableSbcChallenge(set, set.name);
     if (!challenge) {
       if (options.returnNullIfComplete) return null;
       fail(`No available challenge for ${set.name}`);
+    }
+    if (options.ensureRegisteredChallenge === true) {
+      challenge = await resolveSbcChallengeForScreen(set, challenge, options.label || set.name);
     }
 
     const controller = ctrl();
@@ -9008,6 +9081,15 @@ function updateLoopControls() {
     const parentLoopDef = state.loopStack[state.loopStack.length - 1] || null;
     recipe = inheritSbcFodderPolicy(cloneLoopDef(recipe), parentLoopDef || {});
     const label = `Unassigned ${policy.id} -> ${recipe.name}`;
+    if (recipe.playerPickSelector) {
+      return trySubmitUnassignedRecoveryPlayerPick({
+        policy,
+        recipe,
+        triggerRefs,
+        parentLoopDef,
+        label,
+      });
+    }
     let set;
     try {
       set = await findSbcSetForDefIfPresent(recipe);
@@ -9091,6 +9173,182 @@ function updateLoopControls() {
       return { status, reason: attempt.result.reason || attempt.result.status };
     }
     return { status: 'progress', consumedItemIds: attempt.result.consumedItemRefs.map((ref) => ref.id) };
+  }
+
+  function playerPickRecoveryDefinition(candidate, parentLoopDef) {
+    const definition = inheritSbcFodderPolicy(cloneLoopDef(candidate), parentLoopDef || {});
+    if (parentLoopDef?.dryRun === true) definition.dryRun = true;
+    return definition;
+  }
+
+  function matchingRecoveryPlayerPickCandidates(item, candidates = []) {
+    return candidates.filter((candidate) => playerPickMatchesReward(
+      item,
+      candidate.pickItemNames || [],
+      candidate.pickItemResourceIds || [],
+    ));
+  }
+
+  async function trySubmitUnassignedRecoveryPlayerPick({ policy, recipe, triggerRefs, parentLoopDef, label }) {
+    const selector = recipe.playerPickSelector;
+    const scanned = getScannedDynamicSbcLoopDefs();
+    const known = resolveRareGoldPlayerPickCandidates(selector, scanned, {
+      includeExhaustedBounded: true,
+    });
+    if (known.status === 'invalid') {
+      return { status: 'blocked', reason: 'dynamic Rare Gold Player Pick selector is invalid' };
+    }
+    if (known.matches.length) {
+      const pendingDefinition = {
+        name: `${recipe.name} pending reward`,
+        pickItemNames: [...new Set(known.matches.flatMap((candidate) => candidate.pickItemNames || []))],
+        pickItemResourceIds: [...new Set(known.matches.flatMap((candidate) => candidate.pickItemResourceIds || []))],
+      };
+      const pending = await findUnassignedPlayerPick(pendingDefinition, 1, {
+        quietMissing: true,
+        failOnUnexpected: true,
+        forceFresh: true,
+      });
+      if (pending) {
+        const matches = matchingRecoveryPlayerPickCandidates(pending, known.matches);
+        if (matches.length !== 1) {
+          return {
+            status: 'blocked',
+            reason: `pending Player Pick has ${matches.length} matching dynamic recovery definitions`,
+          };
+        }
+        const pickDef = playerPickRecoveryDefinition(matches[0], parentLoopDef);
+        log(`${label}: redeeming pending ${pickDef.name} before submitting another recovery Pick`);
+        try {
+          await redeemAndSelectPlayerPick(pending, pickDef, {
+            cleanupOptions: {
+              loopDef: parentLoopDef,
+              blockedPolicy: 'preserve',
+              enableRecovery: false,
+            },
+          });
+        } catch (error) {
+          return { status: 'blocked', reason: error?.message || String(error) };
+        }
+        return { status: 'progress' };
+      }
+    }
+
+    const candidates = resolveRareGoldPlayerPickCandidates(selector, scanned);
+    if (candidates.status !== 'matched') {
+      log(`${label}: no scanned dynamic Rare Gold Player Pick is currently eligible; trying the next configured recipe`);
+      return { status: 'unavailable', reason: 'no eligible dynamic Rare Gold Player Pick' };
+    }
+    const unavailable = [];
+    for (const candidate of candidates.matches) {
+      let set;
+      let challenges;
+      let livePick;
+      try {
+        set = await findSbcSetForDefIfPresent(candidate);
+        if (!set) {
+          unavailable.push(`${candidate.name}: Set is no longer available`);
+          continue;
+        }
+        // Revalidate against the same fully-hydrated metadata contract used by the
+        // dynamic scan. A plain requestChallengesForSet response can omit the squad
+        // shape needed to determine the player count, even when its eligibility
+        // requirements prove this is a valid Rare Gold recovery Pick.
+        challenges = await loadDynamicSbcDiscoveryChallenges(set, candidate, {
+          cachedSnapshot: true,
+        });
+        const liveSnapshot = eaSbcAdapter().snapshotDiscoverySet(set, challenges);
+        const parsed = parsePlayerPickSbcSnapshot({
+          set: liveSnapshot,
+          pricePlatform: candidate.pricePlatform || 'pc',
+        });
+        const live = parsed.status === 'supported'
+          ? resolveRareGoldPlayerPickCandidates(selector, [parsed.loop])
+          : { status: 'missing', matches: [] };
+        if (live.status !== 'matched') {
+          const diagnostics = Array.isArray(parsed.diagnostics) && parsed.diagnostics.length
+            ? ` (${parsed.diagnostics.join('; ')})`
+            : '';
+          unavailable.push(`${candidate.name}: live Set/Challenge metadata no longer matches the recovery selector${diagnostics}`);
+          continue;
+        }
+        livePick = live.loop;
+      } catch (error) {
+        unavailable.push(`${candidate.name}: live metadata read failed (${error?.message || error})`);
+        continue;
+      }
+      const incomplete = challenges
+        .map((challenge, index) => ({ challenge, challengeNo: index + 1 }))
+        .filter(({ challenge }) => !isCompletedChallenge(challenge));
+      if (incomplete.length !== 1 || incomplete[0].challengeNo !== 1) {
+        unavailable.push(`${candidate.name}: expected exactly one incomplete Challenge`);
+        continue;
+      }
+      const pickDef = playerPickRecoveryDefinition(livePick, parentLoopDef);
+      // This recovery runs while the outer Unassigned resolver is holding the
+      // blocked duplicate signals. Load the exact Challenge already validated
+      // above once, then carry that context through selection and submission.
+      // This avoids a second Challenge lookup after the recovery transaction
+      // has begun.
+      let opened;
+      try {
+        opened = await openSbcSet(set, {
+          challenge: incomplete[0].challenge,
+          ensureRegisteredChallenge: true,
+          label: `${label}: ${candidate.name}`,
+          returnNullIfComplete: true,
+        });
+      } catch (error) {
+        const reason = error?.message || String(error);
+        log(`${label}: ${candidate.name} recovery Pick screen load failed: ${reason}`);
+        unavailable.push(`${candidate.name}: recovery Pick screen load failed (${reason})`);
+        continue;
+      }
+      if (!opened) {
+        unavailable.push(`${candidate.name}: SBC has no available challenge`);
+        continue;
+      }
+      let submission;
+      try {
+        submission = await submitPlayerPickChallenge(pickDef, 1, 1, {
+          opened,
+          preferredSignalRefs: triggerRefs,
+          requirePreferredSignal: true,
+          missingStatus: 'insufficient',
+        });
+      } catch (error) {
+        return { status: 'blocked', reason: error?.message || String(error) };
+      }
+      if (submission.status === 'unavailable' || submission.status === 'insufficient') {
+        unavailable.push(`${candidate.name}: ${submission.reason || submission.status}`);
+        continue;
+      }
+      if (!submission.submitted) {
+        return { status: 'blocked', reason: submission.reason || `${candidate.name} submission blocked` };
+      }
+      const pickItem = await findUnassignedPlayerPick(pickDef, 10, {
+        forceFresh: true,
+        failOnUnexpected: true,
+      });
+      if (!pickItem) {
+        return { status: 'blocked', reason: `${pickDef.name} submitted but its Player Pick reward was not found` };
+      }
+      try {
+        await redeemAndSelectPlayerPick(pickItem, pickDef, {
+          cleanupOptions: {
+            loopDef: parentLoopDef,
+            blockedPolicy: 'preserve',
+            enableRecovery: false,
+          },
+        });
+      } catch (error) {
+        return { status: 'blocked', reason: error?.message || String(error) };
+      }
+      log(`${label}: completed, redeemed, and cleaned up ${pickDef.name}`);
+      return { status: 'progress' };
+    }
+    log(`${label}: no dynamic Rare Gold Player Pick could consume the blocked duplicate (${unavailable.join('; ') || 'no usable candidate'}); trying the next configured recipe`);
+    return { status: 'unavailable', reason: unavailable.join('; ') || 'no usable dynamic Rare Gold Player Pick' };
   }
 
   function buildUnassignedRecoveryResolvers(options = {}) {
@@ -10156,24 +10414,42 @@ function updateLoopControls() {
           await sleep(CFG.pauseMs);
           return materialized;
         },
-        cleanup: async ({ attempt }) => resolveRuntimeUnassigned(
+        cleanup: async ({ attempt, pendingItems }) => resolveRuntimeUnassigned(
           attempt === 1 ? cleanupReason : `${cleanupReason} delayed response retry ${attempt}/3`,
           {
             ...unassignedCleanupOptions,
-            beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label, {
+            routeEvidenceItemIds: (pendingItems?.length ? pendingItems : openedItems)
+              .map((item) => Number(item?.id || 0))
+              .filter(Boolean),
+            beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(
+              pendingItems?.length ? pendingItems : openedItems,
+              label,
+              {
               routingBaseline: context.routingBaseline || null,
               authoritativeMaterialization: materializedForSettlement?.freshMaterialization,
-            }),
+              },
+            ),
           },
         ),
-        confirmRouting: async () => confirmOpenedItemRouting(openedItems, label, {
-          routingBaseline: context.routingBaseline || null,
-        }),
+        confirmRouting: async ({ pendingItems }) => confirmOpenedItemRouting(
+          pendingItems?.length ? pendingItems : openedItems,
+          label,
+          { routingBaseline: context.routingBaseline || null },
+        ),
         onRetry: async ({ attempt, routing, materialized }) => {
           log(`${label}: ${routing.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
           await sleep(CFG.pauseMs);
+          const pendingIds = new Set((routing.pendingItems || [])
+            .map((item) => Number(item?.id || 0))
+            .filter(Boolean));
+          const pendingDuplicates = uniqueItems((materialized?.deferredDuplicates || [])
+            .filter((item) => pendingIds.has(Number(item?.id || 0))));
+          if (!pendingDuplicates.length) {
+            log(`${label}: retry has no pending duplicate response entity to re-materialize; retaining confirmed routes`);
+            return;
+          }
           await materializeOpenedDuplicatesFresh(
-            materialized?.deferredDuplicates || [],
+            pendingDuplicates,
             `${label} delayed materialization retry ${attempt + 1}/3`,
             { routingBaseline: context.routingBaseline || null },
           );
@@ -11921,12 +12197,16 @@ function updateLoopControls() {
     if (!selection.ok) {
       log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} missing ${selection.missing.count} ${selection.missing.rarity || selection.missing.tier || 'player'}(s); stopping`);
       logSelectionDiagnostics(`${loopDef.name} challenge ${challengeNo}/${challengeTotal}`, selection, challengeDef.priorityPiles);
-      return { status: 'blocked', submitted: false, reason: `missing ${selection.missing.count} player(s)` };
+      return {
+        status: options.missingStatus === 'insufficient' ? 'insufficient' : 'blocked',
+        submitted: false,
+        reason: `missing ${selection.missing.count} player(s)`,
+      };
     }
     if (options.requirePreferredSignal === true
       && preferredSignalRefs.length
       && !selectionConsumesSignalRefs(selection, preferredSignalRefs)) {
-      log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} did not consume a required recovery duplicate signal; preserving the primary 10x85+ fodder`);
+      log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} did not consume a required recovery duplicate signal; preserving the current recovery material`);
       return { status: 'unavailable', submitted: false, reason: 'recovery duplicate signal was not selected' };
     }
     if (options.dryRun === true) {
@@ -11939,6 +12219,7 @@ function updateLoopControls() {
     const attempt = await submitInventorySbcAttempt(challengeDef, selection, {
       label,
       handleReward: false,
+      opened: options.opened || null,
       preSaveValidators: [({ players }) => {
         assertPlayerPickFodderProtection(challengeDef, players);
         return true;
