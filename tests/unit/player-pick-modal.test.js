@@ -66,9 +66,14 @@ describe('manual Player Pick modal', () => {
       style: expect.objectContaining({ gridColumn: '1', gridRow: '1', textDecoration: 'underline' }),
     });
     expect(harness.created.find((element) => element.textContent === 'Player Two')).toMatchObject({ tagName: 'span' });
-    expect(harness.created.find((element) => element.textContent === 'rating:90, special, new')).toBeTruthy();
-    expect(harness.created.find((element) => element.textContent === 'price:135k')).toMatchObject({
-      style: expect.objectContaining({ gridColumn: '2', gridRow: '1 / span 2' }),
+    const ratingBadge = harness.created.find((element) => element.textContent === '90'
+      && element.style?.background && element.style?.borderRadius === '2px');
+    expect(ratingBadge).toMatchObject({ style: expect.objectContaining({ fontWeight: '700' }) });
+    expect(harness.created.find((element) => element.textContent === 'new')).toBeTruthy();
+    expect(harness.created.find((element) => element.textContent === 'dupe')).toBeTruthy();
+    const priceNode = harness.created.find((element) => element.textContent === 'price:135k');
+    expect(priceNode).toMatchObject({
+      style: expect.objectContaining({ marginLeft: 'auto', fontWeight: '700' }),
     });
     expect(confirm.disabled).toBe(true);
     const stopPropagation = vi.fn();
@@ -103,5 +108,38 @@ describe('manual Player Pick modal', () => {
     stopCheck();
     await expect(promise).rejects.toThrow(/Stopped by user/);
     expect(harness.body[0].removed).toBe(true);
+  });
+
+  it('uses the EA native theme accent when resolveNativeTheme is provided', () => {
+    const harness = createUiHarness();
+    const resolveNativeTheme = vi.fn((item) => ({
+      background: { r: 0xC4, g: 0x66, b: 0x9F },
+      foreground: { r: 0xFF, g: 0xFF, b: 0xFF },
+      accent: { r: 0xFF, g: 0xC2, b: 0xD6 },
+      source: 'EA Rarity',
+    }));
+    const cancelStopCheck = vi.fn();
+    const promise = waitForManualPlayerPickSelection({
+      dom: harness.dom,
+      ranked: [{ item: { id: 1, name: 'Special 96' }, rating: 96, special: true, rare: false, duplicate: false, price: 220000 }],
+      pickCount: 1,
+      reason: 'special',
+      describeCandidate: () => 'Special 96',
+      formatPrice: (price) => `${price / 1000}k`,
+      resolveNativeTheme,
+      scheduleStopCheck: () => 11,
+      cancelStopCheck,
+      isStopping: () => false,
+    });
+
+    expect(resolveNativeTheme).toHaveBeenCalledWith({ id: 1, name: 'Special 96' });
+    const card = harness.created.find((element) => element.role === 'button');
+    expect(card.style.borderLeft).toContain('#FFC2D6');
+    expect(card.style.background).toContain('#C4669F');
+    card.click();
+    harness.created.find((element) => element.textContent === 'Confirm selection').click();
+    return expect(promise).resolves.toEqual([{ id: 1, name: 'Special 96' }]).then(() => {
+      expect(cancelStopCheck).toHaveBeenCalledWith(11);
+    });
   });
 });
