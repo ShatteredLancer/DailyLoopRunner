@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.53
+// @version      0.8.54
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.53",
+    version: "0.8.54",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -34873,7 +34873,9 @@
         const description = String(options.describeCandidate(candidate) || "");
         card.title = description;
         const theme = candidateTheme(candidate, options.resolveNativeTheme);
+        const isNew = candidate?.duplicate !== true;
         applyStyles2(card, {
+          position: "relative",
           minHeight: "72px",
           textAlign: "left",
           color: theme.foreground,
@@ -34889,6 +34891,25 @@
           alignItems: "center",
           boxSizing: "border-box"
         });
+        if (isNew) {
+          const ribbon = options.dom.create("span");
+          ribbon.textContent = "NEW";
+          ribbon.title = "New card (not yet owned)";
+          applyStyles2(ribbon, {
+            position: "absolute",
+            top: "4px",
+            right: "6px",
+            padding: "2px 7px",
+            borderRadius: "9px",
+            background: "#64d77a",
+            color: "#0a1d10",
+            fontSize: "10px",
+            fontWeight: "800",
+            letterSpacing: "0.08em",
+            boxShadow: "0 0 8px rgba(100, 215, 122, 0.45)"
+          });
+          card.appendChild(ribbon);
+        }
         const futbinUrl = candidateFutbinUrl(candidate, options.resolveFutbinPlayerId);
         const name = options.dom.create(futbinUrl ? "a" : "span");
         name.textContent = candidateName(candidate, description, options.itemDisplayName);
@@ -34909,7 +34930,8 @@
           whiteSpace: "nowrap",
           fontWeight: "700",
           color: theme.foreground,
-          textDecoration: futbinUrl ? "underline" : "none"
+          textDecoration: futbinUrl ? "underline" : "none",
+          paddingRight: isNew ? "42px" : "0"
         });
         const tagRow = options.dom.create("div");
         applyStyles2(tagRow, {
