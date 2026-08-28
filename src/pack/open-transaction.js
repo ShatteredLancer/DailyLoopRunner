@@ -280,6 +280,19 @@ export async function openPackTransaction(options = {}) {
           },
         }), { phase: 'recovery', attempt, packRef, code });
       }
+      if (recovery?.status === 'deferred' || recovery?.status === 'replan') {
+        return publishReceipt(options, createOpenPackReceipt({
+          status: 'replan',
+          packRef,
+          reason: recovery.reason || 'pack open retry deferred until pending items are routed',
+          attempts: attempt,
+          details: {
+            ...(recovery.details || {}),
+            phase: 'recovery',
+            reasonCode: recovery.reasonCode || 'PACK_OPEN_RETRY_DEFERRED',
+          },
+        }), { phase: 'recovery', attempt, packRef, code });
+      }
     }
   }
 

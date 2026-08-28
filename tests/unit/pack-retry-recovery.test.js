@@ -111,6 +111,119 @@ describe('pack open retry recovery', () => {
     expect(openStorePacks).not.toHaveBeenCalled();
   });
 
+  it('resolves a known delayed pending item before retrying the unopened pack', async () => {
+    const inspectFreshUnassigned = vi.fn()
+      .mockResolvedValueOnce({
+        verified: true,
+        source: 'fresh-purchased-api',
+        items: [{ id: 933760205603, type: 'player-pick' }],
+      })
+      .mockResolvedValueOnce({
+        verified: true,
+        source: 'fresh-purchased-api',
+        items: [],
+      });
+    const resolvePendingItems = vi.fn(async () => ({
+      status: 'resolved',
+      details: { delayedPlayerPickCount: 1 },
+    }));
+    const resolveUnassigned = vi.fn();
+    const refreshInventory = vi.fn(async () => {});
+    const result = await recoverPackOpenRetry({
+      label: 'Scanned Provisions reward',
+      code: 471,
+      pack: { id: 21346 },
+      sleep: async () => {},
+      inspectFreshUnassigned,
+      resolvePendingItems,
+      resolveUnassigned,
+      openStorePacks: async () => true,
+      refreshInventory,
+    });
+
+    expect(result).toMatchObject({
+      status: 'ready',
+      resetRetryBaseline: true,
+      evidence: {
+        source: 'fresh-purchased-api',
+        verified: true,
+        pendingCount: 0,
+      },
+    });
+    expect(resolvePendingItems).toHaveBeenCalledWith(expect.objectContaining({
+      items: [{ id: 933760205603, type: 'player-pick' }],
+    }));
+    expect(inspectFreshUnassigned).toHaveBeenCalledTimes(2);
+    expect(resolveUnassigned).not.toHaveBeenCalled();
+    expect(refreshInventory).toHaveBeenCalledWith({ storeRefreshed: true });
+  });
+
+  it('preserves an unresolved Player Pick instead of misreporting a lost pack response', async () => {
+    const resolveUnassigned = vi.fn();
+    const result = await recoverPackOpenRetry({
+      label: 'Scanned Provisions reward',
+      code: 471,
+      pack: { id: 21346 },
+      sleep: async () => {},
+      inspectFreshUnassigned: async () => ({
+        verified: true,
+        source: 'fresh-purchased-api',
+        items: [{ id: 933760205603, type: 'player-pick' }],
+      }),
+      resolvePendingItems: async () => ({
+        status: 'blocked',
+        reason: 'manual Player Pick selection is still pending',
+        reasonCode: 'UNASSIGNED_PLAYER_PICK_PENDING',
+      }),
+      resolveUnassigned,
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reason: 'UNASSIGNED_PLAYER_PICK_PENDING',
+      details: {
+        reasonCode: 'UNASSIGNED_PLAYER_PICK_PENDING',
+        pendingItemReason: 'manual Player Pick selection is still pending',
+      },
+    });
+    expect(resolveUnassigned).not.toHaveBeenCalled();
+  });
+
+  it('defers the unopened pack after a known Player Pick is selected for later routing', async () => {
+    const resolveUnassigned = vi.fn();
+    const markFailedPack = vi.fn();
+    const inspectFreshUnassigned = vi.fn(async () => ({
+      verified: true,
+      source: 'fresh-purchased-api',
+      items: [{ id: 933760205603, type: 'player-pick' }],
+    }));
+    const result = await recoverPackOpenRetry({
+      label: 'Scanned Provisions reward',
+      code: 471,
+      pack: { id: 21346 },
+      markFailedPack,
+      sleep: async () => {},
+      inspectFreshUnassigned,
+      resolvePendingItems: async () => ({
+        status: 'deferred',
+        reason: 'Player Pick selected; selected card needs Rolling routing',
+        reasonCode: 'PACK_OPEN_DEFERRED_FOR_PLAYER_PICK',
+        details: { selectedCardCount: 1 },
+      }),
+      resolveUnassigned,
+    });
+
+    expect(result).toMatchObject({
+      status: 'deferred',
+      discarded: false,
+      reasonCode: 'PACK_OPEN_DEFERRED_FOR_PLAYER_PICK',
+      details: { selectedCardCount: 1 },
+    });
+    expect(inspectFreshUnassigned).toHaveBeenCalledOnce();
+    expect(markFailedPack).not.toHaveBeenCalled();
+    expect(resolveUnassigned).not.toHaveBeenCalled();
+  });
+
   it('fails closed when neither fresh API nor page navigation can verify Unassigned state', async () => {
     const openStorePacks = vi.fn();
     const result = await recoverPackOpenRetry({

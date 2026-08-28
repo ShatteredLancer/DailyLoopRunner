@@ -354,6 +354,35 @@ describe('openPackTransaction', () => {
     expect(transport).toHaveBeenCalledOnce();
   });
 
+  it('returns a replan receipt when retry recovery resolves a blocking Player Pick first', async () => {
+    const transport = vi.fn(async () => ({ success: false, status: 409, error: { code: 471 } }));
+    const selector = vi.fn(async ({ attempt }) => ({ id: 21346, instance: attempt }));
+    const receipt = await openPackTransaction({
+      packSelector: selector,
+      openTransport: transport,
+      retryPolicy: { attempts: 2, retryCodes: ['471'] },
+      beforeRetry: async () => ({
+        status: 'deferred',
+        reason: 'delayed Storage-pressure Player Pick was resolved',
+        reasonCode: 'PACK_OPEN_DEFERRED_FOR_PLAYER_PICK',
+        details: { selectedCardCount: 1 },
+      }),
+    });
+
+    expect(receipt).toMatchObject({
+      status: 'replan',
+      reason: 'delayed Storage-pressure Player Pick was resolved',
+      attempts: 1,
+      details: {
+        phase: 'recovery',
+        reasonCode: 'PACK_OPEN_DEFERRED_FOR_PLAYER_PICK',
+        selectedCardCount: 1,
+      },
+    });
+    expect(selector).toHaveBeenCalledOnce();
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
   it('returns the final error code after a bounded retry is exhausted', async () => {
     const beforeRetry = vi.fn(async () => {});
     const receipt = await openPackTransaction({

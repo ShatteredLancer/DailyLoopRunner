@@ -16,6 +16,12 @@ All notable user-facing changes are documented here. This project follows
 
 ### Fixed
 
+- When a delayed Storage-pressure Player Pick appears only after a Provisions
+  pack open returns EA code `471`, redeem that known Pick through its Rolling
+  owner, stage the selected card through normal Unassigned routing, and defer
+  the still-unopened pack for the next bounded recovery pass. This avoids
+  misreporting `PACK_OPEN_RESPONSE_LOST` or trying to move the Pick item to
+  Club while preserving fail-closed handling for unrelated or mixed items.
 - Continue Rolling when a deferred primary-pack duplicate has already become a
   normal Club item because another recovery SBC consumed its duplicate
   counterpart. The Runner verifies the exact item ID and definition and still

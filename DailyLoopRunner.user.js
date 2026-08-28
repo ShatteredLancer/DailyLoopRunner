@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.54
+// @version      0.8.55
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.54",
+    version: "0.8.55",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -26281,6 +26281,19 @@
             }
           }), { phase: "recovery", attempt, packRef, code });
         }
+        if (recovery?.status === "deferred" || recovery?.status === "replan") {
+          return publishReceipt(options, createOpenPackReceipt({
+            status: "replan",
+            packRef,
+            reason: recovery.reason || "pack open retry deferred until pending items are routed",
+            attempts: attempt,
+            details: {
+              ...recovery.details || {},
+              phase: "recovery",
+              reasonCode: recovery.reasonCode || "PACK_OPEN_RETRY_DEFERRED"
+            }
+          }), { phase: "recovery", attempt, packRef, code });
+        }
       }
     }
     return publishReceipt(options, createOpenPackReceipt({ status: "blocked", reason: lastReason || "open failed", attempts }), { phase: "transport", code: lastReason });
@@ -26598,6 +26611,58 @@
       details: { reasonCode: PACK_OPEN_RESPONSE_LOST, unassignedEvidence: evidence2 }
     };
   }
+  async function tryResolveKnownPendingItems(options, inspection, base) {
+    if (typeof options.resolvePendingItems !== "function") return null;
+    const evidence2 = inspectionSummary(inspection);
+    let resolution;
+    try {
+      resolution = await options.resolvePendingItems({
+        inspection,
+        items: inspectionItems(inspection),
+        evidence: evidence2
+      });
+    } catch (error) {
+      options.log?.(`${base.label}: pending-item retry recovery failed: ${error?.message || error}`);
+      return null;
+    }
+    if (!resolution || resolution.status === "unhandled") return null;
+    if (resolution.status === "deferred" || resolution.status === "replan") {
+      return {
+        status: "deferred",
+        reason: resolution.reason || "known pending items must be routed before retrying the pack open",
+        reasonCode: resolution.reasonCode || "PACK_OPEN_RETRY_DEFERRED",
+        details: resolution.details || null
+      };
+    }
+    if (resolution.status !== "resolved") {
+      const resultBase = { ...base };
+      delete resultBase.label;
+      const reasonCode2 = resolution.reasonCode || PACK_OPEN_RESULT_AMBIGUOUS;
+      return {
+        ...resultBase,
+        status: "blocked",
+        reason: reasonCode2,
+        details: {
+          reasonCode: reasonCode2,
+          pendingItemReason: resolution.reason || null,
+          unassignedEvidence: evidence2
+        }
+      };
+    }
+    const refreshed = await inspectFreshUnassigned(options, base.label);
+    const refreshedEvidence = inspectionSummary(refreshed);
+    if (!refreshed.verified || refreshedEvidence.pendingCount > 0) {
+      options.log?.(`${base.label}: known pending item recovery did not produce verified empty Unassigned state`);
+      return resolvePendingInspection(options, refreshed, base);
+    }
+    options.log?.(`${base.label}: resolved ${evidence2.pendingCount} known pending item(s); continuing bounded pack retry`);
+    return {
+      status: "resolved",
+      inspection: refreshed,
+      resetRetryBaseline: true,
+      details: resolution.details || null
+    };
+  }
   async function recoverPackOpenRetry(options = {}) {
     const label = String(options.label || "Pack open");
     const code = normalizedCode(options.code) || "unknown";
@@ -26605,24 +26670,48 @@
     const packId2 = Number(pack?.id ?? pack?.packId ?? pack?.packDefinitionId ?? pack?.packAssetId ?? 0) || null;
     const log = typeof options.log === "function" ? options.log : () => {
     };
-    log(`${label}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
-    if (shouldDiscardFailedPack(code)) {
+    const discardOnRetry = shouldDiscardFailedPack(code);
+    let discarded = false;
+    const discardFailedPack = () => {
+      if (!discardOnRetry || discarded) return;
       options.markFailedPack?.(pack);
+      discarded = true;
       log(`${label}: excluding failed pack instance${packId2 ? ` #${packId2}` : ""} before retry`);
-    }
+    };
+    log(`${label}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
     log(`${label}: checking Purchased/Unassigned state before any retry`);
     await options.sleep?.(Math.max(0, Number(options.pauseMs || 0)));
-    const base = { code, discarded: shouldDiscardFailedPack(code), storeRefreshed: false };
+    const base = { code, discarded: false, storeRefreshed: false };
     const freshInspection = await inspectFreshUnassigned(options, label);
+    let stateEvidence = freshInspection.verified ? freshInspection : null;
     if (freshInspection.verified) {
       const evidence2 = inspectionSummary(freshInspection);
       log(`${label}: fresh ${evidence2.source} verified ${evidence2.pendingCount} pending item(s)`);
       if (evidence2.pendingCount > 0) {
-        return resolvePendingInspection(options, freshInspection, { ...base, label });
+        const knownPending = await tryResolveKnownPendingItems(
+          options,
+          freshInspection,
+          { ...base, label }
+        );
+        if (knownPending?.status === "blocked") {
+          discardFailedPack();
+          return { ...knownPending, discarded };
+        }
+        if (knownPending?.status === "deferred") {
+          log(`${label}: keeping the unopened pack instance eligible while known pending items are routed`);
+          return { ...base, ...knownPending, discarded: false };
+        }
+        if (knownPending?.status === "resolved") {
+          stateEvidence = knownPending.inspection;
+          base.resetRetryBaseline = knownPending.resetRetryBaseline === true;
+        } else {
+          discardFailedPack();
+          base.discarded = discarded;
+          return resolvePendingInspection(options, freshInspection, { ...base, label });
+        }
       }
     }
     await options.unwind?.();
-    let stateEvidence = freshInspection.verified ? freshInspection : null;
     if (!stateEvidence && typeof options.showUnassigned === "function") {
       try {
         const pageItems = await options.showUnassigned();
@@ -26636,6 +26725,8 @@
       }
     }
     if (!stateEvidence) {
+      discardFailedPack();
+      base.discarded = discarded;
       return {
         ...base,
         status: "blocked",
@@ -26647,8 +26738,12 @@
       };
     }
     if (stateEvidence && inspectionItems(stateEvidence).length > 0) {
+      discardFailedPack();
+      base.discarded = discarded;
       return resolvePendingInspection(options, stateEvidence, { ...base, label });
     }
+    discardFailedPack();
+    base.discarded = discarded;
     let storeRefreshed = false;
     try {
       storeRefreshed = await options.openStorePacks?.() === true;
@@ -43408,7 +43503,7 @@
             markStalePack(failedPack);
             log(`${purpose}: excluding ambiguous pack instance #${Number(failedPack?.id || 0) || "?"} before retry`);
           }
-          return recoverPackOpenRetry({
+          const recovery = await recoverPackOpenRetry({
             label: purpose,
             code,
             pack: failedPack,
@@ -43418,6 +43513,7 @@
             pauseMs: CFG.pauseMs,
             settleMs: 700,
             inspectFreshUnassigned: inspectFreshRuntimeUnassigned,
+            resolvePendingItems: options.resolveRetryPendingItems,
             unwind: () => unwindSbcSquadControllers2(`${purpose} pack-open recovery`),
             showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`, {
               stableEmptyReads: 3,
@@ -43432,6 +43528,11 @@
               includePacks: !storeRefreshed
             })
           });
+          if (recovery?.status === "ready" && recovery.resetRetryBaseline === true) {
+            retryBaseline = captureRuntimePackOpenRetrySnapshot(failedPack);
+            log(`${purpose}: reset pack-open retry baseline after resolving unrelated pending items`);
+          }
+          return recovery;
         },
         allowGone: options.allowGone === true,
         onGone: async (selectedPack) => {
@@ -43456,6 +43557,7 @@
         }
         return receipt;
       }
+      if (receipt.status === "replan" && options.returnReplanReceipt === true) return receipt;
       if (receipt.status === "stale" || receipt.status === "unavailable") {
         if (receipt.status === "unavailable") log(`${purpose}: no matching pack remains after recovery`);
         return null;
@@ -53009,9 +53111,69 @@
         allowGone: true,
         allowPendingItems: true,
         returnBlockedReceipt: true,
+        returnReplanReceipt: true,
         preOpenUnassignedOptions: { returnBlockedResult: true },
         assumeSpecialPlayers: options.assumeTotwReward === true,
         retryCodes: ["471", "500"],
+        resolveRetryPendingItems: async ({ items }) => {
+          const freshItems = Array.isArray(items) ? items : [];
+          if (!freshItems.length) return { status: "unhandled" };
+          let pendingPlayerPicks = [];
+          try {
+            pendingPlayerPicks = eaPlayerPickAdapter().listUnassignedPlayerPicks();
+          } catch {
+          }
+          const pickIds = new Set(
+            pendingPlayerPicks.map((item) => Number(item?.id || 0)).filter(Boolean)
+          );
+          const matchingPickCount = freshItems.filter((item) => pickIds.has(Number(item?.id || 0))).length;
+          if (!matchingPickCount) return { status: "unhandled" };
+          if (matchingPickCount !== freshItems.length) {
+            return {
+              status: "blocked",
+              reason: "fresh Unassigned contains a Player Pick mixed with other unresolved items",
+              reasonCode: "UNASSIGNED_PLAYER_PICK_MIXED"
+            };
+          }
+          if (loopDef.rollingStorageSinkEnabled !== true || !loopDef.rollingStorageSink) {
+            return {
+              status: "blocked",
+              reason: "a Player Pick is pending in Unassigned and no Rolling Storage Sink owner is enabled",
+              reasonCode: "UNASSIGNED_PLAYER_PICK_PENDING"
+            };
+          }
+          log(`${routeContext.rewardLabel}: delayed Storage-pressure Player Pick blocked the pack open; resolving it before retry`);
+          const selected2 = await resumePendingRollingStorageSinkReward(
+            loopDef,
+            runtime,
+            loopDef.rollingStorageSink
+          );
+          if (selected2?.status === "selected") {
+            const resumed = await resumeRollingPendingUnassigned(loopDef, runtime);
+            if (resumed?.status !== "ready") {
+              return {
+                status: "blocked",
+                reason: resumed?.reason || "the selected Player Pick card could not be staged for Rolling recovery",
+                reasonCode: resumed?.reasonCode || "UNASSIGNED_PLAYER_PICK_RESULT_PENDING"
+              };
+            }
+            return {
+              status: "deferred",
+              reason: "delayed Storage-pressure Player Pick was resolved; defer the unopened pack until its selected card is routed",
+              reasonCode: "PACK_OPEN_DEFERRED_FOR_PLAYER_PICK",
+              details: {
+                delayedPlayerPickCount: matchingPickCount,
+                selectedCardCount: selected2.pickedCards?.length || 0,
+                primaryPending: resumed.primaryPending === true
+              }
+            };
+          }
+          return {
+            status: "blocked",
+            reason: selected2?.reason || "the delayed Storage-pressure Player Pick could not be resolved",
+            reasonCode: selected2?.reasonCode || "UNASSIGNED_PLAYER_PICK_PENDING"
+          };
+        },
         resolveRetryPack: () => findRewardPack(definition, null, {
           attempts: 2,
           delayMs: 1200,

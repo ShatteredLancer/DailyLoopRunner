@@ -69,33 +69,111 @@ async function resolvePendingInspection(options, inspection, base) {
   };
 }
 
+async function tryResolveKnownPendingItems(options, inspection, base) {
+  if (typeof options.resolvePendingItems !== 'function') return null;
+  const evidence = inspectionSummary(inspection);
+  let resolution;
+  try {
+    resolution = await options.resolvePendingItems({
+      inspection,
+      items: inspectionItems(inspection),
+      evidence,
+    });
+  } catch (error) {
+    options.log?.(`${base.label}: pending-item retry recovery failed: ${error?.message || error}`);
+    return null;
+  }
+  if (!resolution || resolution.status === 'unhandled') return null;
+  if (resolution.status === 'deferred' || resolution.status === 'replan') {
+    return {
+      status: 'deferred',
+      reason: resolution.reason || 'known pending items must be routed before retrying the pack open',
+      reasonCode: resolution.reasonCode || 'PACK_OPEN_RETRY_DEFERRED',
+      details: resolution.details || null,
+    };
+  }
+  if (resolution.status !== 'resolved') {
+    const resultBase = { ...base };
+    delete resultBase.label;
+    const reasonCode = resolution.reasonCode || PACK_OPEN_RESULT_AMBIGUOUS;
+    return {
+      ...resultBase,
+      status: 'blocked',
+      reason: reasonCode,
+      details: {
+        reasonCode,
+        pendingItemReason: resolution.reason || null,
+        unassignedEvidence: evidence,
+      },
+    };
+  }
+
+  const refreshed = await inspectFreshUnassigned(options, base.label);
+  const refreshedEvidence = inspectionSummary(refreshed);
+  if (!refreshed.verified || refreshedEvidence.pendingCount > 0) {
+    options.log?.(`${base.label}: known pending item recovery did not produce verified empty Unassigned state`);
+    return resolvePendingInspection(options, refreshed, base);
+  }
+  options.log?.(`${base.label}: resolved ${evidence.pendingCount} known pending item(s); continuing bounded pack retry`);
+  return {
+    status: 'resolved',
+    inspection: refreshed,
+    resetRetryBaseline: true,
+    details: resolution.details || null,
+  };
+}
+
 export async function recoverPackOpenRetry(options = {}) {
   const label = String(options.label || 'Pack open');
   const code = normalizedCode(options.code) || 'unknown';
   const pack = options.pack || null;
   const packId = Number(pack?.id ?? pack?.packId ?? pack?.packDefinitionId ?? pack?.packAssetId ?? 0) || null;
   const log = typeof options.log === 'function' ? options.log : () => {};
+  const discardOnRetry = shouldDiscardFailedPack(code);
+  let discarded = false;
+  const discardFailedPack = () => {
+    if (!discardOnRetry || discarded) return;
+    options.markFailedPack?.(pack);
+    discarded = true;
+    log(`${label}: excluding failed pack instance${packId ? ` #${packId}` : ''} before retry`);
+  };
 
   log(`${label}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
-  if (shouldDiscardFailedPack(code)) {
-    options.markFailedPack?.(pack);
-    log(`${label}: excluding failed pack instance${packId ? ` #${packId}` : ''} before retry`);
-  }
   log(`${label}: checking Purchased/Unassigned state before any retry`);
 
   await options.sleep?.(Math.max(0, Number(options.pauseMs || 0)));
-  const base = { code, discarded: shouldDiscardFailedPack(code), storeRefreshed: false };
+  const base = { code, discarded: false, storeRefreshed: false };
   const freshInspection = await inspectFreshUnassigned(options, label);
+  let stateEvidence = freshInspection.verified ? freshInspection : null;
   if (freshInspection.verified) {
     const evidence = inspectionSummary(freshInspection);
     log(`${label}: fresh ${evidence.source} verified ${evidence.pendingCount} pending item(s)`);
     if (evidence.pendingCount > 0) {
-      return resolvePendingInspection(options, freshInspection, { ...base, label });
+      const knownPending = await tryResolveKnownPendingItems(
+        options,
+        freshInspection,
+        { ...base, label },
+      );
+      if (knownPending?.status === 'blocked') {
+        discardFailedPack();
+        return { ...knownPending, discarded };
+      }
+      if (knownPending?.status === 'deferred') {
+        log(`${label}: keeping the unopened pack instance eligible while known pending items are routed`);
+        return { ...base, ...knownPending, discarded: false };
+      }
+      if (knownPending?.status === 'resolved') {
+        stateEvidence = knownPending.inspection;
+        base.resetRetryBaseline = knownPending.resetRetryBaseline === true;
+      } else {
+        discardFailedPack();
+        base.discarded = discarded;
+        return resolvePendingInspection(options, freshInspection, { ...base, label });
+      }
     }
   }
 
   await options.unwind?.();
-  let stateEvidence = freshInspection.verified ? freshInspection : null;
   if (!stateEvidence && typeof options.showUnassigned === 'function') {
     try {
       const pageItems = await options.showUnassigned();
@@ -109,6 +187,8 @@ export async function recoverPackOpenRetry(options = {}) {
     }
   }
   if (!stateEvidence) {
+    discardFailedPack();
+    base.discarded = discarded;
     return {
       ...base,
       status: 'blocked',
@@ -120,9 +200,13 @@ export async function recoverPackOpenRetry(options = {}) {
     };
   }
   if (stateEvidence && inspectionItems(stateEvidence).length > 0) {
+    discardFailedPack();
+    base.discarded = discarded;
     return resolvePendingInspection(options, stateEvidence, { ...base, label });
   }
 
+  discardFailedPack();
+  base.discarded = discarded;
   let storeRefreshed = false;
   try {
     storeRefreshed = await options.openStorePacks?.() === true;

@@ -4279,7 +4279,7 @@ function updateLoopControls() {
           markStalePack(failedPack);
           log(`${purpose}: excluding ambiguous pack instance #${Number(failedPack?.id || 0) || '?'} before retry`);
         }
-        return recoverPackOpenRetry({
+        const recovery = await recoverPackOpenRetry({
           label: purpose,
           code,
           pack: failedPack,
@@ -4289,6 +4289,7 @@ function updateLoopControls() {
           pauseMs: CFG.pauseMs,
           settleMs: 700,
           inspectFreshUnassigned: inspectFreshRuntimeUnassigned,
+          resolvePendingItems: options.resolveRetryPendingItems,
           unwind: () => unwindSbcSquadControllers(`${purpose} pack-open recovery`),
           showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`, {
             stableEmptyReads: 3,
@@ -4303,6 +4304,11 @@ function updateLoopControls() {
             includePacks: !storeRefreshed,
           }),
         });
+        if (recovery?.status === 'ready' && recovery.resetRetryBaseline === true) {
+          retryBaseline = captureRuntimePackOpenRetrySnapshot(failedPack);
+          log(`${purpose}: reset pack-open retry baseline after resolving unrelated pending items`);
+        }
+        return recovery;
       },
       allowGone: options.allowGone === true,
       onGone: async (selectedPack) => {
@@ -4327,6 +4333,7 @@ function updateLoopControls() {
       }
       return receipt;
     }
+    if (receipt.status === 'replan' && options.returnReplanReceipt === true) return receipt;
     if (receipt.status === 'stale' || receipt.status === 'unavailable') {
       if (receipt.status === 'unavailable') log(`${purpose}: no matching pack remains after recovery`);
       return null;
@@ -15144,9 +15151,68 @@ function updateLoopControls() {
       allowGone: true,
       allowPendingItems: true,
       returnBlockedReceipt: true,
+      returnReplanReceipt: true,
       preOpenUnassignedOptions: { returnBlockedResult: true },
       assumeSpecialPlayers: options.assumeTotwReward === true,
       retryCodes: ['471', '500'],
+      resolveRetryPendingItems: async ({ items }) => {
+        const freshItems = Array.isArray(items) ? items : [];
+        if (!freshItems.length) return { status: 'unhandled' };
+        let pendingPlayerPicks = [];
+        try { pendingPlayerPicks = eaPlayerPickAdapter().listUnassignedPlayerPicks(); } catch { }
+        const pickIds = new Set(
+          pendingPlayerPicks.map((item) => Number(item?.id || 0)).filter(Boolean),
+        );
+        const matchingPickCount = freshItems.filter((item) => (
+          pickIds.has(Number(item?.id || 0))
+        )).length;
+        if (!matchingPickCount) return { status: 'unhandled' };
+        if (matchingPickCount !== freshItems.length) {
+          return {
+            status: 'blocked',
+            reason: 'fresh Unassigned contains a Player Pick mixed with other unresolved items',
+            reasonCode: 'UNASSIGNED_PLAYER_PICK_MIXED',
+          };
+        }
+        if (loopDef.rollingStorageSinkEnabled !== true || !loopDef.rollingStorageSink) {
+          return {
+            status: 'blocked',
+            reason: 'a Player Pick is pending in Unassigned and no Rolling Storage Sink owner is enabled',
+            reasonCode: 'UNASSIGNED_PLAYER_PICK_PENDING',
+          };
+        }
+        log(`${routeContext.rewardLabel}: delayed Storage-pressure Player Pick blocked the pack open; resolving it before retry`);
+        const selected = await resumePendingRollingStorageSinkReward(
+          loopDef,
+          runtime,
+          loopDef.rollingStorageSink,
+        );
+        if (selected?.status === 'selected') {
+          const resumed = await resumeRollingPendingUnassigned(loopDef, runtime);
+          if (resumed?.status !== 'ready') {
+            return {
+              status: 'blocked',
+              reason: resumed?.reason || 'the selected Player Pick card could not be staged for Rolling recovery',
+              reasonCode: resumed?.reasonCode || 'UNASSIGNED_PLAYER_PICK_RESULT_PENDING',
+            };
+          }
+          return {
+            status: 'deferred',
+            reason: 'delayed Storage-pressure Player Pick was resolved; defer the unopened pack until its selected card is routed',
+            reasonCode: 'PACK_OPEN_DEFERRED_FOR_PLAYER_PICK',
+            details: {
+              delayedPlayerPickCount: matchingPickCount,
+              selectedCardCount: selected.pickedCards?.length || 0,
+              primaryPending: resumed.primaryPending === true,
+            },
+          };
+        }
+        return {
+          status: 'blocked',
+          reason: selected?.reason || 'the delayed Storage-pressure Player Pick could not be resolved',
+          reasonCode: selected?.reasonCode || 'UNASSIGNED_PLAYER_PICK_PENDING',
+        };
+      },
       resolveRetryPack: () => findRewardPack(definition, null, {
         attempts: 2,
         delayMs: 1200,
