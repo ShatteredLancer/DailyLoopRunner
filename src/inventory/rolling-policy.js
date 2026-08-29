@@ -591,8 +591,11 @@ export function createRollingPrimarySelectionPolicy(input = {}) {
       softProtectSpecialPiles: ['club'],
       allowSoftProtectedFallback: true,
       allowOtherSpecialAsOrdinary,
-      liveRequirementsAvailable: exclusiveRoles.length > 0
-        && exclusiveRoles.every((role) => role.minCount >= 1 && role.maxCount >= role.minCount),
+      // A TEAM_RATING-only Challenge has no Required Special role and does
+      // not need a player-group matcher. Once a Required Special role exists,
+      // retain the fail-closed count contract for every role.
+      liveRequirementsAvailable: exclusiveRoles.length === 0
+        || exclusiveRoles.every((role) => role.minCount >= 1 && role.maxCount >= role.minCount),
     },
   };
 }

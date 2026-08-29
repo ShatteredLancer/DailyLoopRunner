@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.55
+// @version      0.8.60
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.55",
+    version: "0.8.60",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -92,6 +92,8 @@
   var ROLLING_DUPLICATE_TRANSACTION_KEY = "fc-loop-runner-rolling-duplicate-transaction-v1";
   var ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY = "fc-loop-runner-rolling-pending-required-special-reward-v1";
   var ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
+  var ROLLING_PENDING_PRIMARY_REWARD_KEY = "fc-loop-runner-rolling-pending-primary-reward-v1";
+  var ROLLING_PENDING_PRIMARY_REWARD_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -842,11 +844,11 @@
       1,
       Math.min(100, Math.floor(Number(loopDef.setCompletionSafetyLimit) || 100))
     );
-    const remainingCompletions4 = hasKnownRemaining ? Math.max(0, Math.floor(Number(rawRemaining))) : safetyLimit;
+    const remainingCompletions3 = hasKnownRemaining ? Math.max(0, Math.floor(Number(rawRemaining))) : safetyLimit;
     return {
-      maxPicks: Math.min(200, pendingCount + remainingCompletions4),
+      maxPicks: Math.min(200, pendingCount + remainingCompletions3),
       pendingCount,
-      remainingCompletions: remainingCompletions4,
+      remainingCompletions: remainingCompletions3,
       usedSafetyLimit: !hasKnownRemaining
     };
   }
@@ -892,56 +894,6 @@
       total: limits.reduce((sum, step) => sum + step.limit, 0),
       text: limits.map((step) => `${step.name}: ${step.policy}`).join("; ")
     };
-  }
-
-  // src/domain/required-special.js
-  var REQUIRED_SPECIAL_ALLOWANCE_MODES = Object.freeze({
-    REQUIRED_ONLY: "required-only",
-    ALL_MATCHING_SPECIALS: "all-matching-specials"
-  });
-  var REQUIRED_SPECIAL_ALLOWANCE_SOURCES = Object.freeze({
-    LIVE_MATCHER: "live-matcher",
-    EXPLICIT_METADATA: "explicit-metadata",
-    FAIL_CLOSED: "fail-closed"
-  });
-  function requirementKey(requirement2 = {}) {
-    return String(requirement2.keyName ?? requirement2.key ?? "");
-  }
-  function numericValues(requirement2 = {}) {
-    return (requirement2.values || []).map(Number).filter(Number.isFinite);
-  }
-  function isAllSpecialEligibilityRequirement(requirement2 = {}) {
-    const key = requirementKey(requirement2);
-    const values = numericValues(requirement2);
-    return ["PLAYER_QUALITY", "PLAYER_LEVEL"].includes(key) && values.length === 1 && values[0] === 4;
-  }
-  function isRequiredSpecialEligibilityRequirement(requirement2 = {}) {
-    return requirementKey(requirement2) === "PLAYER_RARITY_GROUP" || isAllSpecialEligibilityRequirement(requirement2);
-  }
-  function requiredSpecialAllowanceMode(requirements = []) {
-    const requiredSpecial = (requirements || []).filter(isRequiredSpecialEligibilityRequirement);
-    return requiredSpecial.length > 0 && requiredSpecial.every(isAllSpecialEligibilityRequirement) ? REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS : REQUIRED_SPECIAL_ALLOWANCE_MODES.REQUIRED_ONLY;
-  }
-  function resolvedRequiredSpecialAllowanceMode(value = {}) {
-    const explicit = String(value?.requiredSpecialAllowanceMode || "");
-    if (Object.values(REQUIRED_SPECIAL_ALLOWANCE_MODES).includes(explicit)) return explicit;
-    return requiredSpecialAllowanceMode(value?.eligibilityRequirements || []);
-  }
-  function isRequiredSpecialConstraint(constraint = {}) {
-    return constraint.id === "runner-required-special" || constraint.source === "ea" && isRequiredSpecialEligibilityRequirement(constraint);
-  }
-  function allowsAllMatchingSpecials(value = {}) {
-    if (value.requiredSpecialAllowanceMode) {
-      return value.requiredSpecialAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS;
-    }
-    return requiredSpecialAllowanceMode(value.dynamicActiveEligibilityRequirements || []) === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS;
-  }
-  function requiredSpecialRoleMaximum(model = {}, constraint = {}) {
-    const minimum = Math.max(0, Number(constraint.count || 0) || 0);
-    if (model.requiredSpecialAllowanceMode !== REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS) {
-      return minimum;
-    }
-    return Math.max(minimum, Number(model.requiredPlayerCount || 0) || 0);
   }
 
   // src/domain/gold-consumption.js
@@ -1101,6 +1053,56 @@
     if (mode === "never") return false;
     if (mode === "always") return true;
     return runtimeOpenEnabled === true;
+  }
+
+  // src/domain/required-special.js
+  var REQUIRED_SPECIAL_ALLOWANCE_MODES = Object.freeze({
+    REQUIRED_ONLY: "required-only",
+    ALL_MATCHING_SPECIALS: "all-matching-specials"
+  });
+  var REQUIRED_SPECIAL_ALLOWANCE_SOURCES = Object.freeze({
+    LIVE_MATCHER: "live-matcher",
+    EXPLICIT_METADATA: "explicit-metadata",
+    FAIL_CLOSED: "fail-closed"
+  });
+  function requirementKey(requirement2 = {}) {
+    return String(requirement2.keyName ?? requirement2.key ?? "");
+  }
+  function numericValues(requirement2 = {}) {
+    return (requirement2.values || []).map(Number).filter(Number.isFinite);
+  }
+  function isAllSpecialEligibilityRequirement(requirement2 = {}) {
+    const key = requirementKey(requirement2);
+    const values = numericValues(requirement2);
+    return ["PLAYER_QUALITY", "PLAYER_LEVEL"].includes(key) && values.length === 1 && values[0] === 4;
+  }
+  function isRequiredSpecialEligibilityRequirement(requirement2 = {}) {
+    return requirementKey(requirement2) === "PLAYER_RARITY_GROUP" || isAllSpecialEligibilityRequirement(requirement2);
+  }
+  function requiredSpecialAllowanceMode(requirements = []) {
+    const requiredSpecial = (requirements || []).filter(isRequiredSpecialEligibilityRequirement);
+    return requiredSpecial.length > 0 && requiredSpecial.every(isAllSpecialEligibilityRequirement) ? REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS : REQUIRED_SPECIAL_ALLOWANCE_MODES.REQUIRED_ONLY;
+  }
+  function resolvedRequiredSpecialAllowanceMode(value = {}) {
+    const explicit = String(value?.requiredSpecialAllowanceMode || "");
+    if (Object.values(REQUIRED_SPECIAL_ALLOWANCE_MODES).includes(explicit)) return explicit;
+    return requiredSpecialAllowanceMode(value?.eligibilityRequirements || []);
+  }
+  function isRequiredSpecialConstraint(constraint = {}) {
+    return constraint.id === "runner-required-special" || constraint.source === "ea" && isRequiredSpecialEligibilityRequirement(constraint);
+  }
+  function allowsAllMatchingSpecials(value = {}) {
+    if (value.requiredSpecialAllowanceMode) {
+      return value.requiredSpecialAllowanceMode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS;
+    }
+    return requiredSpecialAllowanceMode(value.dynamicActiveEligibilityRequirements || []) === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS;
+  }
+  function requiredSpecialRoleMaximum(model = {}, constraint = {}) {
+    const minimum = Math.max(0, Number(constraint.count || 0) || 0);
+    if (model.requiredSpecialAllowanceMode !== REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS) {
+      return minimum;
+    }
+    return Math.max(minimum, Number(model.requiredPlayerCount || 0) || 0);
   }
 
   // src/config/upgrade-policies.js
@@ -2710,17 +2712,95 @@
       matches
     };
   }
-  function createRollingUpgradeLoopDef(primaryLoop = {}) {
-    const specialAllowanceModes = (primaryLoop.dynamicChallenges || []).map(resolvedRequiredSpecialAllowanceMode);
+  function createRollingPrimaryStage(loop = {}) {
+    const setId = positiveInteger2(loop.sbcSetIds?.[0]);
+    const rating = Number(loop.dynamicRewardMinRating);
+    const challenges = Array.isArray(loop.dynamicChallenges) ? loop.dynamicChallenges : [];
+    const rewardPackIds = Array.isArray(loop.rewardPackIds) ? loop.rewardPackIds : [];
+    const challengeIds = challenges.map((challenge) => positiveInteger2(challenge?.challengeId));
+    const packIds = rewardPackIds.map(positiveInteger2);
+    if (!setId || ![85, 86].includes(rating) || !challenges.length || !rewardPackIds.length || challengeIds.some((id) => !id) || new Set(challengeIds).size !== challengeIds.length || packIds.some((id) => !id) || new Set(packIds).size !== packIds.length) return null;
+    return {
+      key: String(rating),
+      setId,
+      setName: normalizedText2(loop.sbcNames?.[0] || loop.name),
+      challengeIds,
+      rewardPackIds: packIds,
+      rewardPackNames: [...loop.rewardPackNames || []],
+      dynamicSbcFamily: loop.dynamicSbcFamily,
+      dynamicRewardCount: loop.dynamicRewardCount,
+      dynamicRewardMinRating: loop.dynamicRewardMinRating,
+      dynamicChallengeCount: loop.dynamicChallengeCount,
+      dynamicChallenges: clone2(loop.dynamicChallenges || []),
+      expectedPlayerCount: loop.expectedPlayerCount,
+      requiredSpecialCount: loop.requiredSpecialCount,
+      allowedSpecialCount: loop.allowedSpecialCount,
+      repeatability: loop.repeatability || "unknown",
+      completionLimit: loop.completionLimit ?? null,
+      remainingCompletions: loop.remainingCompletions ?? null
+    };
+  }
+  function resolveRollingRequiredSpecialContract(value = {}) {
+    const requiredSpecialCount = Number(value.requiredSpecialCount);
+    const allowedSpecialCount = Number(value.allowedSpecialCount);
+    if (!Number.isInteger(requiredSpecialCount) || ![0, 1].includes(requiredSpecialCount)) {
+      return {
+        valid: false,
+        reason: "supports only zero or one live Required Special slot"
+      };
+    }
+    if (!Number.isInteger(allowedSpecialCount) || allowedSpecialCount < 0) {
+      return {
+        valid: false,
+        reason: "allowedSpecialCount must be a non-negative integer"
+      };
+    }
+    if (requiredSpecialCount === 0) {
+      return allowedSpecialCount === 0 ? { valid: true, requiredSpecialCount, allowedSpecialCount, expectedAllowedSpecialCount: 0 } : {
+        valid: false,
+        reason: "allows no special cards when the live Challenge requires none"
+      };
+    }
+    const specialAllowanceModes = (value.dynamicChallenges || []).map(resolvedRequiredSpecialAllowanceMode);
     const allowsAllSafeSpecials = specialAllowanceModes.length > 0 && specialAllowanceModes.every((mode) => mode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS);
-    const expectedAllowedSpecialCount = allowsAllSafeSpecials ? Number(primaryLoop.expectedPlayerCount || 0) : 1;
-    if (primaryLoop.dynamicSbcFamily !== "high-rated-x10" || Number(primaryLoop.dynamicRewardCount || 0) !== 10 || Number(primaryLoop.dynamicRewardMinRating || 0) !== 85 || Number(primaryLoop.requiredSpecialCount || 0) !== 1 || Number(primaryLoop.allowedSpecialCount || 0) !== expectedAllowedSpecialCount) return null;
+    const expectedAllowedSpecialCount = allowsAllSafeSpecials ? Number(value.expectedPlayerCount || 0) : 1;
+    if (!Number.isInteger(expectedAllowedSpecialCount) || expectedAllowedSpecialCount < 1 || allowedSpecialCount !== expectedAllowedSpecialCount) {
+      return {
+        valid: false,
+        reason: allowsAllSafeSpecials ? `requires one live Required Special slot and allows up to ${expectedAllowedSpecialCount} safe special cards` : "requires allowedSpecialCount to match its one live Required Special slot"
+      };
+    }
+    return {
+      valid: true,
+      requiredSpecialCount,
+      allowedSpecialCount,
+      expectedAllowedSpecialCount
+    };
+  }
+  function validRollingPrimaryStage(stage = {}) {
+    const rating = Number(stage.dynamicRewardMinRating);
+    const setId = positiveInteger2(stage.setId);
+    const challengeIds = Array.isArray(stage.challengeIds) ? stage.challengeIds.map(positiveInteger2).filter(Boolean) : [];
+    const packIds = Array.isArray(stage.rewardPackIds) ? stage.rewardPackIds.map(positiveInteger2).filter(Boolean) : [];
+    if (!setId || ![85, 86].includes(rating) || String(stage.key || "") !== String(rating) || !challengeIds.length || new Set(challengeIds).size !== challengeIds.length || !packIds.length || new Set(packIds).size !== packIds.length) return false;
+    if (!["unlimited", "bounded"].includes(stage.repeatability)) return false;
+    if (stage.repeatability === "bounded" && (!Number.isInteger(Number(stage.completionLimit)) || Number(stage.completionLimit) < 1 || !Number.isInteger(Number(stage.remainingCompletions)) || Number(stage.remainingCompletions) < 0)) return false;
+    return resolveRollingRequiredSpecialContract(stage).valid;
+  }
+  function createRollingUpgradeLoopDef(primaryLoop = {}, options = {}) {
+    const specialContract = resolveRollingRequiredSpecialContract(primaryLoop);
+    if (primaryLoop.dynamicSbcFamily !== "high-rated-x10" || Number(primaryLoop.dynamicRewardCount || 0) !== 10 || ![85, 86].includes(Number(primaryLoop.dynamicRewardMinRating || 0)) || !specialContract.valid) return null;
     const setId = positiveInteger2(primaryLoop.sbcSetIds?.[0]);
     if (!setId) return null;
+    const composite = options.composite === true;
+    const inferredStage = createRollingPrimaryStage(primaryLoop);
+    const stages = Array.isArray(options.stages) && options.stages.length ? options.stages.map(clone2) : [inferredStage].filter(Boolean);
+    if (composite && stages.length !== 2 || !composite && stages.length > 1 || stages.some((stage) => !validRollingPrimaryStage(stage))) return null;
+    if (composite && (Number(stages[0].dynamicRewardMinRating) !== 86 || Number(stages[1].dynamicRewardMinRating) !== 85 || stages[0].repeatability !== "bounded" || Number(stages[0].remainingCompletions) <= 0 || stages[1].repeatability !== "unlimited")) return null;
     const result = {
       ...clone2(primaryLoop),
-      id: `rolling-upgrade-${setId}-${Number(primaryLoop.dynamicRewardMinRating || 0) || "x"}`,
-      name: `${primaryLoop.name} Rolling Loop`,
+      id: composite ? `rolling-upgrade-composite-${stages[0].setId}-${stages[1].setId}` : `rolling-upgrade-${setId}-${Number(primaryLoop.dynamicRewardMinRating || 0) || "x"}`,
+      name: composite ? `${stages[0].setName} -> ${stages[1].setName} Rolling Loop` : `${primaryLoop.name} Rolling Loop`,
       strategy: ROLLING_UPGRADE_STRATEGY,
       hidden: false,
       mvp: false,
@@ -2729,6 +2809,8 @@
       openRewardPacks: false,
       maxCompletions: 0,
       useRoundsAsCompletions: true,
+      rollingPrimaryComposite: composite,
+      ...stages.length ? { rollingPrimaryStages: stages } : {},
       runtimeQuantity: {
         mode: "user",
         target: "maxCompletions",
@@ -5047,6 +5129,8 @@
       sbcNames: unique2([activity.setName, ...target.sbcNames || []].map(normalizedText4).filter(Boolean)),
       rewardPackIds: unique2([...activity.rewardPackIds || [], ...target.rewardPackIds || []].map(positiveInteger4).filter(Boolean)),
       rewardPackNames: unique2([...activity.rewardPackNames || [], ...target.rewardPackNames || []].map(normalizedText4).filter(Boolean)),
+      repeatability: activity.repeatability || target.repeatability || "unknown",
+      completionLimit: activity.completionLimit ?? target.completionLimit ?? null,
       remainingCompletions: activity.remainingCompletions,
       dynamicSbcFamily: activity.familyId,
       scannedMetadata: true,
@@ -5793,14 +5877,79 @@
     if (loopDef.dynamicSbcFamily !== "high-rated-x10" || Number(loopDef.dynamicRewardCount) !== 10) {
       errors.push("rollingUpgrade requires a scanned high-rated-x10 primary with 10 rewards");
     }
+    if (loopDef.dynamicRewardMinRating !== void 0 && ![85, 86].includes(Number(loopDef.dynamicRewardMinRating))) {
+      errors.push("rollingUpgrade dynamicRewardMinRating must be 85 or 86");
+    }
     validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
     validateNumberArray(loopDef.sbcSetIds, "sbcSetIds", errors);
     validateNumberArray(loopDef.rewardPackIds, "rewardPackIds", errors);
-    const dynamicAllowanceModes = (loopDef.dynamicChallenges || []).map(resolvedRequiredSpecialAllowanceMode);
-    const allowsAllSafeSpecials = dynamicAllowanceModes.length > 0 && dynamicAllowanceModes.every((mode) => mode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS);
-    const expectedAllowedSpecialCount = allowsAllSafeSpecials ? Number(loopDef.expectedPlayerCount || 0) : 1;
-    if (Number(loopDef.requiredSpecialCount) !== 1 || Number(loopDef.allowedSpecialCount) !== expectedAllowedSpecialCount) {
-      errors.push(allowsAllSafeSpecials ? `rollingUpgrade requires one Required Special slot and allows up to ${expectedAllowedSpecialCount} safe special cards` : "rollingUpgrade requires exactly one scanned Required Special slot");
+    const specialContract = resolveRollingRequiredSpecialContract(loopDef);
+    if (!specialContract.valid) {
+      errors.push(`rollingUpgrade ${specialContract.reason}`);
+    }
+    const stages = loopDef.rollingPrimaryStages;
+    const composite = loopDef.rollingPrimaryComposite === true;
+    if (stages !== void 0) {
+      if (!Array.isArray(stages) || ![1, 2].includes(stages.length)) {
+        errors.push("rollingPrimaryStages must contain one or two stages");
+      } else {
+        const seenSetIds = /* @__PURE__ */ new Set();
+        const seenStageKeys = /* @__PURE__ */ new Set();
+        stages.forEach((stage, index) => {
+          const path = `rollingPrimaryStages[${index}]`;
+          if (!isPlainObject(stage)) {
+            errors.push(`${path} must be an object`);
+            return;
+          }
+          const rating = Number(stage.dynamicRewardMinRating);
+          const setId = Number(stage.setId);
+          const challengeIds = Array.isArray(stage.challengeIds) ? stage.challengeIds.map(Number) : [];
+          const packIds = Array.isArray(stage.rewardPackIds) ? stage.rewardPackIds.map(Number) : [];
+          const stageKey = String(stage.key || "");
+          if (![85, 86].includes(rating)) errors.push(`${path}.dynamicRewardMinRating must be 85 or 86`);
+          if (stageKey !== String(rating)) errors.push(`${path}.key must match dynamicRewardMinRating`);
+          if (seenStageKeys.has(stageKey)) errors.push(`${path}.key must be unique`);
+          seenStageKeys.add(stageKey);
+          if (!Number.isInteger(setId) || setId < 1) errors.push(`${path}.setId must be a positive integer`);
+          if (seenSetIds.has(setId)) errors.push(`${path}.setId must be unique`);
+          seenSetIds.add(setId);
+          if (!challengeIds.length || challengeIds.some((id) => !Number.isInteger(id) || id < 1)) {
+            errors.push(`${path}.challengeIds must contain positive integers`);
+          } else if (new Set(challengeIds).size !== challengeIds.length) {
+            errors.push(`${path}.challengeIds must be unique`);
+          }
+          if (!packIds.length || packIds.some((id) => !Number.isInteger(id) || id < 1)) {
+            errors.push(`${path}.rewardPackIds must contain positive integers`);
+          } else if (new Set(packIds).size !== packIds.length) {
+            errors.push(`${path}.rewardPackIds must be unique`);
+          }
+          if (!["unlimited", "bounded"].includes(stage.repeatability)) {
+            errors.push(`${path}.repeatability must be unlimited or bounded`);
+          }
+          if (stage.repeatability === "bounded") {
+            if (!Number.isInteger(Number(stage.completionLimit)) || Number(stage.completionLimit) < 1) {
+              errors.push(`${path}.completionLimit must be a positive integer for bounded stages`);
+            }
+            if (!Number.isInteger(Number(stage.remainingCompletions)) || Number(stage.remainingCompletions) < 0) {
+              errors.push(`${path}.remainingCompletions must be a non-negative integer for bounded stages`);
+            }
+          }
+          const hasSpecialMetadata = Object.prototype.hasOwnProperty.call(stage, "requiredSpecialCount") || Object.prototype.hasOwnProperty.call(stage, "allowedSpecialCount") || Object.prototype.hasOwnProperty.call(stage, "dynamicChallenges");
+          if (hasSpecialMetadata) {
+            const specialContract2 = resolveRollingRequiredSpecialContract(stage);
+            if (!specialContract2.valid) errors.push(`${path} ${specialContract2.reason}`);
+          }
+        });
+        if (composite) {
+          if (stages.length !== 2 || Number(stages[0]?.dynamicRewardMinRating) !== 86 || Number(stages[1]?.dynamicRewardMinRating) !== 85 || stages[0]?.repeatability !== "bounded" || Number(stages[0]?.remainingCompletions) <= 0 || stages[1]?.repeatability !== "unlimited") {
+            errors.push("rollingPrimaryComposite requires [86 bounded with remaining uses, 85 unlimited] stages");
+          }
+        } else if (stages.length !== 1) {
+          errors.push("non-composite rollingPrimaryStages must contain exactly one stage");
+        }
+      }
+    } else if (composite) {
+      errors.push("rollingPrimaryComposite requires rollingPrimaryStages");
     }
     const capabilities = [
       ["rollingTotwUpgrade", "totw-upgrade"],
@@ -6861,12 +7010,30 @@
   function unique3(values = []) {
     return [...new Set(values.filter((value) => value !== void 0 && value !== null && value !== ""))];
   }
-  function remainingCompletions3(set = {}) {
-    if (set.timesCompleted === null || set.timesCompleted === void 0 || set.repeats === null || set.repeats === void 0) return null;
-    const completed = Number(set.timesCompleted);
-    const repeats = Number(set.repeats);
-    if (!Number.isFinite(completed) || !Number.isFinite(repeats) || repeats <= 0 || repeats < completed) return null;
-    return Math.max(0, Math.floor(repeats - completed));
+  function classifyUpgradeRepeatability(set = {}) {
+    const rawRepeats = set?.repeats;
+    if (rawRepeats === null) {
+      return { repeatability: "unlimited", completionLimit: null, remainingCompletions: null };
+    }
+    if (rawRepeats === void 0 || rawRepeats === "") {
+      return { repeatability: "unknown", completionLimit: null, remainingCompletions: null };
+    }
+    const repeats = Number(rawRepeats);
+    if (!Number.isInteger(repeats) || repeats < 0) {
+      return { repeatability: "unknown", completionLimit: null, remainingCompletions: null };
+    }
+    if (repeats === 0) {
+      return { repeatability: "unlimited", completionLimit: null, remainingCompletions: null };
+    }
+    const completed = Number(set?.timesCompleted);
+    if (!Number.isInteger(completed) || completed < 0 || completed > repeats) {
+      return { repeatability: "unknown", completionLimit: repeats, remainingCompletions: null };
+    }
+    return {
+      repeatability: "bounded",
+      completionLimit: repeats,
+      remainingCompletions: Math.max(0, repeats - completed)
+    };
   }
   function detectDynamicUpgradeFamily(set = {}) {
     const text = `${normalizedText6(set.name)} ${(set.rewards || []).map((reward) => `${reward.name || ""} ${reward.description || ""}`).join(" ")}`;
@@ -7101,7 +7268,8 @@
       specialCount: 0,
       requirements: []
     };
-    const remaining = remainingCompletions3(set);
+    const repeatability = classifyUpgradeRepeatability(set);
+    const remaining = repeatability.remainingCompletions;
     if (remaining === 0) {
       return {
         status: "completed",
@@ -7136,6 +7304,8 @@
       sbcNames: [setName],
       rewardPackIds: rewards.ids,
       rewardPackNames: rewards.names,
+      repeatability: repeatability.repeatability,
+      completionLimit: repeatability.completionLimit,
       remainingCompletions: remaining,
       scannedMetadata: true,
       ratingSbcFill: {
@@ -7190,6 +7360,185 @@
       diagnostics: []
     };
   }
+  function rollingCandidateRating(loop = {}) {
+    const rating = Number(loop?.dynamicRewardMinRating);
+    return Number.isInteger(rating) && [85, 86].includes(rating) ? rating : null;
+  }
+  function rollingCandidateLoop(loop = {}) {
+    if (loop?.dynamicSbcFamily !== "high-rated-x10" || Number(loop?.dynamicRewardCount) !== 10 || !rollingCandidateRating(loop)) return null;
+    return loop;
+  }
+  function rollingCandidateMetadataValid(loop = {}) {
+    if (!loop || rollingCandidateLoop(loop) !== loop) return false;
+    const setId = positiveInteger5(loop.sbcSetIds?.[0]);
+    const challengeIds = (loop.dynamicChallenges || []).map((challenge) => positiveInteger5(challenge?.challengeId)).filter(Boolean);
+    const configuredPackIds = Array.isArray(loop.rewardPackIds) ? loop.rewardPackIds : [];
+    const packIds = configuredPackIds.map(positiveInteger5).filter(Boolean);
+    if (!setId || challengeIds.length !== (loop.dynamicChallenges || []).length || new Set(challengeIds).size !== challengeIds.length || packIds.length !== configuredPackIds.length || new Set(packIds).size !== packIds.length || !packIds.length) return false;
+    if (!["unlimited", "bounded", "unknown"].includes(loop.repeatability)) return false;
+    if (loop.repeatability === "bounded") {
+      if (!Number.isInteger(Number(loop.completionLimit)) || Number(loop.completionLimit) < 1) return false;
+      if (!Number.isInteger(Number(loop.remainingCompletions)) || Number(loop.remainingCompletions) < 0) return false;
+    } else if (loop.repeatability === "unlimited" && loop.completionLimit !== null && loop.completionLimit !== void 0) {
+      return false;
+    }
+    return true;
+  }
+  function rollingCandidateEvidence(result = {}) {
+    const family = result?.family;
+    const rating = Number(family?.rewardMinRating);
+    if (family?.id !== "high-rated-x10" || ![85, 86].includes(rating)) return null;
+    const loop = result?.loop || result?.discoveredLoop || null;
+    return {
+      rating,
+      setId: positiveInteger5(result?.setId || loop?.sbcSetIds?.[0]),
+      status: String(result?.status || "unknown"),
+      loop,
+      valid: rollingCandidateMetadataValid(loop),
+      diagnostics: [...result?.diagnostics || []]
+    };
+  }
+  function unresolvedRollingCandidateReason(evidence2 = []) {
+    const summary = evidence2.map((entry) => {
+      const diagnostic = entry.diagnostics.length ? `: ${entry.diagnostics.join(", ")}` : "";
+      return `${entry.rating}x10 Set #${entry.setId || "?"} ${entry.status}${diagnostic}`;
+    }).join("; ");
+    return `Rolling candidate identity is incomplete or unsupported (${summary || "unknown candidate"})`;
+  }
+  function rollingCandidateSetIds(loops = []) {
+    return unique3((loops || []).map((loop) => positiveInteger5(loop?.sbcSetIds?.[0])).filter(Boolean));
+  }
+  function rollingPlanFailure(reason, candidates = []) {
+    return {
+      status: "unavailable",
+      reason,
+      loop: null,
+      candidates: candidates.map((loop) => clone4(loop)),
+      suppressedSetIds: []
+    };
+  }
+  function rolling85Fallback(candidate85, candidates, reason) {
+    if (candidate85?.repeatability !== "unlimited") return null;
+    const loop = createRollingUpgradeLoopDef(candidate85);
+    if (!loop) return null;
+    return {
+      status: "resolved",
+      mode: "single",
+      fallbackFrom: "86x10",
+      fallbackReason: reason,
+      loop,
+      stages: [createRollingPrimaryStage(candidate85)],
+      candidates: (candidates || []).filter(Boolean).map(clone4),
+      suppressedSetIds: [Number(candidate85.sbcSetIds[0])]
+    };
+  }
+  function selectRollingUpgradePlan(loops = []) {
+    const candidates = (loops || []).map(rollingCandidateLoop).filter(rollingCandidateMetadataValid);
+    const byRating = (rating) => candidates.filter(
+      (loop) => Number(loop.dynamicRewardMinRating) === rating
+    );
+    const candidates86 = byRating(86);
+    const candidates85 = byRating(85);
+    if (candidates86.length > 1) {
+      const fallback = rolling85Fallback(
+        candidates85.length === 1 ? candidates85[0] : null,
+        [...candidates86, ...candidates85],
+        "multiple 86x10 candidates are ambiguous"
+      );
+      if (fallback) return fallback;
+      return rollingPlanFailure("multiple 86x10 candidates are ambiguous", candidates86);
+    }
+    if (candidates85.length > 1) {
+      return rollingPlanFailure("multiple 85x10 candidates are ambiguous", candidates85);
+    }
+    const candidate86 = candidates86[0] || null;
+    const candidate85 = candidates85[0] || null;
+    if (candidate86 && candidate85 && Number(candidate86.sbcSetIds?.[0]) === Number(candidate85.sbcSetIds?.[0])) {
+      return rollingPlanFailure("86x10 and 85x10 resolve to the same SBC Set identity", [candidate86, candidate85]);
+    }
+    if (candidate86?.repeatability === "unknown") {
+      const fallback = rolling85Fallback(
+        candidate85,
+        [candidate86, candidate85],
+        "86x10 repeatability is unknown"
+      );
+      if (fallback) return fallback;
+      return rollingPlanFailure("86x10 repeatability is unknown and no confirmed unlimited 85x10 exists", [candidate86]);
+    }
+    const usable85 = candidate85?.repeatability === "unlimited" ? candidate85 : null;
+    if (candidate86?.repeatability === "unlimited") {
+      const loop = createRollingUpgradeLoopDef(candidate86);
+      if (!loop) {
+        const fallback = rolling85Fallback(
+          usable85,
+          [candidate86, usable85],
+          "86x10 does not satisfy the Rolling contract"
+        );
+        if (fallback) return fallback;
+        return rollingPlanFailure("86x10 does not satisfy the Rolling contract", [candidate86]);
+      }
+      return {
+        status: "resolved",
+        mode: "single",
+        loop,
+        stages: [createRollingPrimaryStage(candidate86)],
+        candidates: [candidate86, ...candidate85 ? [candidate85] : []].map(clone4),
+        suppressedSetIds: rollingCandidateSetIds([candidate86, candidate85])
+      };
+    }
+    if (candidate86?.repeatability === "bounded" && Number(candidate86.remainingCompletions) > 0) {
+      if (!usable85) {
+        return rollingPlanFailure("86x10 has remaining limited uses but no confirmed unlimited 85x10 fallback", [candidate86, ...candidate85 ? [candidate85] : []]);
+      }
+      const stages = [createRollingPrimaryStage(candidate86), createRollingPrimaryStage(usable85)];
+      const loop = createRollingUpgradeLoopDef(candidate86, { stages, composite: true });
+      if (!loop) {
+        const fallback = rolling85Fallback(
+          usable85,
+          [candidate86, usable85],
+          "86x10 -> 85x10 does not satisfy the Rolling contract"
+        );
+        if (fallback) return fallback;
+        return rollingPlanFailure("86x10 -> 85x10 does not satisfy the Rolling contract", [candidate86, usable85]);
+      }
+      return {
+        status: "resolved",
+        mode: "bounded-then-unlimited",
+        loop,
+        stages,
+        candidates: [candidate86, usable85].map(clone4),
+        suppressedSetIds: [Number(candidate86.sbcSetIds[0]), Number(usable85.sbcSetIds[0])]
+      };
+    }
+    if (candidate86?.repeatability === "bounded" && Number(candidate86.remainingCompletions) === 0) {
+      if (!usable85) {
+        return rollingPlanFailure("86x10 is exhausted and no confirmed unlimited 85x10 exists", [candidate86, ...candidate85 ? [candidate85] : []]);
+      }
+      const loop = createRollingUpgradeLoopDef(usable85);
+      if (!loop) return rollingPlanFailure("85x10 does not satisfy the Rolling contract", [usable85]);
+      return {
+        status: "resolved",
+        mode: "single",
+        loop,
+        stages: [createRollingPrimaryStage(usable85)],
+        candidates: [candidate86, usable85].map(clone4),
+        suppressedSetIds: [Number(usable85.sbcSetIds[0])]
+      };
+    }
+    if (!candidate86 && usable85) {
+      const loop = createRollingUpgradeLoopDef(usable85);
+      if (!loop) return rollingPlanFailure("85x10 does not satisfy the Rolling contract", [usable85]);
+      return {
+        status: "resolved",
+        mode: "single",
+        loop,
+        stages: [createRollingPrimaryStage(usable85)],
+        candidates: [usable85].map(clone4),
+        suppressedSetIds: [Number(usable85.sbcSetIds[0])]
+      };
+    }
+    return rollingPlanFailure("no confirmed unlimited Rolling stage is available", candidates);
+  }
   function configuredUpgradeMatches(result, loop = {}) {
     if (loop.strategy !== "fillAndVerifySbc") return false;
     if ((loop.sbcSetIds || []).map(Number).includes(Number(result.setId))) return true;
@@ -7208,6 +7557,8 @@
       sbcNames: unique3([...discoveredLoop.sbcNames || [], ...configuredLoop.sbcNames || []]),
       rewardPackIds: unique3([...discoveredLoop.rewardPackIds || [], ...configuredLoop.rewardPackIds || []]),
       rewardPackNames: unique3([...discoveredLoop.rewardPackNames || [], ...configuredLoop.rewardPackNames || []]),
+      repeatability: discoveredLoop.repeatability,
+      completionLimit: discoveredLoop.completionLimit,
       remainingCompletions: discoveredLoop.remainingCompletions,
       dynamicSbcFamily: discoveredLoop.dynamicSbcFamily,
       dynamicRewardCount: discoveredLoop.dynamicRewardCount,
@@ -7245,7 +7596,6 @@
   function buildUpgradeDiscoverySession(input2 = {}) {
     const configuredLoops = [...input2.configuredLoops || []];
     const discoveredLoops = [];
-    const rollingLoops = [];
     const loopOverrides = {};
     const results = [];
     for (const set of input2.sets || []) {
@@ -7255,10 +7605,6 @@
       if (parsed.status !== "supported") {
         results.push(parsed);
         continue;
-      }
-      const rollingLoop = createRollingUpgradeLoopDef(parsed.loop);
-      if (rollingLoop && !rollingLoops.some((loop) => loop.id === rollingLoop.id)) {
-        rollingLoops.push(rollingLoop);
       }
       const matches = configuredLoops.filter((loop) => configuredUpgradeMatches(parsed, loop));
       if (matches.length) {
@@ -7276,7 +7622,42 @@
       discoveredLoops.push(parsed.loop);
       results.push(parsed);
     }
-    return { discoveredLoops, rollingLoops, loopOverrides, results };
+    const rollingEvidence = results.map(rollingCandidateEvidence).filter((evidence2) => evidence2 && evidence2.status !== "completed");
+    const evidence85 = rollingEvidence.filter((evidence2) => evidence2.rating === 85);
+    const evidence86 = rollingEvidence.filter((evidence2) => evidence2.rating === 86);
+    const valid85 = evidence85.filter((evidence2) => evidence2.valid).map((evidence2) => evidence2.loop);
+    const valid86 = evidence86.filter((evidence2) => evidence2.valid).map((evidence2) => evidence2.loop);
+    let rollingPlan;
+    if (evidence85.length > 1) {
+      rollingPlan = rollingPlanFailure("multiple 85x10 candidates are ambiguous", valid85);
+    } else if (evidence85.length === 1 && evidence85[0].valid !== true) {
+      rollingPlan = rollingPlanFailure(unresolvedRollingCandidateReason(evidence85), []);
+    } else if (evidence86.length > 1) {
+      const fallback = rolling85Fallback(
+        valid85[0],
+        [...valid86, ...valid85],
+        "multiple 86x10 candidates are ambiguous"
+      );
+      rollingPlan = fallback || rollingPlanFailure(
+        "multiple 86x10 candidates are ambiguous",
+        [...valid86, ...valid85]
+      );
+    } else if (evidence86.length === 1 && evidence86[0].valid !== true) {
+      const reason = unresolvedRollingCandidateReason(evidence86);
+      const fallback = rolling85Fallback(valid85[0], valid85, reason);
+      rollingPlan = fallback || rollingPlanFailure(reason, valid85);
+    } else {
+      rollingPlan = selectRollingUpgradePlan([...valid86, ...valid85]);
+    }
+    const rollingLoops = rollingPlan.loop ? [rollingPlan.loop] : [];
+    return {
+      discoveredLoops,
+      rollingLoops,
+      rollingPlan,
+      suppressedSetIds: [...rollingPlan.suppressedSetIds || []],
+      loopOverrides,
+      results
+    };
   }
   function collectScannedUpgradeActivities(results = []) {
     const activities = [];
@@ -7296,6 +7677,8 @@
         rewardPackIds: [...loop.rewardPackIds || []],
         rewardPackNames: [...loop.rewardPackNames || []],
         rewardCount: loop.dynamicRewardCount ?? null,
+        repeatability: loop.repeatability || "unknown",
+        completionLimit: loop.completionLimit ?? null,
         remainingCompletions: loop.remainingCompletions ?? null,
         requirements: (loop.requirements || []).map((requirement2) => ({
           tier: requirement2.tier,
@@ -13131,7 +13514,10 @@
         softProtectSpecialPiles: ["club"],
         allowSoftProtectedFallback: true,
         allowOtherSpecialAsOrdinary,
-        liveRequirementsAvailable: exclusiveRoles.length > 0 && exclusiveRoles.every((role) => role.minCount >= 1 && role.maxCount >= role.minCount)
+        // A TEAM_RATING-only Challenge has no Required Special role and does
+        // not need a player-group matcher. Once a Required Special role exists,
+        // retain the fail-closed count contract for every role.
+        liveRequirementsAvailable: exclusiveRoles.length === 0 || exclusiveRoles.every((role) => role.minCount >= 1 && role.maxCount >= role.minCount)
       }
     };
   }
@@ -29469,12 +29855,30 @@
       let leftoverRecoveryBatchActive = false;
       let leftoverRecoveryRewardsExhausted = false;
       let shortageProvisionsPacksOpened = 0;
+      let refreshedPrimaryStage = null;
+      if (typeof options.refreshPrimaryStage === "function") {
+        refreshedPrimaryStage = await options.refreshPrimaryStage({ result, iteration: result.iterations });
+        if (isStopped(refreshedPrimaryStage)) return finish("stopped", refreshedPrimaryStage, "stopped while refreshing the active Rolling stage");
+        if (isBlocked(refreshedPrimaryStage)) {
+          return finish(
+            refreshedPrimaryStage?.status === "unavailable" ? "unavailable" : "blocked",
+            refreshedPrimaryStage,
+            "active Rolling stage could not be resolved",
+            reasonCode(refreshedPrimaryStage) || "PRIMARY_STAGE_UNAVAILABLE"
+          );
+        }
+      }
       const resumedPrimary = resumedPrimaryPending;
       await enter(ROLLING_UPGRADE_PHASES.BOOTSTRAP_OR_FIND_REWARD, { resumedPrimary });
       const packResult = resumedPrimary ? null : await options.findPrimaryPack({ result, iteration: result.iterations });
       if (isStopped(packResult)) return finish("stopped", packResult, "stopped while finding primary reward");
       if (packResult?.status === "blocked" || packResult?.status === "failed") {
-        return finish("blocked", packResult, "primary reward lookup failed", "PRIMARY_REWARD_LOOKUP_FAILED");
+        return finish(
+          "blocked",
+          packResult,
+          "primary reward lookup failed",
+          reasonCode(packResult) || "PRIMARY_REWARD_LOOKUP_FAILED"
+        );
       }
       const pack = packResult?.pack || (packResult && !packResult.status && !packResult.reason ? packResult : null);
       if (pack) {
@@ -29496,6 +29900,24 @@
         }
         result.packsOpened++;
         progressed = true;
+        if (refreshedPrimaryStage?.pendingReward === true && typeof options.refreshPrimaryStage === "function") {
+          const postRewardStage = await options.refreshPrimaryStage({
+            result,
+            iteration: result.iterations,
+            afterPendingReward: true
+          });
+          if (isStopped(postRewardStage)) {
+            return finish("stopped", postRewardStage, "stopped while refreshing the Rolling stage after its pending reward");
+          }
+          if (isBlocked(postRewardStage)) {
+            return finish(
+              postRewardStage?.status === "unavailable" ? "unavailable" : "blocked",
+              postRewardStage,
+              "active Rolling stage could not be resolved after its pending reward",
+              reasonCode(postRewardStage) || "PRIMARY_STAGE_UNAVAILABLE"
+            );
+          }
+        }
         await enter(ROLLING_UPGRADE_PHASES.CLASSIFY_OPENED_ITEMS);
         const classified = await options.classifyOpenedItems?.({ opened, pack, result, iteration: result.iterations }) || { status: "ready" };
         if (classified?.inventoryDelta) result.inventoryDelta = classified.inventoryDelta;
@@ -44009,7 +44431,7 @@
     }
     function logDynamicUpgradeDiscovery(snapshot, parsed, loadError) {
       const reward = (snapshot.rewards || []).find((entry) => entry?.type === "PACK") || {};
-      log(`Dynamic SBC scan: Upgrade set #${snapshot.id || "?"} ${snapshot.name || "?"}; category:${snapshot.categoryNames?.join("/") || "?"}; reward ${reward.name || "?"} (#${reward.packId || reward.resourceId || "?"}); challenges:${snapshot.challenges?.length || 0}; completed:${snapshot.timesCompleted ?? "?"}, repeats:${snapshot.repeats ?? "?"}, remaining:${parsed.remainingCompletions ?? "?"}; status:${parsed.status}`);
+      log(`Dynamic SBC scan: Upgrade set #${snapshot.id || "?"} ${snapshot.name || "?"}; category:${snapshot.categoryNames?.join("/") || "?"}; reward ${reward.name || "?"} (#${reward.packId || reward.resourceId || "?"}); challenges:${snapshot.challenges?.length || 0}; completed:${snapshot.timesCompleted ?? "?"}, repeats:${snapshot.repeats ?? "?"}, repeatability:${parsed.loop?.repeatability || "?"}, remaining:${parsed.loop?.remainingCompletions ?? "?"}; status:${parsed.status}`);
       for (const [index, challenge] of (snapshot.challenges || []).entries()) {
         const requirements = (challenge.eligibilityRequirements || []).map(describePlayerPickDiscoveryRequirement).join(", ");
         log(`Dynamic SBC scan: Upgrade challenge ${index + 1} #${challenge.id || "?"} players:${challenge.requiredPlayerCount || "?"} completed:${challenge.completed ? "yes" : "no"}; ${requirements || "requirements unavailable"}`);
@@ -44198,6 +44620,13 @@
         sets: snapshots,
         configuredLoops
       });
+      if (upgradeSession.rollingPlan?.status === "resolved") {
+        const plan = upgradeSession.rollingPlan;
+        const stageSummary = (plan.stages || []).map((stage) => `${stage.dynamicRewardMinRating}x10 Set #${stage.setId} ${stage.repeatability}${stage.remainingCompletions === null ? "" : ` remaining:${stage.remainingCompletions}`}`).join(" -> ");
+        log(`Dynamic SBC scan: Rolling plan resolved (${plan.mode}); ${stageSummary || "no stages"}; suppressed Set(s):${(plan.suppressedSetIds || []).join(",") || "none"}`);
+      } else if (upgradeSession.rollingPlan?.reason) {
+        log(`Dynamic SBC scan: Rolling plan unavailable: ${upgradeSession.rollingPlan.reason}`);
+      }
       const specializedLoopOverrides = {
         ...pickSession.loopOverrides,
         ...upgradeSession.loopOverrides
@@ -44234,9 +44663,13 @@
           }
         }
       );
+      const rollingSuppressedSetIds = new Set(
+        (upgradeSession.suppressedSetIds || []).map(Number).filter(Boolean)
+      );
+      const visibleMaterializedUpgradeLoops = materializedUpgradeLoops.filter((loopDef) => !rollingSuppressedSetIds.has(Number(loopDef?.sbcSetIds?.[0] || 0)));
       state.discoveredLoopDefs = cloneLoopDef([
         ...pickSession.discoveredLoops,
-        ...materializedUpgradeLoops,
+        ...visibleMaterializedUpgradeLoops,
         ...materializedRollingLoops
       ]);
       state.discoveredLoopOverrides = cloneLoopDef({
@@ -44246,7 +44679,7 @@
       state.discoveredRecoveryRecipeOverrides = cloneLoopDef(activitySession.recoveryRecipeOverrides);
       state.scannedDynamicSbcDefs = cloneLoopDef([
         ...collectScannedPlayerPickLoopDefs(pickSession.results),
-        ...materializedUpgradeLoops,
+        ...visibleMaterializedUpgradeLoops,
         ...Object.values(upgradeSession.loopOverrides).filter(
           (loopDef) => loopDef?.discovered === true && loopDef?.discoveryKind === "upgrade"
         )
@@ -47326,6 +47759,7 @@
         }
       }) || null;
       let pack = explicitPackId ? findById(explicitPackId) : null;
+      if (options.requireExactPackId === true && explicitPackId) return pack;
       if (!pack && loopDef.rewardPackIds?.length) {
         pack = loopDef.rewardPackIds.map((id) => findById(id)).find(Boolean);
       }
@@ -50009,8 +50443,8 @@
           return receipt || { status: "stale", reason: "source pack stale or unavailable" };
         },
         runStages: async ({ result: current, phase, context }) => {
-          const remainingCompletions4 = consumeAllSourcePacks ? null : Math.max(0, maxCompletions - Number(current.stageCompletions.rare || 0));
-          if (remainingCompletions4 === 0) {
+          const remainingCompletions3 = consumeAllSourcePacks ? null : Math.max(0, maxCompletions - Number(current.stageCompletions.rare || 0));
+          if (remainingCompletions3 === 0) {
             return { status: "completed", completions: { rare: 0 }, reason: "completion target reached" };
           }
           if (dryRun) {
@@ -50029,7 +50463,7 @@
             isEligibleLowRareGoldDuplicate,
             `${rareUpgradeLabel} ${phase === "resume" ? "resumed " : ""}low rare gold`,
             {
-              maxCompletions: remainingCompletions4 ?? 100,
+              maxCompletions: remainingCompletions3 ?? 100,
               forceAttempts: phase === "pack" && Number(context?.lowRare || 0) > 0 ? 1 : 0,
               transientUnassignedSignals: phase === "pack" ? context?.transientUnassignedSignals || [] : [],
               requireFullSignalCoverage: true
@@ -50049,10 +50483,10 @@
         afterStalePack: async () => {
           if (!dryRun) await sleep(CFG.pauseMs);
         },
-        onSourceExhausted: async ({ remainingCompletions: remainingCompletions4 }) => {
+        onSourceExhausted: async ({ remainingCompletions: remainingCompletions3 }) => {
           const fallbackLoopId = String(loopDef.sourceExhaustedFallbackLoopId || "").trim();
           const fallbackActivityFamily = String(loopDef.sourceExhaustedFallbackActivityFamily || "").trim();
-          const requestedFallbackCompletions = fillRemainingRoundsFromInventory ? Number(remainingCompletions4 || 0) : consumeAllSourcePacks ? Number(loopDef.sourceExhaustedFallbackMaxCompletions || 1) : Number(remainingCompletions4 || 0);
+          const requestedFallbackCompletions = fillRemainingRoundsFromInventory ? Number(remainingCompletions3 || 0) : consumeAllSourcePacks ? Number(loopDef.sourceExhaustedFallbackMaxCompletions || 1) : Number(remainingCompletions3 || 0);
           if (fillRemainingRoundsFromInventory && requestedFallbackCompletions === 0) {
             log(`${loopDef.name}: source packs completed the requested ${maxCompletions} round(s); no inventory fallback needed`);
             return { status: "completed", completions: { rare: 0 }, reason: null };
@@ -50696,10 +51130,10 @@
           failOnUnexpected: true
         });
         const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
-        const remainingCompletions4 = getDailySetRemaining(set);
+        const remainingCompletions3 = getDailySetRemaining(set);
         pickTarget = resolvePlayerPickRunTarget(loopDef, {
           pendingCount: pending.length,
-          remainingCompletions: remainingCompletions4
+          remainingCompletions: remainingCompletions3
         });
         const remainingLabel = pickTarget.usedSafetyLimit ? `unknown; running until unavailable (safety cap ${pickTarget.remainingCompletions})` : `${pickTarget.remainingCompletions}`;
         log(`${loopDef.name}: limited Set progress completed:${Number.isFinite(Number(set?.timesCompleted)) ? set.timesCompleted : "?"}, repeats:${Number.isFinite(Number(set?.repeats)) ? set.repeats : "?"}, remaining:${remainingLabel}; pending Pick(s):${pickTarget.pendingCount}`);
@@ -52219,13 +52653,23 @@
       const challengeContext = await findAvailableRatingSbcChallengeContext(set, loopDef.name, {
         force: options.force === true
       });
-      if (!challengeContext.challenge) {
+      const exactChallengeId = positiveRollingJournalId(options.challengeId);
+      const resolvedChallenge = exactChallengeId ? (challengeContext.challenges || []).find((entry) => Number(entry?.id || 0) === exactChallengeId) || null : challengeContext.challenge;
+      if (!resolvedChallenge) {
         return { status: "unavailable", reason: "no available primary SBC challenge remains" };
       }
-      const challenge = loopDef.dryRun ? challengeContext.challenge : await loadRatingSbcChallengeForSet(set, challengeContext.challenge, loopDef.name, {
+      const challenge = loopDef.dryRun ? resolvedChallenge : await loadRatingSbcChallengeForSet(set, resolvedChallenge, loopDef.name, {
         force: options.force === true
       });
       if (!challenge) return { status: "unavailable", reason: "primary SBC challenge could not be loaded" };
+      const stageChallengeIds = (loopDef.rollingPrimaryStages || []).find((stage) => Number(stage.setId) === Number(loopDef.sbcSetIds?.[0]))?.challengeIds || [];
+      if (stageChallengeIds.length && !stageChallengeIds.map(Number).includes(Number(challenge.id))) {
+        return {
+          status: "blocked",
+          reason: `live Challenge #${challenge.id || "?"} is not registered for primary Set #${loopDef.sbcSetIds?.[0] || "?"}`,
+          reasonCode: "PRIMARY_STAGE_CHALLENGE_IDENTITY_MISMATCH"
+        };
+      }
       const activeLoopDef = applyRollingAutomaticUseFodderPolicy(
         materializeDynamicUpgradeChallengeLoopDef(loopDef, challenge),
         loopDef
@@ -52240,11 +52684,12 @@
         };
       }
       const roles = eaRequiredSpecialConstraints(model);
-      const roleCount = roles.reduce((total, entry) => total + Number(entry.constraint.count || 0), 0);
-      if (roleCount !== 1) {
+      const roleCounts = roles.map(({ constraint }) => Number(constraint.count));
+      const roleCount = roleCounts.reduce((total, count) => total + (Number.isFinite(count) ? count : 0), 0);
+      if (roleCounts.some((count) => !Number.isInteger(count) || count < 0) || roleCount > 1) {
         return {
           status: "blocked",
-          reason: `Rolling requires exactly one live Required Special slot, found ${roleCount}`,
+          reason: `Rolling supports zero or one live Required Special slot, found ${roleCount}`,
           reasonCode: "LIVE_REQUIREMENT_UNAVAILABLE"
         };
       }
@@ -53392,6 +53837,178 @@
         log(`Rolling Required Special reward journal unavailable: ${error?.message || error}`);
         return false;
       }
+    }
+    function positiveRollingJournalId(value) {
+      const number = Number(value);
+      return Number.isInteger(number) && number > 0 ? number : null;
+    }
+    function rollingJournalStage(loopDef, stageKey) {
+      const stages = Array.isArray(loopDef?.rollingPrimaryStages) ? loopDef.rollingPrimaryStages : [];
+      return stages.find((stage) => String(stage?.key || "") === String(stageKey || "")) || null;
+    }
+    function sameRollingJournalIds(left = [], right = []) {
+      const a = [...left.map(positiveRollingJournalId).filter(Boolean)].sort((x, y) => x - y);
+      const b = [...right.map(positiveRollingJournalId).filter(Boolean)].sort((x, y) => x - y);
+      return a.length === b.length && a.every((value, index) => value === b[index]);
+    }
+    function readRollingJournalIds(value) {
+      if (!Array.isArray(value) || !value.length) return null;
+      const ids = value.map(positiveRollingJournalId);
+      return ids.every(Boolean) && new Set(ids).size === ids.length ? ids : null;
+    }
+    function persistRollingPendingPrimaryReward(pending) {
+      try {
+        if (!pending) {
+          const removed = adapters.userscriptStorage.remove(ROLLING_PENDING_PRIMARY_REWARD_KEY);
+          if (removed === false) return false;
+          const sentinel = `missing-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          return adapters.userscriptStorage.get(
+            ROLLING_PENDING_PRIMARY_REWARD_KEY,
+            sentinel
+          ) === sentinel;
+        }
+        const journal = {
+          version: 1,
+          loopId: String(pending.loopId || ""),
+          stageKey: String(pending.stageKey || ""),
+          setId: positiveRollingJournalId(pending.setId),
+          challengeId: positiveRollingJournalId(pending.challengeId),
+          challengeIds: readRollingJournalIds(pending.challengeIds) || [],
+          rewardPackId: positiveRollingJournalId(pending.rewardPackId),
+          queuedAt: Number(pending.queuedAt || Date.now())
+        };
+        if (!journal.loopId || !journal.stageKey || !journal.setId || !journal.challengeId || !journal.challengeIds.length || !journal.rewardPackId || !Number.isFinite(journal.queuedAt)) return false;
+        adapters.userscriptStorage.set(ROLLING_PENDING_PRIMARY_REWARD_KEY, journal);
+        const stored = adapters.userscriptStorage.get(
+          ROLLING_PENDING_PRIMARY_REWARD_KEY,
+          null
+        );
+        return stored?.version === journal.version && stored?.loopId === journal.loopId && stored?.stageKey === journal.stageKey && stored?.setId === journal.setId && stored?.challengeId === journal.challengeId && sameRollingJournalIds(stored?.challengeIds || [], journal.challengeIds) && stored?.rewardPackId === journal.rewardPackId && stored?.queuedAt === journal.queuedAt;
+      } catch (error) {
+        log(`Rolling primary reward journal unavailable: ${error?.message || error}`);
+        return false;
+      }
+    }
+    function readPersistedRollingPendingPrimaryReward() {
+      try {
+        const stored = adapters.userscriptStorage.get(
+          ROLLING_PENDING_PRIMARY_REWARD_KEY,
+          null
+        );
+        if (stored === null || stored === void 0) return null;
+        if (!stored || typeof stored !== "object") {
+          return {
+            status: "invalid",
+            reason: "Rolling primary reward journal is not an object",
+            reasonCode: "PRIMARY_REWARD_JOURNAL_INVALID"
+          };
+        }
+        const journal = {
+          version: Number(stored.version),
+          loopId: String(stored.loopId || ""),
+          stageKey: String(stored.stageKey || ""),
+          setId: positiveRollingJournalId(stored.setId),
+          challengeId: positiveRollingJournalId(stored.challengeId),
+          challengeIds: readRollingJournalIds(stored.challengeIds) || [],
+          rewardPackId: positiveRollingJournalId(stored.rewardPackId),
+          queuedAt: Number(stored.queuedAt)
+        };
+        if (journal.version !== 1 || !journal.loopId || !journal.stageKey || !journal.setId || !journal.challengeId || !journal.challengeIds.length || !journal.rewardPackId || !Number.isFinite(journal.queuedAt) || journal.queuedAt <= 0) {
+          return {
+            status: "invalid",
+            reason: "Rolling primary reward journal is incomplete or malformed",
+            reasonCode: "PRIMARY_REWARD_JOURNAL_INVALID"
+          };
+        }
+        return { status: "ready", ...journal };
+      } catch (error) {
+        return {
+          status: "invalid",
+          reason: `Rolling primary reward journal could not be read: ${error?.message || error}`,
+          reasonCode: "PRIMARY_REWARD_JOURNAL_INVALID"
+        };
+      }
+    }
+    function clearRollingPendingPrimaryReward(runtime) {
+      const cleared = persistRollingPendingPrimaryReward(null);
+      if (!cleared) {
+        log("Rolling primary reward journal could not be cleared");
+        return false;
+      }
+      if (runtime) {
+        runtime.pendingPrimaryReward = false;
+        runtime.pendingRewardPackId = null;
+        runtime.pendingRewardPackDefinition = null;
+        runtime.pendingPrimaryRewardJournal = null;
+      }
+      return true;
+    }
+    function restoreRollingPendingPrimaryReward(loopDef) {
+      const stored = readPersistedRollingPendingPrimaryReward();
+      if (!stored) return { status: "none" };
+      if (stored.status !== "ready") {
+        const cleared = persistRollingPendingPrimaryReward(null);
+        return {
+          ...stored,
+          status: "blocked",
+          ...cleared ? {} : {
+            reason: `${stored.reason}; the invalid journal could not be cleared`,
+            reasonCode: "PRIMARY_REWARD_JOURNAL_CLEAR_FAILED"
+          }
+        };
+      }
+      if (stored.loopId !== String(loopDef?.id || "")) {
+        const cleared = persistRollingPendingPrimaryReward(null);
+        return {
+          status: "blocked",
+          reason: cleared ? `Rolling primary reward journal belongs to Loop ${stored.loopId || "?"}, not ${loopDef?.id || "?"}` : "mismatched Rolling primary reward journal could not be cleared",
+          reasonCode: cleared ? "PRIMARY_REWARD_JOURNAL_LOOP_MISMATCH" : "PRIMARY_REWARD_JOURNAL_CLEAR_FAILED"
+        };
+      }
+      const stage = rollingJournalStage(loopDef, stored.stageKey);
+      if (!stage || positiveRollingJournalId(stage.setId) !== stored.setId || !sameRollingJournalIds(stage.challengeIds || [], stored.challengeIds) || !stored.challengeIds.includes(stored.challengeId) || !(stage.rewardPackIds || []).map(positiveRollingJournalId).includes(stored.rewardPackId)) {
+        const cleared = persistRollingPendingPrimaryReward(null);
+        return {
+          status: "blocked",
+          reason: cleared ? `Rolling primary reward journal does not match stage ${stored.stageKey || "?"}` : "mismatched Rolling primary reward journal could not be cleared",
+          reasonCode: cleared ? "PRIMARY_REWARD_JOURNAL_STAGE_MISMATCH" : "PRIMARY_REWARD_JOURNAL_CLEAR_FAILED"
+        };
+      }
+      const age = Date.now() - stored.queuedAt;
+      if (age < -3e5 || age >= ROLLING_PENDING_PRIMARY_REWARD_MAX_AGE_MS) {
+        const cleared = persistRollingPendingPrimaryReward(null);
+        return {
+          status: "blocked",
+          reason: !cleared ? "expired Rolling primary reward journal could not be cleared" : age < 0 ? "Rolling primary reward journal timestamp is in the future" : "Rolling primary reward journal expired before its Pack was opened",
+          reasonCode: !cleared ? "PRIMARY_REWARD_JOURNAL_CLEAR_FAILED" : age < 0 ? "PRIMARY_REWARD_JOURNAL_INVALID" : "PRIMARY_REWARD_JOURNAL_EXPIRED"
+        };
+      }
+      return { status: "ready", journal: stored, stage };
+    }
+    function queueRollingPendingPrimaryReward(runtime, loopDef, result) {
+      if (!result?.submitted) return result;
+      const stageKey = String(runtime?.activeRollingStageKey || "");
+      const stage = rollingJournalStage(loopDef, stageKey);
+      const rewardPackId = positiveRollingJournalId(result.rewardPackId);
+      const stageChallengeIds = readRollingJournalIds(stage?.challengeIds);
+      const submittedChallengeId = positiveRollingJournalId(result?.challengeRef?.id) || (stageChallengeIds?.length === 1 ? stageChallengeIds[0] : null);
+      const pending = {
+        loopId: loopDef?.id || null,
+        stageKey,
+        setId: stage?.setId,
+        challengeId: submittedChallengeId,
+        challengeIds: stageChallengeIds,
+        rewardPackId,
+        queuedAt: Date.now()
+      };
+      runtime.pendingPrimaryRewardJournal = pending;
+      if (stage && submittedChallengeId && rewardPackId && stageChallengeIds?.includes(submittedChallengeId) && persistRollingPendingPrimaryReward(pending)) {
+        pending.persisted = true;
+      } else {
+        pending.persisted = false;
+        log(`${loopDef?.name || "Rolling"}: primary reward is held in memory; no exact restart journal was written (stage:${stageKey || "?"}, pack:${rewardPackId || "?"})`);
+      }
+      return result;
     }
     function readPersistedRollingPendingRequiredSpecialReward() {
       try {
@@ -56972,6 +57589,8 @@
       return true;
     }
     async function runRollingUpgradeLoop(loopDef) {
+      const canonicalLoopDef = loopDef;
+      const rollingPrimaryStages = Array.isArray(loopDef.rollingPrimaryStages) ? loopDef.rollingPrimaryStages : [];
       await waitAppReady();
       const runtime = {
         primaryContext: null,
@@ -56986,6 +57605,11 @@
         primaryDuplicateRefs: [],
         pendingUnassignedRefs: [],
         pendingRewardPackId: null,
+        pendingRewardPackDefinition: null,
+        pendingPrimaryReward: false,
+        pendingPrimaryRewardJournal: null,
+        pendingPrimaryRewardJournalState: null,
+        pendingPrimaryRewardJournalClearFailed: false,
         pendingRecoveryReward: restoreRollingPendingRequiredSpecialReward(loopDef),
         recoveryDuplicateRefs: [],
         storageSinkExhaustedSetIds: /* @__PURE__ */ new Set(),
@@ -57001,8 +57625,157 @@
         telemetryCalculationRequested: false,
         telemetryCalculationRunning: false,
         telemetryPublishedVersion: null,
-        telemetryErrorReasons: /* @__PURE__ */ new Set()
+        telemetryErrorReasons: /* @__PURE__ */ new Set(),
+        activeRollingStageKey: null,
+        activeLoopDef: loopDef
       };
+      function stageLoopDef(stage) {
+        if (!stage) return canonicalLoopDef;
+        return {
+          ...cloneLoopDef(canonicalLoopDef),
+          sbcSetIds: [Number(stage.setId)],
+          sbcNames: [stage.setName || canonicalLoopDef.name],
+          rewardPackIds: [...stage.rewardPackIds || []],
+          rewardPackNames: [...stage.rewardPackNames || []],
+          dynamicSbcFamily: stage.dynamicSbcFamily || canonicalLoopDef.dynamicSbcFamily,
+          dynamicRewardCount: stage.dynamicRewardCount,
+          dynamicRewardMinRating: stage.dynamicRewardMinRating,
+          dynamicChallengeCount: stage.dynamicChallengeCount,
+          dynamicChallenges: cloneLoopDef(stage.dynamicChallenges || []),
+          expectedPlayerCount: stage.expectedPlayerCount,
+          requiredSpecialCount: stage.requiredSpecialCount,
+          allowedSpecialCount: stage.allowedSpecialCount,
+          repeatability: stage.repeatability,
+          completionLimit: stage.completionLimit,
+          remainingCompletions: stage.remainingCompletions
+        };
+      }
+      const restoredPrimaryReward = restoreRollingPendingPrimaryReward(canonicalLoopDef);
+      runtime.pendingPrimaryRewardJournalState = restoredPrimaryReward;
+      if (restoredPrimaryReward.status === "ready") {
+        const restoredStage = restoredPrimaryReward.stage;
+        runtime.activeRollingStageKey = String(restoredStage.key);
+        runtime.activeLoopDef = stageLoopDef(restoredStage);
+        runtime.pendingRewardPackId = restoredPrimaryReward.journal.rewardPackId;
+        runtime.pendingRewardPackDefinition = runtime.activeLoopDef;
+        runtime.pendingPrimaryReward = true;
+        runtime.pendingPrimaryRewardJournal = restoredPrimaryReward.journal;
+        log(`${canonicalLoopDef.name}: restored pending primary reward journal for ${restoredStage.key}x10 Set #${restoredStage.setId}, Pack #${restoredPrimaryReward.journal.rewardPackId}`);
+      }
+      async function refreshPrimaryStage() {
+        if (canonicalLoopDef.rollingPrimaryComposite !== true || rollingPrimaryStages.length !== 2) {
+          if (runtime.pendingPrimaryReward && runtime.pendingRewardPackDefinition) {
+            runtime.activeLoopDef = runtime.pendingRewardPackDefinition;
+            loopDef = runtime.pendingRewardPackDefinition;
+            const stage = rollingPrimaryStages.find((entry) => String(entry.key || "") === String(runtime.activeRollingStageKey || "")) || null;
+            return { status: "ready", stage, pendingReward: true };
+          }
+          if (rollingPrimaryStages.length === 1) {
+            const stage = rollingPrimaryStages[0];
+            const activeStageLoop = stageLoopDef(stage);
+            runtime.activeRollingStageKey = String(stage.key);
+            runtime.activeLoopDef = activeStageLoop;
+            loopDef = activeStageLoop;
+            return { status: "ready", stage };
+          }
+          runtime.activeLoopDef = loopDef;
+          return { status: "ready", stage: null };
+        }
+        const primaryStage = rollingPrimaryStages[0];
+        const fallbackStage = rollingPrimaryStages[1];
+        if (runtime.pendingPrimaryReward && runtime.pendingRewardPackDefinition) {
+          const pendingStage = rollingPrimaryStages.find((stage) => String(stage.key || "") === String(runtime.activeRollingStageKey || "")) || primaryStage;
+          const pendingLoop = runtime.pendingRewardPackDefinition || stageLoopDef(pendingStage);
+          runtime.activeLoopDef = pendingLoop;
+          loopDef = pendingLoop;
+          return { status: "ready", stage: pendingStage, pendingReward: true };
+        }
+        if (runtime.activeRollingStageKey === fallbackStage.key) {
+          let fallbackSet;
+          try {
+            fallbackSet = await findSbcSetForLoopDef(stageLoopDef(fallbackStage), `${canonicalLoopDef.name} 85x10 stage`);
+          } catch (error) {
+            return {
+              status: "blocked",
+              reason: `85x10 fallback Set #${fallbackStage.setId} could not be resolved: ${error?.message || error}`,
+              reasonCode: "PRIMARY_STAGE_IDENTITY_UNAVAILABLE"
+            };
+          }
+          const liveFallback = classifyUpgradeRepeatability(fallbackSet);
+          if (liveFallback.repeatability !== "unlimited") {
+            return {
+              status: "blocked",
+              reason: `85x10 fallback Set #${fallbackStage.setId} is not confirmed unlimited`,
+              reasonCode: "PRIMARY_STAGE_FALLBACK_NOT_UNLIMITED"
+            };
+          }
+          const fallbackLoop = stageLoopDef(fallbackStage);
+          runtime.activeLoopDef = fallbackLoop;
+          loopDef = fallbackLoop;
+          return { status: "ready", stage: fallbackStage };
+        }
+        let primarySet;
+        try {
+          primarySet = await findSbcSetForLoopDef(stageLoopDef(primaryStage), `${canonicalLoopDef.name} 86x10 stage`);
+        } catch (error) {
+          return {
+            status: "blocked",
+            reason: `86x10 stage Set #${primaryStage.setId} could not be resolved: ${error?.message || error}`,
+            reasonCode: "PRIMARY_STAGE_IDENTITY_UNAVAILABLE"
+          };
+        }
+        const livePrimary = classifyUpgradeRepeatability(primarySet);
+        if (livePrimary.repeatability !== "bounded") {
+          return {
+            status: "blocked",
+            reason: `86x10 stage Set #${primaryStage.setId} repeatability changed to ${livePrimary.repeatability}`,
+            reasonCode: "PRIMARY_STAGE_REPEATABILITY_CHANGED"
+          };
+        }
+        let nextStage = Number(livePrimary.remainingCompletions) > 0 ? primaryStage : fallbackStage;
+        if (nextStage === fallbackStage) {
+          const pending86Pack = findRewardPackInCache(
+            stageLoopDef(primaryStage),
+            null,
+            { repositoryOnly: true }
+          );
+          if (pending86Pack) {
+            runtime.pendingRewardPackId = packIdKey3(pending86Pack) || null;
+            runtime.pendingRewardPackDefinition = stageLoopDef(primaryStage);
+            runtime.pendingPrimaryReward = true;
+            nextStage = primaryStage;
+            log(`${canonicalLoopDef.name}: found pending 86x10 reward pack #${runtime.pendingRewardPackId || "?"}; delaying fallback until it is opened`);
+          }
+        }
+        if (nextStage === fallbackStage) {
+          let fallbackSet;
+          try {
+            fallbackSet = await findSbcSetForLoopDef(stageLoopDef(fallbackStage), `${canonicalLoopDef.name} 85x10 stage`);
+          } catch (error) {
+            return {
+              status: "blocked",
+              reason: `85x10 fallback Set #${fallbackStage.setId} could not be resolved: ${error?.message || error}`,
+              reasonCode: "PRIMARY_STAGE_IDENTITY_UNAVAILABLE"
+            };
+          }
+          const liveFallback = classifyUpgradeRepeatability(fallbackSet);
+          if (liveFallback.repeatability !== "unlimited") {
+            return {
+              status: "blocked",
+              reason: `85x10 fallback Set #${fallbackStage.setId} is not confirmed unlimited`,
+              reasonCode: "PRIMARY_STAGE_FALLBACK_NOT_UNLIMITED"
+            };
+          }
+        }
+        const nextLoopDef = stageLoopDef(nextStage);
+        if (runtime.activeRollingStageKey !== nextStage.key) {
+          log(`${canonicalLoopDef.name}: active primary stage -> ${nextStage.key}x10 (Set #${nextStage.setId})${nextStage === fallbackStage ? " after 86x10 exhausted" : ""}`);
+        }
+        runtime.activeRollingStageKey = nextStage.key;
+        runtime.activeLoopDef = nextLoopDef;
+        loopDef = nextLoopDef;
+        return { status: "ready", stage: nextStage };
+      }
       publishRollingTelemetry(loopDef, runtime, {
         phase: ROLLING_UPGRADE_PHASES.PREFLIGHT,
         completedCycles: 0,
@@ -57031,7 +57804,14 @@
             if (loopDef.openRewardPacks !== true) {
               return { status: "blocked", reason: "Rolling Upgrade requires Open reward packs" };
             }
-            runtime.primaryContext = await loadRollingPrimaryContext(loopDef);
+            if (runtime.pendingPrimaryRewardJournalState?.status === "blocked") {
+              return runtime.pendingPrimaryRewardJournalState;
+            }
+            const stage = await refreshPrimaryStage();
+            if (stage.status !== "ready") return stage;
+            runtime.primaryContext = await loadRollingPrimaryContext(runtime.activeLoopDef || loopDef, {
+              challengeId: runtime.pendingPrimaryRewardJournal?.challengeId
+            });
             if (runtime.primaryContext.status !== "ready") return runtime.primaryContext;
             const groupMatcher = eaRequiredSpecialConstraints(runtime.primaryContext.model).map(({ constraint }) => `${constraint.label}:${constraint.matcherSource || "runtime"}`).join(",") || "none";
             log(`${loopDef.name}: live primary Challenge #${runtime.primaryContext.challenge?.id || "?"} ready; target rating:${runtime.primaryContext.model.targetRating}, players:${runtime.primaryContext.model.requiredPlayerCount}, Required Special matcher:${groupMatcher}, Protection rating:${rollingProtectionRating(loopDef)}`);
@@ -57089,13 +57869,53 @@
           resumePendingUnassigned: async () => resumeRollingPendingUnassigned(loopDef, runtime),
           hasPendingRecoveryReward: () => detectRollingPendingRequiredSpecialReward(loopDef, runtime),
           findPrimaryPack: async () => {
-            const pack = await findRewardPack(loopDef, runtime.pendingRewardPackId, {
+            const activeLoopDef = runtime.pendingPrimaryReward ? runtime.pendingRewardPackDefinition || runtime.activeLoopDef || loopDef : runtime.activeLoopDef || loopDef;
+            if (runtime.pendingPrimaryReward && !runtime.pendingRewardPackId) {
+              return {
+                status: "blocked",
+                reason: `${activeLoopDef.name}: submitted primary reward has no stable Pack identity`,
+                reasonCode: "PRIMARY_REWARD_CONFIRMATION_REQUIRED"
+              };
+            }
+            const pack = await findRewardPack(activeLoopDef, runtime.pendingRewardPackId, {
               attempts: runtime.pendingRewardPackId ? 6 : 1,
               delayMs: 1200,
               logWait: runtime.pendingRewardPackId !== null,
-              repositoryOnly: true
+              repositoryOnly: true,
+              requireExactPackId: runtime.pendingPrimaryReward === true
             });
+            if (!pack && runtime.pendingPrimaryReward) {
+              return {
+                status: "blocked",
+                reason: `${activeLoopDef.name}: submitted primary reward is not yet confirmed in My Packs`,
+                reasonCode: "PRIMARY_REWARD_CONFIRMATION_REQUIRED"
+              };
+            }
             return pack || null;
+          },
+          refreshPrimaryStage: async () => {
+            const stage = await refreshPrimaryStage();
+            if (stage.status !== "ready") return stage;
+            if (runtime.primaryContext?.activeLoopDef?.sbcSetIds?.[0] !== runtime.activeLoopDef?.sbcSetIds?.[0]) {
+              runtime.primaryContext = await loadRollingPrimaryContext(runtime.activeLoopDef, {
+                challengeId: runtime.pendingPrimaryRewardJournal?.challengeId
+              });
+              if (runtime.primaryContext.status !== "ready") return runtime.primaryContext;
+              if (runtime.coordinator) {
+                const reconciled = await runtime.coordinator.reconcile(
+                  `${canonicalLoopDef.name} primary stage switch`,
+                  { refreshUnassigned: true }
+                );
+                if (!reconciled?.ok) {
+                  return {
+                    status: "blocked",
+                    reason: reconciled.reason || "inventory reconciliation failed after primary stage switch",
+                    reasonCode: "INVENTORY_RECONCILIATION_FAILED"
+                  };
+                }
+              }
+            }
+            return stage;
           },
           openPrimaryPack: async ({ pack }) => {
             runtime.openRouting = null;
@@ -57108,22 +57928,39 @@
               allowPendingItems: true,
               returnBlockedReceipt: true,
               retryCodes: ["471", "500"],
-              resolveRetryPack: () => findRewardPack(loopDef, runtime.pendingRewardPackId, {
-                attempts: 2,
-                delayMs: 1200,
-                repositoryOnly: true
-              }),
+              resolveRetryPack: () => findRewardPack(
+                runtime.pendingRewardPackDefinition || runtime.activeLoopDef || loopDef,
+                runtime.pendingRewardPackId,
+                {
+                  attempts: 2,
+                  delayMs: 1200,
+                  repositoryOnly: true,
+                  requireExactPackId: runtime.pendingPrimaryReward === true
+                }
+              ),
               openedItemPolicy: createRollingPrimaryPackPolicy(routingLoopDef, runtime, {
                 capturePrimaryDuplicates: true
               }),
               settleReceipt: async (openedReceipt) => {
-                runtime.pendingRewardPackId = null;
+                const cleared = clearRollingPendingPrimaryReward(runtime);
+                if (!cleared) runtime.pendingPrimaryRewardJournalClearFailed = true;
                 runtime.lastMutation = await runtime.coordinator.recordPackReceipt(openedReceipt, { reconcile: true });
               }
             });
             if (!receipt) return { status: "unavailable", reason: "primary reward pack is unavailable" };
             if (receipt.status === "opened") {
-              runtime.pendingRewardPackId = null;
+              if (runtime.pendingPrimaryRewardJournalClearFailed === true) {
+                if (!clearRollingPendingPrimaryReward(runtime)) {
+                  return {
+                    ...receipt,
+                    status: "blocked",
+                    reason: "primary reward opened, but its restart journal could not be cleared safely",
+                    reasonCode: "PRIMARY_REWARD_JOURNAL_CLEAR_FAILED"
+                  };
+                }
+                runtime.pendingPrimaryRewardJournalClearFailed = false;
+              }
+              clearRollingPendingPrimaryReward(runtime);
             }
             return {
               ...receipt,
@@ -58013,6 +58850,9 @@
             }
             if (submission.submitted) {
               runtime.pendingRewardPackId = submission.rewardPackId || null;
+              runtime.pendingRewardPackDefinition = runtime.activeLoopDef || loopDef;
+              runtime.pendingPrimaryReward = true;
+              queueRollingPendingPrimaryReward(runtime, canonicalLoopDef, submission);
               runtime.forceChallengeRefresh = true;
               recordRollingRecapDuplicateRoute("primary", rollingDuplicatePlayerCount(fill.selection));
               const deferredStorage = await routeRollingDeferredPrimaryStorage(

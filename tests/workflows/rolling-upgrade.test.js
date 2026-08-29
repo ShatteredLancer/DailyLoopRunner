@@ -63,6 +63,82 @@ function harness(overrides = {}) {
 }
 
 describe('10x85+ Rolling workflow', () => {
+  it('refreshes the active primary stage before looking up each iteration reward', async () => {
+    const calls = [];
+    const options = harness({
+      maxCompletions: 2,
+      refreshPrimaryStage: vi.fn(async ({ iteration }) => {
+        calls.push(`stage:${iteration}`);
+        return { status: 'ready' };
+      }),
+      findPrimaryPack: vi.fn(async ({ iteration }) => {
+        calls.push(`pack:${iteration}`);
+        return { id: iteration, name: 'x10' };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      completions: 2,
+    });
+    expect(calls).toEqual(['stage:1', 'pack:1', 'stage:2', 'pack:2']);
+  });
+
+  it('stops before reward lookup when the active primary stage is ambiguous', async () => {
+    const options = harness({
+      refreshPrimaryStage: vi.fn(async () => ({
+        status: 'blocked',
+        reason: '86x10 repeatability is unknown',
+        reasonCode: 'PRIMARY_STAGE_REPEATABILITY_CHANGED',
+      })),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'PRIMARY_STAGE_REPEATABILITY_CHANGED',
+    });
+    expect(options.findPrimaryPack).not.toHaveBeenCalled();
+  });
+
+  it('keeps the workflow on the current stage when a submitted reward has no pack id', async () => {
+    const refreshPrimaryStage = vi.fn(async ({ iteration }) => (
+      iteration === 1 ? { status: 'ready' } : {
+        status: 'blocked',
+        reason: 'current stage reward must be confirmed before fallback',
+        reasonCode: 'PRIMARY_REWARD_CONFIRMATION_REQUIRED',
+      }
+    ));
+    const options = harness({
+      maxCompletions: 2,
+      refreshPrimaryStage,
+      submitPrimary: vi.fn(async () => ({ status: 'submitted', submitted: true, rewardPackId: null })),
+    });
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'PRIMARY_REWARD_CONFIRMATION_REQUIRED',
+      completions: 1,
+    });
+    expect(refreshPrimaryStage).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves a delayed primary reward confirmation block from pack lookup', async () => {
+    const options = harness({
+      findPrimaryPack: vi.fn(async () => ({
+        status: 'blocked',
+        reason: 'submitted primary reward is not yet visible',
+        reasonCode: 'PRIMARY_REWARD_CONFIRMATION_REQUIRED',
+      })),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'PRIMARY_REWARD_CONFIRMATION_REQUIRED',
+      reason: 'submitted primary reward is not yet visible',
+    });
+    expect(options.openPrimaryPack).not.toHaveBeenCalled();
+    expect(options.planPrimarySquad).not.toHaveBeenCalled();
+  });
+
   it('does not invoke Provisions shortage recovery without explicit permission', async () => {
     const recoverProvisions = vi.fn(async () => ({ status: 'submitted' }));
     const options = harness({

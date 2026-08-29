@@ -5,8 +5,18 @@ All notable user-facing changes are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.8.60] - 2026-08-29
+
 ### Added
 
+- Publish the dynamic high-rated Upgrade Rolling plan as one session entry:
+  unlimited `86x10` takes priority, while a bounded `86x10` is combined with
+  an independently confirmed unlimited `85x10` fallback. Set, Challenge, Pack,
+  repeatability, and pending-reward identities remain bound and are rechecked
+  before stage changes.
+- Allow a live `TEAM_RATING`-only Rolling Challenge to enter rating planning
+  without inventing a Required Special matcher; Challenges that do require
+  special cards remain subject to the existing live-contract checks.
 - Add an explicit Rolling setting that lets normal Provisions shortage
   recovery use exact Club current-pool non-TOTW special cards inside the
   configured `87-91` Provisions range only as a final fallback. The option is

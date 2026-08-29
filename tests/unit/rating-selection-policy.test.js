@@ -41,6 +41,45 @@ async function select(candidateEntries, options = {}) {
 }
 
 describe('role-aware rating selection policy', () => {
+  it('allows a TEAM_RATING-only Rolling primary without a Required Special matcher', async () => {
+    const candidates = Array.from({ length: 11 }, (_, index) => entry(index + 1, 89));
+    const rollingPolicy = createRollingPrimarySelectionPolicy({
+      entries: candidates.map((value) => ({
+        item: value.item,
+        pileName: value.pileName,
+        classification: {
+          requiredSpecial: false,
+          protected: false,
+          provisionsReserve: false,
+        },
+      })),
+      model: {
+        requiredPlayerCount: 11,
+        targetRating: 89,
+        constraints: [],
+      },
+      protectionRating: 97,
+      reserveRatings: [87, 88],
+    });
+
+    expect(rollingPolicy.exclusiveRoles).toEqual([]);
+    expect(rollingPolicy.protectionPolicy.liveRequirementsAvailable).toBe(true);
+
+    const plan = await select(candidates, {
+      ratingModel: {
+        requiredPlayerCount: 11,
+        targetRating: 89,
+        maxSpecialCount: 0,
+        constraints: [],
+      },
+      selection: rollingPolicy,
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected).toHaveLength(11);
+    expect(plan.details.rating).toBe(89);
+  });
+
   it('uses Unassigned, Storage, and Transfer without Club when the Storage Sink squad is feasible', async () => {
     const plan = await select([
       entry(1, 84, { pileName: 'unassigned', pileRank: 0 }),

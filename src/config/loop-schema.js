@@ -1,9 +1,5 @@
 import { isPlainObject } from '../domain/objects.js';
 import {
-  REQUIRED_SPECIAL_ALLOWANCE_MODES,
-  resolvedRequiredSpecialAllowanceMode,
-} from '../domain/required-special.js';
-import {
   GOLD_CONSUMPTION_MODES,
   goldConsumptionCompatible,
 } from '../domain/gold-consumption.js';
@@ -20,6 +16,7 @@ import {
 } from './runtime-options.js';
 import {
   ROLLING_PROVISIONS_MAX_RATINGS,
+  resolveRollingRequiredSpecialContract,
 } from './rolling-upgrade.js';
 import {
   DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
@@ -627,23 +624,94 @@ function validateRollingUpgrade(loopDef, errors) {
   if (loopDef.dynamicSbcFamily !== 'high-rated-x10' || Number(loopDef.dynamicRewardCount) !== 10) {
     errors.push('rollingUpgrade requires a scanned high-rated-x10 primary with 10 rewards');
   }
+  if (loopDef.dynamicRewardMinRating !== undefined
+    && ![85, 86].includes(Number(loopDef.dynamicRewardMinRating))) {
+    errors.push('rollingUpgrade dynamicRewardMinRating must be 85 or 86');
+  }
   validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
   validateNumberArray(loopDef.sbcSetIds, 'sbcSetIds', errors);
   validateNumberArray(loopDef.rewardPackIds, 'rewardPackIds', errors);
-  const dynamicAllowanceModes = (loopDef.dynamicChallenges || [])
-    .map(resolvedRequiredSpecialAllowanceMode);
-  const allowsAllSafeSpecials = dynamicAllowanceModes.length > 0
-    && dynamicAllowanceModes.every((mode) => (
-      mode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
-    ));
-  const expectedAllowedSpecialCount = allowsAllSafeSpecials
-    ? Number(loopDef.expectedPlayerCount || 0)
-    : 1;
-  if (Number(loopDef.requiredSpecialCount) !== 1
-    || Number(loopDef.allowedSpecialCount) !== expectedAllowedSpecialCount) {
-    errors.push(allowsAllSafeSpecials
-      ? `rollingUpgrade requires one Required Special slot and allows up to ${expectedAllowedSpecialCount} safe special cards`
-      : 'rollingUpgrade requires exactly one scanned Required Special slot');
+  const specialContract = resolveRollingRequiredSpecialContract(loopDef);
+  if (!specialContract.valid) {
+    errors.push(`rollingUpgrade ${specialContract.reason}`);
+  }
+  const stages = loopDef.rollingPrimaryStages;
+  const composite = loopDef.rollingPrimaryComposite === true;
+  if (stages !== undefined) {
+    if (!Array.isArray(stages) || (![1, 2].includes(stages.length))) {
+      errors.push('rollingPrimaryStages must contain one or two stages');
+    } else {
+      const seenSetIds = new Set();
+      const seenStageKeys = new Set();
+      stages.forEach((stage, index) => {
+        const path = `rollingPrimaryStages[${index}]`;
+        if (!isPlainObject(stage)) {
+          errors.push(`${path} must be an object`);
+          return;
+        }
+        const rating = Number(stage.dynamicRewardMinRating);
+        const setId = Number(stage.setId);
+        const challengeIds = Array.isArray(stage.challengeIds)
+          ? stage.challengeIds.map(Number)
+          : [];
+        const packIds = Array.isArray(stage.rewardPackIds)
+          ? stage.rewardPackIds.map(Number)
+          : [];
+        const stageKey = String(stage.key || '');
+        if (![85, 86].includes(rating)) errors.push(`${path}.dynamicRewardMinRating must be 85 or 86`);
+        if (stageKey !== String(rating)) errors.push(`${path}.key must match dynamicRewardMinRating`);
+        if (seenStageKeys.has(stageKey)) errors.push(`${path}.key must be unique`);
+        seenStageKeys.add(stageKey);
+        if (!Number.isInteger(setId) || setId < 1) errors.push(`${path}.setId must be a positive integer`);
+        if (seenSetIds.has(setId)) errors.push(`${path}.setId must be unique`);
+        seenSetIds.add(setId);
+        if (!challengeIds.length || challengeIds.some((id) => !Number.isInteger(id) || id < 1)) {
+          errors.push(`${path}.challengeIds must contain positive integers`);
+        } else if (new Set(challengeIds).size !== challengeIds.length) {
+          errors.push(`${path}.challengeIds must be unique`);
+        }
+        if (!packIds.length || packIds.some((id) => !Number.isInteger(id) || id < 1)) {
+          errors.push(`${path}.rewardPackIds must contain positive integers`);
+        } else if (new Set(packIds).size !== packIds.length) {
+          errors.push(`${path}.rewardPackIds must be unique`);
+        }
+        if (!['unlimited', 'bounded'].includes(stage.repeatability)) {
+          errors.push(`${path}.repeatability must be unlimited or bounded`);
+        }
+        if (stage.repeatability === 'bounded') {
+          if (!Number.isInteger(Number(stage.completionLimit)) || Number(stage.completionLimit) < 1) {
+            errors.push(`${path}.completionLimit must be a positive integer for bounded stages`);
+          }
+          if (!Number.isInteger(Number(stage.remainingCompletions)) || Number(stage.remainingCompletions) < 0) {
+            errors.push(`${path}.remainingCompletions must be a non-negative integer for bounded stages`);
+          }
+        }
+        // Keep the historical minimal stage fixture compatible, but validate
+        // every stage that carries live special-card metadata with the same
+        // contract as the top-level Rolling definition.
+        const hasSpecialMetadata = Object.prototype.hasOwnProperty.call(stage, 'requiredSpecialCount')
+          || Object.prototype.hasOwnProperty.call(stage, 'allowedSpecialCount')
+          || Object.prototype.hasOwnProperty.call(stage, 'dynamicChallenges');
+        if (hasSpecialMetadata) {
+          const specialContract = resolveRollingRequiredSpecialContract(stage);
+          if (!specialContract.valid) errors.push(`${path} ${specialContract.reason}`);
+        }
+      });
+      if (composite) {
+        if (stages.length !== 2
+          || Number(stages[0]?.dynamicRewardMinRating) !== 86
+          || Number(stages[1]?.dynamicRewardMinRating) !== 85
+          || stages[0]?.repeatability !== 'bounded'
+          || Number(stages[0]?.remainingCompletions) <= 0
+          || stages[1]?.repeatability !== 'unlimited') {
+          errors.push('rollingPrimaryComposite requires [86 bounded with remaining uses, 85 unlimited] stages');
+        }
+      } else if (stages.length !== 1) {
+        errors.push('non-composite rollingPrimaryStages must contain exactly one stage');
+      }
+    }
+  } else if (composite) {
+    errors.push('rollingPrimaryComposite requires rollingPrimaryStages');
   }
   const capabilities = [
     ['rollingTotwUpgrade', 'totw-upgrade'],

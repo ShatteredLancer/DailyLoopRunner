@@ -463,6 +463,8 @@ export function mergeScannedActivityMetadata(target = {}, activity = {}) {
     sbcNames: unique([activity.setName, ...(target.sbcNames || [])].map(normalizedText).filter(Boolean)),
     rewardPackIds: unique([...(activity.rewardPackIds || []), ...(target.rewardPackIds || [])].map(positiveInteger).filter(Boolean)),
     rewardPackNames: unique([...(activity.rewardPackNames || []), ...(target.rewardPackNames || [])].map(normalizedText).filter(Boolean)),
+    repeatability: activity.repeatability || target.repeatability || 'unknown',
+    completionLimit: activity.completionLimit ?? target.completionLimit ?? null,
     remainingCompletions: activity.remainingCompletions,
     dynamicSbcFamily: activity.familyId,
     scannedMetadata: true,

@@ -239,6 +239,172 @@ describe('loop configuration schema', () => {
     ]));
   });
 
+  it('accepts a bounded 86x10 followed by an unlimited 85x10 Rolling stage', () => {
+    const loop = validRollingLoop();
+    loop.dynamicRewardMinRating = 86;
+    loop.rollingPrimaryComposite = true;
+    loop.rollingPrimaryStages = [
+      {
+        key: '86',
+        setId: 860,
+        setName: '10x 86+ Upgrade',
+        challengeIds: [1860],
+        rewardPackIds: [2860],
+        dynamicRewardCount: 10,
+        dynamicRewardMinRating: 86,
+        repeatability: 'bounded',
+        completionLimit: 3,
+        remainingCompletions: 2,
+      },
+      {
+        key: '85',
+        setId: 850,
+        setName: '10x 85+ Upgrade',
+        challengeIds: [1850],
+        rewardPackIds: [2850],
+        dynamicRewardCount: 10,
+        dynamicRewardMinRating: 85,
+        repeatability: 'unlimited',
+        completionLimit: null,
+        remainingCompletions: null,
+      },
+    ];
+    expect(validateLoopDef(loop, 'composite Rolling')).toEqual([]);
+  });
+
+  it('accepts a zero-special 86x10 stage followed by the existing one-special 85x10 stage', () => {
+    const loop = validRollingLoop();
+    Object.assign(loop, {
+      dynamicRewardMinRating: 86,
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      dynamicChallenges: [{
+        challengeId: 1860,
+        requiredPlayerCount: 11,
+        targetRating: 89,
+        specialCount: 0,
+        eligibilityRequirements: [{ key: 'TEAM_RATING', values: [89], count: 11 }],
+      }],
+      rollingPrimaryComposite: true,
+      rollingPrimaryStages: [
+        {
+          key: '86',
+          setId: 860,
+          setName: '10x 86+ Upgrade',
+          challengeIds: [1860],
+          rewardPackIds: [2860],
+          dynamicRewardCount: 10,
+          dynamicRewardMinRating: 86,
+          dynamicChallenges: [{
+            challengeId: 1860,
+            requiredPlayerCount: 11,
+            targetRating: 89,
+            specialCount: 0,
+            eligibilityRequirements: [{ key: 'TEAM_RATING', values: [89], count: 11 }],
+          }],
+          expectedPlayerCount: 11,
+          requiredSpecialCount: 0,
+          allowedSpecialCount: 0,
+          repeatability: 'bounded',
+          completionLimit: 10,
+          remainingCompletions: 10,
+        },
+        {
+          key: '85',
+          setId: 850,
+          setName: '10x 85+ Upgrade',
+          challengeIds: [1850],
+          rewardPackIds: [2850],
+          dynamicRewardCount: 10,
+          dynamicRewardMinRating: 85,
+          dynamicChallenges: [{
+            challengeId: 1850,
+            requiredPlayerCount: 11,
+            targetRating: 88,
+            specialCount: 1,
+            eligibilityRequirements: [
+              { key: 'TEAM_RATING', values: [88], count: 11 },
+              { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+            ],
+          }],
+          expectedPlayerCount: 11,
+          requiredSpecialCount: 1,
+          allowedSpecialCount: 1,
+          repeatability: 'unlimited',
+          completionLimit: null,
+          remainingCompletions: null,
+        },
+      ],
+    });
+
+    expect(validateLoopDef(loop, 'zero-special composite Rolling')).toEqual([]);
+  });
+
+  it('rejects a Rolling stage whose special allowance does not match its live requirement', () => {
+    const loop = validRollingLoop();
+    Object.assign(loop, {
+      dynamicRewardMinRating: 86,
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 1,
+      dynamicChallenges: [{
+        challengeId: 1860,
+        requiredPlayerCount: 11,
+        targetRating: 89,
+        specialCount: 0,
+        eligibilityRequirements: [{ key: 'TEAM_RATING', values: [89], count: 11 }],
+      }],
+    });
+
+    expect(validateLoopDef(loop, 'invalid zero-special Rolling'))
+      .toContain('rollingUpgrade allows no special cards when the live Challenge requires none');
+  });
+
+  it('rejects a composite Rolling stage in the wrong order or with unknown repeatability', () => {
+    const loop = validRollingLoop();
+    Object.assign(loop, {
+      dynamicRewardMinRating: 86,
+      rollingPrimaryComposite: true,
+      rollingPrimaryStages: [
+        { setId: 850, challengeIds: [1850], rewardPackIds: [2850], dynamicRewardMinRating: 85, repeatability: 'unlimited' },
+        { setId: 860, challengeIds: [1860], rewardPackIds: [2860], dynamicRewardMinRating: 86, repeatability: 'unknown' },
+      ],
+    });
+    expect(validateLoopDef(loop, 'invalid composite Rolling').join('\n'))
+      .toMatch(/repeatability must be unlimited or bounded|requires \[86 bounded/);
+  });
+
+  it('rejects ambiguous Rolling stage keys and duplicate Challenge identities', () => {
+    const loop = validRollingLoop();
+    Object.assign(loop, {
+      dynamicRewardMinRating: 86,
+      rollingPrimaryComposite: true,
+      rollingPrimaryStages: [
+        {
+          key: '86',
+          setId: 860,
+          challengeIds: [1860, 1860],
+          rewardPackIds: [2860],
+          dynamicRewardMinRating: 86,
+          repeatability: 'bounded',
+          completionLimit: 3,
+          remainingCompletions: 2,
+        },
+        {
+          key: '86',
+          setId: 850,
+          challengeIds: [1850],
+          rewardPackIds: [2850],
+          dynamicRewardMinRating: 85,
+          repeatability: 'unlimited',
+        },
+      ],
+    });
+    const errors = validateLoopDef(loop, 'ambiguous composite Rolling').join('\n');
+    expect(errors).toContain('rollingPrimaryStages[0].challengeIds must be unique');
+    expect(errors).toContain('rollingPrimaryStages[1].key must match dynamicRewardMinRating');
+    expect(errors).toContain('rollingPrimaryStages[1].key must be unique');
+  });
+
   it('admits a Storage Sink Set when one challenge is 87+ and preserves strict rating validation', () => {
     const diagnostic = 'rollingStorageSink.capability.challengeRatings must contain one or more ratings of 87+';
 

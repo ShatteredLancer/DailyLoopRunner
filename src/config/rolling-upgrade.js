@@ -684,27 +684,147 @@ export function resolveRollingPlayerPickCapability(
   };
 }
 
-export function createRollingUpgradeLoopDef(primaryLoop = {}) {
-  const specialAllowanceModes = (primaryLoop.dynamicChallenges || [])
+export function createRollingPrimaryStage(loop = {}) {
+  const setId = positiveInteger(loop.sbcSetIds?.[0]);
+  const rating = Number(loop.dynamicRewardMinRating);
+  const challenges = Array.isArray(loop.dynamicChallenges) ? loop.dynamicChallenges : [];
+  const rewardPackIds = Array.isArray(loop.rewardPackIds) ? loop.rewardPackIds : [];
+  const challengeIds = challenges.map((challenge) => positiveInteger(challenge?.challengeId));
+  const packIds = rewardPackIds.map(positiveInteger);
+  if (!setId || ![85, 86].includes(rating)
+    || !challenges.length
+    || !rewardPackIds.length
+    || challengeIds.some((id) => !id)
+    || new Set(challengeIds).size !== challengeIds.length
+    || packIds.some((id) => !id)
+    || new Set(packIds).size !== packIds.length) return null;
+  return {
+    key: String(rating),
+    setId,
+    setName: normalizedText(loop.sbcNames?.[0] || loop.name),
+    challengeIds,
+    rewardPackIds: packIds,
+    rewardPackNames: [...(loop.rewardPackNames || [])],
+    dynamicSbcFamily: loop.dynamicSbcFamily,
+    dynamicRewardCount: loop.dynamicRewardCount,
+    dynamicRewardMinRating: loop.dynamicRewardMinRating,
+    dynamicChallengeCount: loop.dynamicChallengeCount,
+    dynamicChallenges: clone(loop.dynamicChallenges || []),
+    expectedPlayerCount: loop.expectedPlayerCount,
+    requiredSpecialCount: loop.requiredSpecialCount,
+    allowedSpecialCount: loop.allowedSpecialCount,
+    repeatability: loop.repeatability || 'unknown',
+    completionLimit: loop.completionLimit ?? null,
+    remainingCompletions: loop.remainingCompletions ?? null,
+  };
+}
+
+export function resolveRollingRequiredSpecialContract(value = {}) {
+  const requiredSpecialCount = Number(value.requiredSpecialCount);
+  const allowedSpecialCount = Number(value.allowedSpecialCount);
+  if (!Number.isInteger(requiredSpecialCount) || ![0, 1].includes(requiredSpecialCount)) {
+    return {
+      valid: false,
+      reason: 'supports only zero or one live Required Special slot',
+    };
+  }
+  if (!Number.isInteger(allowedSpecialCount) || allowedSpecialCount < 0) {
+    return {
+      valid: false,
+      reason: 'allowedSpecialCount must be a non-negative integer',
+    };
+  }
+  if (requiredSpecialCount === 0) {
+    return allowedSpecialCount === 0
+      ? { valid: true, requiredSpecialCount, allowedSpecialCount, expectedAllowedSpecialCount: 0 }
+      : {
+          valid: false,
+          reason: 'allows no special cards when the live Challenge requires none',
+        };
+  }
+  const specialAllowanceModes = (value.dynamicChallenges || [])
     .map(resolvedRequiredSpecialAllowanceMode);
   const allowsAllSafeSpecials = specialAllowanceModes.length > 0
     && specialAllowanceModes.every((mode) => (
       mode === REQUIRED_SPECIAL_ALLOWANCE_MODES.ALL_MATCHING_SPECIALS
     ));
   const expectedAllowedSpecialCount = allowsAllSafeSpecials
-    ? Number(primaryLoop.expectedPlayerCount || 0)
+    ? Number(value.expectedPlayerCount || 0)
     : 1;
+  if (!Number.isInteger(expectedAllowedSpecialCount) || expectedAllowedSpecialCount < 1
+    || allowedSpecialCount !== expectedAllowedSpecialCount) {
+    return {
+      valid: false,
+      reason: allowsAllSafeSpecials
+        ? `requires one live Required Special slot and allows up to ${expectedAllowedSpecialCount} safe special cards`
+        : 'requires allowedSpecialCount to match its one live Required Special slot',
+    };
+  }
+  return {
+    valid: true,
+    requiredSpecialCount,
+    allowedSpecialCount,
+    expectedAllowedSpecialCount,
+  };
+}
+
+function validRollingPrimaryStage(stage = {}) {
+  const rating = Number(stage.dynamicRewardMinRating);
+  const setId = positiveInteger(stage.setId);
+  const challengeIds = Array.isArray(stage.challengeIds)
+    ? stage.challengeIds.map(positiveInteger).filter(Boolean)
+    : [];
+  const packIds = Array.isArray(stage.rewardPackIds)
+    ? stage.rewardPackIds.map(positiveInteger).filter(Boolean)
+    : [];
+  if (!setId || ![85, 86].includes(rating)
+    || String(stage.key || '') !== String(rating)
+    || !challengeIds.length
+    || new Set(challengeIds).size !== challengeIds.length
+    || !packIds.length
+    || new Set(packIds).size !== packIds.length) return false;
+  if (!['unlimited', 'bounded'].includes(stage.repeatability)) return false;
+  if (stage.repeatability === 'bounded'
+    && (!Number.isInteger(Number(stage.completionLimit))
+      || Number(stage.completionLimit) < 1
+      || !Number.isInteger(Number(stage.remainingCompletions))
+      || Number(stage.remainingCompletions) < 0)) return false;
+  return resolveRollingRequiredSpecialContract(stage).valid;
+}
+
+export function createRollingUpgradeLoopDef(primaryLoop = {}, options = {}) {
+  const specialContract = resolveRollingRequiredSpecialContract(primaryLoop);
   if (primaryLoop.dynamicSbcFamily !== 'high-rated-x10'
     || Number(primaryLoop.dynamicRewardCount || 0) !== 10
-    || Number(primaryLoop.dynamicRewardMinRating || 0) !== 85
-    || Number(primaryLoop.requiredSpecialCount || 0) !== 1
-    || Number(primaryLoop.allowedSpecialCount || 0) !== expectedAllowedSpecialCount) return null;
+    || ![85, 86].includes(Number(primaryLoop.dynamicRewardMinRating || 0))
+    || !specialContract.valid) return null;
   const setId = positiveInteger(primaryLoop.sbcSetIds?.[0]);
   if (!setId) return null;
+  const composite = options.composite === true;
+  const inferredStage = createRollingPrimaryStage(primaryLoop);
+  const stages = Array.isArray(options.stages) && options.stages.length
+    ? options.stages.map(clone)
+    : [inferredStage].filter(Boolean);
+  // Keep the historical factory contract for callers that only provide the
+  // primary Set identity. Live discovery always supplies a fully validated
+  // stage, while minimal programmatic definitions may omit stage metadata.
+  if ((composite && stages.length !== 2) || (!composite && stages.length > 1)
+    || stages.some((stage) => !validRollingPrimaryStage(stage))) return null;
+  if (composite && (
+    Number(stages[0].dynamicRewardMinRating) !== 86
+    || Number(stages[1].dynamicRewardMinRating) !== 85
+    || stages[0].repeatability !== 'bounded'
+    || Number(stages[0].remainingCompletions) <= 0
+    || stages[1].repeatability !== 'unlimited'
+  )) return null;
   const result = {
     ...clone(primaryLoop),
-    id: `rolling-upgrade-${setId}-${Number(primaryLoop.dynamicRewardMinRating || 0) || 'x'}`,
-    name: `${primaryLoop.name} Rolling Loop`,
+    id: composite
+      ? `rolling-upgrade-composite-${stages[0].setId}-${stages[1].setId}`
+      : `rolling-upgrade-${setId}-${Number(primaryLoop.dynamicRewardMinRating || 0) || 'x'}`,
+    name: composite
+      ? `${stages[0].setName} -> ${stages[1].setName} Rolling Loop`
+      : `${primaryLoop.name} Rolling Loop`,
     strategy: ROLLING_UPGRADE_STRATEGY,
     hidden: false,
     mvp: false,
@@ -713,6 +833,8 @@ export function createRollingUpgradeLoopDef(primaryLoop = {}) {
     openRewardPacks: false,
     maxCompletions: 0,
     useRoundsAsCompletions: true,
+    rollingPrimaryComposite: composite,
+    ...(stages.length ? { rollingPrimaryStages: stages } : {}),
     runtimeQuantity: {
       mode: 'user',
       target: 'maxCompletions',

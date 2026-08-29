@@ -8,7 +8,10 @@ import {
 import { readEligibilityRequirements } from '../selection/rating-model.js';
 import { parseBasicUpgradeChallenge } from './activity-discovery.js';
 import { createDynamicUpgradePolicy } from './upgrade-policies.js';
-import { createRollingUpgradeLoopDef } from './rolling-upgrade.js';
+import {
+  createRollingPrimaryStage,
+  createRollingUpgradeLoopDef,
+} from './rolling-upgrade.js';
 
 const SUPPORTED_PLAYER_KEYS = new Set([
   'PLAYER_QUALITY',
@@ -37,13 +40,40 @@ function unique(values = []) {
   return [...new Set(values.filter((value) => value !== undefined && value !== null && value !== ''))];
 }
 
+export function classifyUpgradeRepeatability(set = {}) {
+  const rawRepeats = set?.repeats;
+  // Upgrade Set payloads historically omit the repeat count (null) for an
+  // explicitly repeatable Upgrade. Keep that compatibility distinction local
+  // to Upgrade discovery; Player Pick uses a stricter contract.
+  if (rawRepeats === null) {
+    return { repeatability: 'unlimited', completionLimit: null, remainingCompletions: null };
+  }
+  if (rawRepeats === undefined || rawRepeats === '') {
+    return { repeatability: 'unknown', completionLimit: null, remainingCompletions: null };
+  }
+  const repeats = Number(rawRepeats);
+  if (!Number.isInteger(repeats) || repeats < 0) {
+    return { repeatability: 'unknown', completionLimit: null, remainingCompletions: null };
+  }
+  if (repeats === 0) {
+    return { repeatability: 'unlimited', completionLimit: null, remainingCompletions: null };
+  }
+  const completed = Number(set?.timesCompleted);
+  if (!Number.isInteger(completed) || completed < 0 || completed > repeats) {
+    return { repeatability: 'unknown', completionLimit: repeats, remainingCompletions: null };
+  }
+  return {
+    repeatability: 'bounded',
+    completionLimit: repeats,
+    remainingCompletions: Math.max(0, repeats - completed),
+  };
+}
+
 function remainingCompletions(set = {}) {
-  if (set.timesCompleted === null || set.timesCompleted === undefined
-    || set.repeats === null || set.repeats === undefined) return null;
-  const completed = Number(set.timesCompleted);
-  const repeats = Number(set.repeats);
-  if (!Number.isFinite(completed) || !Number.isFinite(repeats) || repeats <= 0 || repeats < completed) return null;
-  return Math.max(0, Math.floor(repeats - completed));
+  const repeatability = classifyUpgradeRepeatability(set);
+  return repeatability.repeatability === 'bounded'
+    ? repeatability.remainingCompletions
+    : null;
 }
 
 export function detectDynamicUpgradeFamily(set = {}) {
@@ -312,7 +342,8 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
     requirements: [],
   };
 
-  const remaining = remainingCompletions(set);
+  const repeatability = classifyUpgradeRepeatability(set);
+  const remaining = repeatability.remainingCompletions;
   if (remaining === 0) {
     return {
       status: 'completed',
@@ -348,6 +379,8 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
     sbcNames: [setName],
     rewardPackIds: rewards.ids,
     rewardPackNames: rewards.names,
+    repeatability: repeatability.repeatability,
+    completionLimit: repeatability.completionLimit,
     remainingCompletions: remaining,
     scannedMetadata: true,
     ratingSbcFill: {
@@ -410,6 +443,214 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
   };
 }
 
+function rollingCandidateRating(loop = {}) {
+  const rating = Number(loop?.dynamicRewardMinRating);
+  return Number.isInteger(rating) && [85, 86].includes(rating) ? rating : null;
+}
+
+function rollingCandidateLoop(loop = {}) {
+  if (loop?.dynamicSbcFamily !== 'high-rated-x10'
+    || Number(loop?.dynamicRewardCount) !== 10
+    || !rollingCandidateRating(loop)) return null;
+  return loop;
+}
+
+function rollingCandidateMetadataValid(loop = {}) {
+  if (!loop || rollingCandidateLoop(loop) !== loop) return false;
+  const setId = positiveInteger(loop.sbcSetIds?.[0]);
+  const challengeIds = (loop.dynamicChallenges || [])
+    .map((challenge) => positiveInteger(challenge?.challengeId))
+    .filter(Boolean);
+  const configuredPackIds = Array.isArray(loop.rewardPackIds) ? loop.rewardPackIds : [];
+  const packIds = configuredPackIds.map(positiveInteger).filter(Boolean);
+  if (!setId
+    || challengeIds.length !== (loop.dynamicChallenges || []).length
+    || new Set(challengeIds).size !== challengeIds.length
+    || packIds.length !== configuredPackIds.length
+    || new Set(packIds).size !== packIds.length
+    || !packIds.length) return false;
+  if (!['unlimited', 'bounded', 'unknown'].includes(loop.repeatability)) return false;
+  if (loop.repeatability === 'bounded') {
+    if (!Number.isInteger(Number(loop.completionLimit)) || Number(loop.completionLimit) < 1) return false;
+    if (!Number.isInteger(Number(loop.remainingCompletions)) || Number(loop.remainingCompletions) < 0) return false;
+  } else if (loop.repeatability === 'unlimited'
+    && loop.completionLimit !== null && loop.completionLimit !== undefined) {
+    return false;
+  }
+  return true;
+}
+
+function rollingCandidateEvidence(result = {}) {
+  const family = result?.family;
+  const rating = Number(family?.rewardMinRating);
+  if (family?.id !== 'high-rated-x10' || ![85, 86].includes(rating)) return null;
+  const loop = result?.loop || result?.discoveredLoop || null;
+  return {
+    rating,
+    setId: positiveInteger(result?.setId || loop?.sbcSetIds?.[0]),
+    status: String(result?.status || 'unknown'),
+    loop,
+    valid: rollingCandidateMetadataValid(loop),
+    diagnostics: [...(result?.diagnostics || [])],
+  };
+}
+
+function unresolvedRollingCandidateReason(evidence = []) {
+  const summary = evidence.map((entry) => {
+    const diagnostic = entry.diagnostics.length ? `: ${entry.diagnostics.join(', ')}` : '';
+    return `${entry.rating}x10 Set #${entry.setId || '?'} ${entry.status}${diagnostic}`;
+  }).join('; ');
+  return `Rolling candidate identity is incomplete or unsupported (${summary || 'unknown candidate'})`;
+}
+
+function rollingCandidateSetIds(loops = []) {
+  return unique((loops || [])
+    .map((loop) => positiveInteger(loop?.sbcSetIds?.[0]))
+    .filter(Boolean));
+}
+
+function rollingPlanFailure(reason, candidates = []) {
+  return {
+    status: 'unavailable',
+    reason,
+    loop: null,
+    candidates: candidates.map((loop) => clone(loop)),
+    suppressedSetIds: [],
+  };
+}
+
+function rolling85Fallback(candidate85, candidates, reason) {
+  if (candidate85?.repeatability !== 'unlimited') return null;
+  const loop = createRollingUpgradeLoopDef(candidate85);
+  if (!loop) return null;
+  return {
+    status: 'resolved',
+    mode: 'single',
+    fallbackFrom: '86x10',
+    fallbackReason: reason,
+    loop,
+    stages: [createRollingPrimaryStage(candidate85)],
+    candidates: (candidates || []).filter(Boolean).map(clone),
+    suppressedSetIds: [Number(candidate85.sbcSetIds[0])],
+  };
+}
+
+/**
+ * Select exactly one safe Rolling plan from live x10 Upgrade candidates.
+ * An unverified or incompatible 86x10 is retained as diagnostic evidence, but
+ * must not hide an independently verified unlimited 85x10 Rolling loop.
+ */
+export function selectRollingUpgradePlan(loops = []) {
+  const candidates = (loops || [])
+    .map(rollingCandidateLoop)
+    .filter(rollingCandidateMetadataValid);
+  const byRating = (rating) => candidates.filter(
+    (loop) => Number(loop.dynamicRewardMinRating) === rating,
+  );
+  const candidates86 = byRating(86);
+  const candidates85 = byRating(85);
+  if (candidates86.length > 1) {
+    const fallback = rolling85Fallback(
+      candidates85.length === 1 ? candidates85[0] : null,
+      [...candidates86, ...candidates85],
+      'multiple 86x10 candidates are ambiguous',
+    );
+    if (fallback) return fallback;
+    return rollingPlanFailure('multiple 86x10 candidates are ambiguous', candidates86);
+  }
+  if (candidates85.length > 1) {
+    return rollingPlanFailure('multiple 85x10 candidates are ambiguous', candidates85);
+  }
+  const candidate86 = candidates86[0] || null;
+  const candidate85 = candidates85[0] || null;
+  if (candidate86 && candidate85
+    && Number(candidate86.sbcSetIds?.[0]) === Number(candidate85.sbcSetIds?.[0])) {
+    return rollingPlanFailure('86x10 and 85x10 resolve to the same SBC Set identity', [candidate86, candidate85]);
+  }
+  if (candidate86?.repeatability === 'unknown') {
+    const fallback = rolling85Fallback(
+      candidate85,
+      [candidate86, candidate85],
+      '86x10 repeatability is unknown',
+    );
+    if (fallback) return fallback;
+    return rollingPlanFailure('86x10 repeatability is unknown and no confirmed unlimited 85x10 exists', [candidate86]);
+  }
+  const usable85 = candidate85?.repeatability === 'unlimited' ? candidate85 : null;
+  if (candidate86?.repeatability === 'unlimited') {
+    const loop = createRollingUpgradeLoopDef(candidate86);
+    if (!loop) {
+      const fallback = rolling85Fallback(
+        usable85,
+        [candidate86, usable85],
+        '86x10 does not satisfy the Rolling contract',
+      );
+      if (fallback) return fallback;
+      return rollingPlanFailure('86x10 does not satisfy the Rolling contract', [candidate86]);
+    }
+    return {
+      status: 'resolved',
+      mode: 'single',
+      loop,
+      stages: [createRollingPrimaryStage(candidate86)],
+      candidates: [candidate86, ...(candidate85 ? [candidate85] : [])].map(clone),
+      suppressedSetIds: rollingCandidateSetIds([candidate86, candidate85]),
+    };
+  }
+  if (candidate86?.repeatability === 'bounded' && Number(candidate86.remainingCompletions) > 0) {
+    if (!usable85) {
+      return rollingPlanFailure('86x10 has remaining limited uses but no confirmed unlimited 85x10 fallback', [candidate86, ...(candidate85 ? [candidate85] : [])]);
+    }
+    const stages = [createRollingPrimaryStage(candidate86), createRollingPrimaryStage(usable85)];
+    const loop = createRollingUpgradeLoopDef(candidate86, { stages, composite: true });
+    if (!loop) {
+      const fallback = rolling85Fallback(
+        usable85,
+        [candidate86, usable85],
+        '86x10 -> 85x10 does not satisfy the Rolling contract',
+      );
+      if (fallback) return fallback;
+      return rollingPlanFailure('86x10 -> 85x10 does not satisfy the Rolling contract', [candidate86, usable85]);
+    }
+    return {
+      status: 'resolved',
+      mode: 'bounded-then-unlimited',
+      loop,
+      stages,
+      candidates: [candidate86, usable85].map(clone),
+      suppressedSetIds: [Number(candidate86.sbcSetIds[0]), Number(usable85.sbcSetIds[0])],
+    };
+  }
+  if (candidate86?.repeatability === 'bounded' && Number(candidate86.remainingCompletions) === 0) {
+    if (!usable85) {
+      return rollingPlanFailure('86x10 is exhausted and no confirmed unlimited 85x10 exists', [candidate86, ...(candidate85 ? [candidate85] : [])]);
+    }
+    const loop = createRollingUpgradeLoopDef(usable85);
+    if (!loop) return rollingPlanFailure('85x10 does not satisfy the Rolling contract', [usable85]);
+    return {
+      status: 'resolved',
+      mode: 'single',
+      loop,
+      stages: [createRollingPrimaryStage(usable85)],
+      candidates: [candidate86, usable85].map(clone),
+      suppressedSetIds: [Number(usable85.sbcSetIds[0])],
+    };
+  }
+  if (!candidate86 && usable85) {
+    const loop = createRollingUpgradeLoopDef(usable85);
+    if (!loop) return rollingPlanFailure('85x10 does not satisfy the Rolling contract', [usable85]);
+    return {
+      status: 'resolved',
+      mode: 'single',
+      loop,
+      stages: [createRollingPrimaryStage(usable85)],
+      candidates: [usable85].map(clone),
+      suppressedSetIds: [Number(usable85.sbcSetIds[0])],
+    };
+  }
+  return rollingPlanFailure('no confirmed unlimited Rolling stage is available', candidates);
+}
+
 function configuredUpgradeMatches(result, loop = {}) {
   if (loop.strategy !== 'fillAndVerifySbc') return false;
   if ((loop.sbcSetIds || []).map(Number).includes(Number(result.setId))) return true;
@@ -429,6 +670,8 @@ export function mergeScannedUpgradeMetadata(configuredLoop, discoveredLoop) {
     sbcNames: unique([...(discoveredLoop.sbcNames || []), ...(configuredLoop.sbcNames || [])]),
     rewardPackIds: unique([...(discoveredLoop.rewardPackIds || []), ...(configuredLoop.rewardPackIds || [])]),
     rewardPackNames: unique([...(discoveredLoop.rewardPackNames || []), ...(configuredLoop.rewardPackNames || [])]),
+    repeatability: discoveredLoop.repeatability,
+    completionLimit: discoveredLoop.completionLimit,
     remainingCompletions: discoveredLoop.remainingCompletions,
     dynamicSbcFamily: discoveredLoop.dynamicSbcFamily,
     dynamicRewardCount: discoveredLoop.dynamicRewardCount,
@@ -469,7 +712,6 @@ export function mergeScannedUpgradeMetadata(configuredLoop, discoveredLoop) {
 export function buildUpgradeDiscoverySession(input = {}) {
   const configuredLoops = [...(input.configuredLoops || [])];
   const discoveredLoops = [];
-  const rollingLoops = [];
   const loopOverrides = {};
   const results = [];
   for (const set of input.sets || []) {
@@ -479,10 +721,6 @@ export function buildUpgradeDiscoverySession(input = {}) {
     if (parsed.status !== 'supported') {
       results.push(parsed);
       continue;
-    }
-    const rollingLoop = createRollingUpgradeLoopDef(parsed.loop);
-    if (rollingLoop && !rollingLoops.some((loop) => loop.id === rollingLoop.id)) {
-      rollingLoops.push(rollingLoop);
     }
     const matches = configuredLoops.filter((loop) => configuredUpgradeMatches(parsed, loop));
     if (matches.length) {
@@ -500,7 +738,44 @@ export function buildUpgradeDiscoverySession(input = {}) {
     discoveredLoops.push(parsed.loop);
     results.push(parsed);
   }
-  return { discoveredLoops, rollingLoops, loopOverrides, results };
+  const rollingEvidence = results
+    .map(rollingCandidateEvidence)
+    .filter((evidence) => evidence && evidence.status !== 'completed');
+  const evidence85 = rollingEvidence.filter((evidence) => evidence.rating === 85);
+  const evidence86 = rollingEvidence.filter((evidence) => evidence.rating === 86);
+  const valid85 = evidence85.filter((evidence) => evidence.valid).map((evidence) => evidence.loop);
+  const valid86 = evidence86.filter((evidence) => evidence.valid).map((evidence) => evidence.loop);
+  let rollingPlan;
+  if (evidence85.length > 1) {
+    rollingPlan = rollingPlanFailure('multiple 85x10 candidates are ambiguous', valid85);
+  } else if (evidence85.length === 1 && evidence85[0].valid !== true) {
+    rollingPlan = rollingPlanFailure(unresolvedRollingCandidateReason(evidence85), []);
+  } else if (evidence86.length > 1) {
+    const fallback = rolling85Fallback(
+      valid85[0],
+      [...valid86, ...valid85],
+      'multiple 86x10 candidates are ambiguous',
+    );
+    rollingPlan = fallback || rollingPlanFailure(
+      'multiple 86x10 candidates are ambiguous',
+      [...valid86, ...valid85],
+    );
+  } else if (evidence86.length === 1 && evidence86[0].valid !== true) {
+    const reason = unresolvedRollingCandidateReason(evidence86);
+    const fallback = rolling85Fallback(valid85[0], valid85, reason);
+    rollingPlan = fallback || rollingPlanFailure(reason, valid85);
+  } else {
+    rollingPlan = selectRollingUpgradePlan([...valid86, ...valid85]);
+  }
+  const rollingLoops = rollingPlan.loop ? [rollingPlan.loop] : [];
+  return {
+    discoveredLoops,
+    rollingLoops,
+    rollingPlan,
+    suppressedSetIds: [...(rollingPlan.suppressedSetIds || [])],
+    loopOverrides,
+    results,
+  };
 }
 
 export function collectScannedUpgradeLoopDefs(results = []) {
@@ -534,6 +809,8 @@ export function collectScannedUpgradeActivities(results = []) {
       rewardPackIds: [...(loop.rewardPackIds || [])],
       rewardPackNames: [...(loop.rewardPackNames || [])],
       rewardCount: loop.dynamicRewardCount ?? null,
+      repeatability: loop.repeatability || 'unknown',
+      completionLimit: loop.completionLimit ?? null,
       remainingCompletions: loop.remainingCompletions ?? null,
       requirements: (loop.requirements || []).map((requirement) => ({
         tier: requirement.tier,

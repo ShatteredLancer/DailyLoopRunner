@@ -4,12 +4,21 @@
 
 当前基线：
 
-- Userscript 版本：`0.8.48`
-- Git 基线：`main` Rolling rating-excess recovery + live group-83 Required Special handling
+- Userscript 版本：`0.8.60`
+- Git 基线：`main` delayed Player Pick recovery + dynamic Rolling primary-stage planning
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
 本文档是重构工作的状态来源。实施过程中应更新里程碑状态、验收记录和发现的问题，不在聊天记录或临时日志中维护另一套进度。
+
+当前开发修正：动态 Upgrade 扫描只发布一个 Rolling 入口。无限 86x10 优先于 85x10；
+限次 86x10 在剩余次数可确认且存在无限 85x10 时生成单个 `86 -> 85` 复合 Loop，
+86 确认耗尽并处理完精确待开奖励后切换；86 已耗尽时只生成 85x10 Rolling。
+85x10 限次、次数未知、候选重复或 Set/Challenge/Pack 身份不完整时不生成 Rolling，
+10x84+ 等其它 Upgrade 继续保留 generic Loop。运行时每轮重读 Set repeatability，并用绑定
+Loop、阶段、Set、Challenge 集合、实际 Challenge、Pack 和时间戳的 pending reward journal
+阻止延迟奖励导致提前切换。Node release gate 当前覆盖 202 个测试文件、1899 项测试；
+真实 EA Web App 仍需分别验证 86 无限、86 限次切 85、86 已耗尽三种会话状态。
 
 当前开发修正：Selection Policy 新增默认关闭的
 `rollingStoragePressureClubBoostersEnabled`。启用后，动态 Storage Pressure 阵容在仍需

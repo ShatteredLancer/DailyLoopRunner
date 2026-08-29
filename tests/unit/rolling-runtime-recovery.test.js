@@ -10,6 +10,8 @@ import {
 import { submitSbcAttempt } from '../../src/sbc/submit-attempt.js';
 import {
   ROLLING_DUPLICATE_TRANSACTION_KEY,
+  ROLLING_PENDING_PRIMARY_REWARD_KEY,
+  ROLLING_PENDING_PRIMARY_REWARD_MAX_AGE_MS,
   ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_KEY,
   ROLLING_PENDING_REQUIRED_SPECIAL_REWARD_MAX_AGE_MS,
 } from '../../src/config/runtime.js';
@@ -96,6 +98,174 @@ function installInventoryRecoveryService(window, inventoryPiles, onMove) {
 }
 
 describe('Rolling runtime recovery helpers', () => {
+  function primaryLoop(overrides = {}) {
+    return {
+      id: 'rolling-upgrade-composite-860-850',
+      name: '86x10 -> 85x10 Rolling Loop',
+      rollingPrimaryComposite: true,
+      rollingPrimaryStages: [
+        {
+          key: '86',
+          setId: 860,
+          challengeIds: [1861, 1862],
+          rewardPackIds: [3860],
+          dynamicRewardMinRating: 86,
+        },
+        {
+          key: '85',
+          setId: 850,
+          challengeIds: [1851],
+          rewardPackIds: [3850],
+          dynamicRewardMinRating: 85,
+          repeatability: 'unlimited',
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  it('persists only an exact primary reward journal with stable stage and Pack identity', async () => {
+    const { api, userscriptValues } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const runtime = { activeRollingStageKey: '86' };
+    const loop = primaryLoop();
+    const result = api.queueRollingPendingPrimaryReward(
+      runtime,
+      loop,
+      { submitted: true, rewardPackId: 3860, challengeRef: { id: 1862 } },
+    );
+
+    expect(result).toMatchObject({ submitted: true });
+    expect(runtime.pendingPrimaryRewardJournal).toMatchObject({
+      loopId: loop.id,
+      stageKey: '86',
+      setId: 860,
+      challengeId: 1862,
+      challengeIds: [1861, 1862],
+      rewardPackId: 3860,
+      persisted: true,
+    });
+    expect(userscriptValues.get(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toMatchObject({
+      version: 1,
+      loopId: loop.id,
+      stageKey: '86',
+      setId: 860,
+      challengeId: 1862,
+      challengeIds: [1861, 1862],
+      rewardPackId: 3860,
+    });
+  });
+
+  it('does not create a restart journal when the submit response has no stable Pack id', async () => {
+    const { api, userscriptValues } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const runtime = { activeRollingStageKey: '86' };
+    const loop = primaryLoop();
+    api.queueRollingPendingPrimaryReward(runtime, loop, { submitted: true, rewardPackId: null });
+
+    expect(runtime.pendingPrimaryRewardJournal.persisted).toBe(false);
+    expect(userscriptValues.has(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toBe(false);
+  });
+
+  it('restores a matching journal and rejects loop, stage, and Pack identity mismatches', async () => {
+    const loop = primaryLoop();
+    const { api, userscriptValues } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: {
+        [ROLLING_PENDING_PRIMARY_REWARD_KEY]: {
+          version: 1,
+          loopId: loop.id,
+          stageKey: '86',
+          setId: 860,
+          challengeId: 1862,
+          challengeIds: [1861, 1862],
+          rewardPackId: 3860,
+          queuedAt: Date.now(),
+        },
+      },
+    });
+
+    expect(api.restoreRollingPendingPrimaryReward(loop)).toMatchObject({
+      status: 'ready',
+      stage: expect.objectContaining({ key: '86', setId: 860 }),
+      journal: expect.objectContaining({ rewardPackId: 3860 }),
+    });
+
+    const wrongLoop = api.restoreRollingPendingPrimaryReward({ ...loop, id: 'other-loop' });
+    expect(wrongLoop).toMatchObject({ status: 'blocked', reasonCode: 'PRIMARY_REWARD_JOURNAL_LOOP_MISMATCH' });
+    expect(userscriptValues.has(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toBe(false);
+
+    userscriptValues.set(ROLLING_PENDING_PRIMARY_REWARD_KEY, {
+      version: 1,
+      loopId: loop.id,
+      stageKey: '86',
+      setId: 850,
+      challengeId: 1862,
+      challengeIds: [1861, 1862],
+      rewardPackId: 3860,
+      queuedAt: Date.now(),
+    });
+    expect(api.restoreRollingPendingPrimaryReward(loop)).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'PRIMARY_REWARD_JOURNAL_STAGE_MISMATCH',
+    });
+  });
+
+  it('fails closed and clears malformed or expired journals', async () => {
+    const loop = primaryLoop();
+    const { api, userscriptValues } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: {
+        [ROLLING_PENDING_PRIMARY_REWARD_KEY]: { broken: true },
+      },
+    });
+    expect(api.restoreRollingPendingPrimaryReward(loop)).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'PRIMARY_REWARD_JOURNAL_INVALID',
+    });
+    expect(userscriptValues.has(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toBe(false);
+
+    userscriptValues.set(ROLLING_PENDING_PRIMARY_REWARD_KEY, {
+      version: 1,
+      loopId: loop.id,
+      stageKey: '86',
+      setId: 860,
+      challengeId: 1862,
+      challengeIds: [1861, 1862],
+      rewardPackId: 3860,
+      queuedAt: Date.now() - ROLLING_PENDING_PRIMARY_REWARD_MAX_AGE_MS - 1,
+    });
+    expect(api.restoreRollingPendingPrimaryReward(loop)).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'PRIMARY_REWARD_JOURNAL_EXPIRED',
+    });
+    expect(userscriptValues.has(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toBe(false);
+  });
+
+  it('clears the primary reward journal only after the exact reward is opened', async () => {
+    const loop = primaryLoop();
+    const { api, userscriptValues } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const runtime = {
+      activeRollingStageKey: '86',
+      pendingPrimaryReward: true,
+      pendingRewardPackId: 3860,
+      pendingRewardPackDefinition: loop,
+    };
+    api.queueRollingPendingPrimaryReward(runtime, loop, {
+      submitted: true,
+      rewardPackId: 3860,
+      challengeRef: { id: 1862 },
+    });
+    expect(userscriptValues.has(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toBe(true);
+    expect(api.clearRollingPendingPrimaryReward(runtime)).toBe(true);
+    expect(runtime).toMatchObject({
+      pendingPrimaryReward: false,
+      pendingRewardPackId: null,
+      pendingRewardPackDefinition: null,
+    });
+    expect(userscriptValues.has(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toBe(false);
+  });
+
   it('settles a deferred primary duplicate already normalized to Club', async () => {
     const normalizedClubItem = makePlayer({
       id: 931725349159,

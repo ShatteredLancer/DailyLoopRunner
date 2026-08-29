@@ -482,8 +482,20 @@ describe('current direct side-effect call baseline', () => {
     expect(helper).toContain('label, options = {}');
     expect(helper).toContain('loadRatingSbcChallenge(challenge, label, options)');
     expect(primaryStart).toBeGreaterThan(-1);
-    expect(primary).toContain('loadRatingSbcChallengeForSet(set, challengeContext.challenge, loopDef.name, {');
-    expect(primary).not.toContain('loadRatingSbcChallenge(challengeContext.challenge, loopDef.name, {');
+    expect(primary).toContain('loadRatingSbcChallengeForSet(set, resolvedChallenge, loopDef.name, {');
+    expect(primary).not.toContain('loadRatingSbcChallenge(resolvedChallenge, loopDef.name, {');
+    expect(primary).not.toContain('loadRatingSbcChallengeForSet(set, challengeContext.challenge, loopDef.name, {');
+  });
+
+  it('accepts a live Rolling primary with zero Required Special slots', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const primaryStart = source.indexOf('async function loadRollingPrimaryContext');
+    const primaryEnd = source.indexOf('function rollingRecoveryDef', primaryStart);
+    const primary = source.slice(primaryStart, primaryEnd);
+
+    expect(primary).toContain('const roleCounts = roles.map(({ constraint }) => Number(constraint.count));');
+    expect(primary).toContain('roleCount > 1');
+    expect(primary).not.toContain('roleCount !== 1');
   });
 
   it('tries ordered unlimited Rare Gold Pick candidates before the Gold sink fallback', async () => {

@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildUpgradeDiscoverySession,
+  classifyUpgradeRepeatability,
   collectScannedUpgradeActivities,
   detectDynamicUpgradeFamily,
   materializeDynamicUpgradeChallengeLoopDef,
   parseDynamicUpgradeSbcSnapshot,
 } from '../../src/config/upgrade-discovery.js';
+import { buildActivityBindingSession } from '../../src/config/activity-discovery.js';
 
 function set(overrides = {}) {
   return {
@@ -24,6 +26,20 @@ function set(overrides = {}) {
       ],
     }],
     ...overrides,
+  };
+}
+
+function noSpecialHighRatedSet(overrides = {}) {
+  const base = set();
+  return {
+    ...base,
+    ...overrides,
+    challenges: overrides.challenges || [{
+      ...base.challenges[0],
+      eligibilityRequirements: [
+        { key: 'TEAM_RATING', values: [89], count: -1 },
+      ],
+    }],
   };
 }
 
@@ -59,6 +75,23 @@ function twoBy84Set(overrides = {}) {
 }
 
 describe('dynamic Upgrade discovery', () => {
+  it('classifies Upgrade repeatability while preserving null as legacy unlimited', () => {
+    expect(classifyUpgradeRepeatability({ repeats: null, timesCompleted: 4 })).toMatchObject({
+      repeatability: 'unlimited',
+      completionLimit: null,
+      remainingCompletions: null,
+    });
+    expect(classifyUpgradeRepeatability({ repeats: 4, timesCompleted: 1 })).toMatchObject({
+      repeatability: 'bounded',
+      completionLimit: 4,
+      remainingCompletions: 3,
+    });
+    expect(classifyUpgradeRepeatability({ repeats: undefined, timesCompleted: 0 }).repeatability)
+      .toBe('unknown');
+    expect(classifyUpgradeRepeatability({ repeats: 4, timesCompleted: 9 }).repeatability)
+      .toBe('unknown');
+  });
+
   it('creates a safe dynamic 85x10 Loop from generic policy', () => {
     const result = parseDynamicUpgradeSbcSnapshot({ set: set() });
     expect(result.status).toBe('supported');
@@ -119,7 +152,10 @@ describe('dynamic Upgrade discovery', () => {
   });
 
   it('stages a separate selectable Rolling Loop without changing the generic x10 Loop', () => {
-    const session = buildUpgradeDiscoverySession({ configuredLoops: [], sets: [set()] });
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [set({ repeats: null })],
+    });
     expect(session.discoveredLoops).toHaveLength(1);
     expect(session.discoveredLoops[0]).toMatchObject({
       strategy: 'fillAndVerifySbc',
@@ -150,7 +186,7 @@ describe('dynamic Upgrade discovery', () => {
     ]);
   });
 
-  it('does not stage Rolling for a high-rated x10 whose live special contract is not exactly one', () => {
+  it('does not stage Rolling for a high-rated x10 whose live special contract requires more than one card', () => {
     const session = buildUpgradeDiscoverySession({
       configuredLoops: [],
       sets: [set({
@@ -483,5 +519,326 @@ describe('dynamic Upgrade discovery', () => {
   it('does not expose a completed Upgrade as runnable', () => {
     const result = parseDynamicUpgradeSbcSnapshot({ set: set({ timesCompleted: 5 }) });
     expect(result.status).toBe('completed');
+  });
+
+  it('publishes one 86x10 Rolling loop when both 86x10 and 85x10 are unlimited', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        set({ id: 860, name: '10x 86+ Upgrade', repeats: null }),
+        set({ id: 850, name: '10x 85+ Upgrade', repeats: null }),
+      ],
+    });
+    expect(session.rollingLoops).toHaveLength(1);
+    expect(session.rollingLoops[0]).toMatchObject({
+      id: 'rolling-upgrade-860-86',
+      sbcSetIds: [860],
+      rollingPrimaryComposite: false,
+      rollingPrimaryStages: [expect.objectContaining({ setId: 860, dynamicRewardMinRating: 86 })],
+    });
+    expect(session.suppressedSetIds).toEqual([860, 850]);
+  });
+
+  it('publishes one composite 86 bounded -> 85 unlimited Rolling loop', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        set({ id: 860, name: '10x 86+ Upgrade', repeats: 3, timesCompleted: 1, rewards: [{ type: 'PACK', packId: 3860 }] }),
+        set({ id: 850, name: '10x 85+ Upgrade', repeats: null, rewards: [{ type: 'PACK', packId: 3850 }] }),
+      ],
+    });
+    expect(session.rollingLoops).toHaveLength(1);
+    expect(session.rollingLoops[0]).toMatchObject({
+      id: 'rolling-upgrade-composite-860-850',
+      rollingPrimaryComposite: true,
+      rollingPrimaryStages: [
+        expect.objectContaining({ setId: 860, dynamicRewardMinRating: 86, repeatability: 'bounded', remainingCompletions: 2 }),
+        expect.objectContaining({ setId: 850, dynamicRewardMinRating: 85, repeatability: 'unlimited' }),
+      ],
+    });
+    expect(session.suppressedSetIds).toEqual([860, 850]);
+  });
+
+  it('publishes a composite Rolling loop when the 86x10 stage has no Required Special', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        noSpecialHighRatedSet({
+          id: 860,
+          name: '10x 86+ Upgrade',
+          repeats: 3,
+          timesCompleted: 1,
+          rewards: [{ type: 'PACK', packId: 3860 }],
+        }),
+        set({ id: 850, name: '10x 85+ Upgrade', repeats: null, rewards: [{ type: 'PACK', packId: 3850 }] }),
+      ],
+    });
+
+    expect(session.rollingLoops).toHaveLength(1);
+    expect(session.rollingLoops[0]).toMatchObject({
+      id: 'rolling-upgrade-composite-860-850',
+      rollingPrimaryComposite: true,
+      rollingPrimaryStages: [
+        expect.objectContaining({
+          setId: 860,
+          dynamicRewardMinRating: 86,
+          requiredSpecialCount: 0,
+          allowedSpecialCount: 0,
+        }),
+        expect.objectContaining({
+          setId: 850,
+          dynamicRewardMinRating: 85,
+          requiredSpecialCount: 1,
+          allowedSpecialCount: 1,
+        }),
+      ],
+    });
+  });
+
+  it('matches the live 86x10 TEAM_RATING-only Challenge shape', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        noSpecialHighRatedSet({
+          id: 1423,
+          name: '10x 86+ Upgrade',
+          repeats: 10,
+          timesCompleted: 0,
+          rewards: [{ type: 'PACK', packId: 1089 }],
+          challenges: [{
+            id: 4132,
+            requiredPlayerCount: 11,
+            eligibilityRequirements: [
+              { key: 'TEAM_RATING', values: [89], count: -1 },
+            ],
+          }],
+        }),
+        set({
+          id: 1356,
+          name: '10x 85+ Upgrade',
+          repeats: 0,
+          timesCompleted: 1800,
+          rewards: [{ type: 'PACK', packId: 1082 }],
+          challenges: [{
+            id: 3874,
+            requiredPlayerCount: 11,
+            eligibilityRequirements: [
+              { key: 'TEAM_RATING', values: [84], count: -1 },
+              { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+            ],
+          }],
+        }),
+      ],
+    });
+
+    expect(session.rollingPlan).toMatchObject({
+      status: 'resolved',
+      mode: 'bounded-then-unlimited',
+    });
+    expect(session.rollingLoops[0].rollingPrimaryStages[0]).toMatchObject({
+      setId: 1423,
+      challengeIds: [4132],
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      repeatability: 'bounded',
+      remainingCompletions: 10,
+    });
+  });
+
+  it('falls back to a valid unlimited 85x10 Rolling loop when the composite 86 stage contract is invalid', () => {
+    const invalid86 = set({
+      id: 860,
+      name: '10x 86+ Upgrade',
+      repeats: 3,
+      timesCompleted: 1,
+      rewards: [{ type: 'PACK', packId: 3860 }],
+      challenges: [{
+        ...set().challenges[0],
+        eligibilityRequirements: [
+          { key: 'TEAM_RATING', values: [89], count: -1 },
+          { key: 'PLAYER_RARITY_GROUP', values: [83], count: 2 },
+        ],
+      }],
+    });
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [invalid86, set({ id: 850, name: '10x 85+ Upgrade', repeats: null })],
+    });
+
+    expect(session.rollingLoops).toHaveLength(1);
+    expect(session.rollingLoops[0]).toMatchObject({
+      id: 'rolling-upgrade-850-85',
+      rollingPrimaryComposite: false,
+      sbcSetIds: [850],
+    });
+    expect(session.rollingPlan).toMatchObject({ status: 'resolved', mode: 'single' });
+    expect(session.suppressedSetIds).toEqual([850]);
+  });
+
+  it('keeps composite stage identities after activity binding', async () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        set({ id: 860, name: '10x 86+ Upgrade', repeats: 3, timesCompleted: 1, rewards: [{ type: 'PACK', packId: 3860 }] }),
+        set({ id: 850, name: '10x 85+ Upgrade', repeats: null, rewards: [{ type: 'PACK', packId: 3850 }] }),
+      ],
+    });
+    const activitySession = buildActivityBindingSession({
+      sets: [
+        set({ id: 860, name: '10x 86+ Upgrade', repeats: 3, timesCompleted: 1 }),
+        set({ id: 850, name: '10x 85+ Upgrade', repeats: null }),
+      ],
+      configuredLoops: session.rollingLoops,
+      additionalActivities: collectScannedUpgradeActivities(session.results),
+    });
+    const bound = activitySession.loopOverrides[session.rollingLoops[0].id] || session.rollingLoops[0];
+    expect(bound.rollingPrimaryStages.map((stage) => stage.setId)).toEqual([860, 850]);
+    expect(bound.rollingPrimaryStages.map((stage) => stage.rewardPackIds[0])).toEqual([3860, 3850]);
+  });
+
+  it('falls back to 85 only after a bounded 86x10 is exhausted', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        set({ id: 860, name: '10x 86+ Upgrade', repeats: 3, timesCompleted: 3 }),
+        set({ id: 850, name: '10x 85+ Upgrade', repeats: null }),
+      ],
+    });
+    expect(session.rollingLoops).toHaveLength(1);
+    expect(session.rollingLoops[0]).toMatchObject({ id: 'rolling-upgrade-850-85', sbcSetIds: [850] });
+  });
+
+  it('does not expose a bounded 85x10 as a standalone Rolling loop', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [set({ id: 850, name: '10x 85+ Upgrade', repeats: 3, timesCompleted: 0 })],
+    });
+    expect(session.discoveredLoops).toHaveLength(1);
+    expect(session.rollingLoops).toEqual([]);
+  });
+
+  it('does not expose an unknown-repeatability 85x10 as a standalone Rolling loop', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [set({ id: 850, name: '10x 85+ Upgrade', repeats: undefined })],
+    });
+    expect(session.rollingLoops).toEqual([]);
+    expect(session.rollingPlan.reason).toContain('no confirmed unlimited Rolling stage');
+  });
+
+  it('does not choose between duplicate 85x10 candidates', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        set({ id: 850, name: '10x 85+ Upgrade', repeats: null }),
+        set({ id: 851, name: '10x 85+ Upgrade', repeats: null }),
+      ],
+    });
+    expect(session.rollingLoops).toEqual([]);
+    expect(session.rollingPlan.reason).toContain('multiple 85x10 candidates are ambiguous');
+  });
+
+  it('falls back to verified unlimited 85 when the 86 repeatability is unknown', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        set({ id: 860, name: '10x 86+ Upgrade', repeats: undefined }),
+        set({ id: 850, name: '10x 85+ Upgrade', repeats: null }),
+      ],
+    });
+    expect(session.rollingLoops).toHaveLength(1);
+    expect(session.rollingLoops[0]).toMatchObject({
+      id: 'rolling-upgrade-850-85',
+      rollingPrimaryComposite: false,
+      sbcSetIds: [850],
+    });
+    expect(session.rollingPlan).toMatchObject({
+      status: 'resolved',
+      mode: 'single',
+      fallbackFrom: '86x10',
+      fallbackReason: '86x10 repeatability is unknown',
+    });
+  });
+
+  it('falls back to verified unlimited 85 when an 86x10 candidate has incomplete identity', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        set({
+          id: 860,
+          name: '10x 86+ Upgrade',
+          repeats: 3,
+          timesCompleted: 0,
+          challenges: [{ ...set().challenges[0], id: null }],
+        }),
+        set({ id: 850, name: '10x 85+ Upgrade', repeats: null }),
+      ],
+    });
+    expect(session.rollingLoops).toHaveLength(1);
+    expect(session.rollingLoops[0]).toMatchObject({
+      id: 'rolling-upgrade-850-85',
+      rollingPrimaryComposite: false,
+      sbcSetIds: [850],
+    });
+    expect(session.rollingPlan).toMatchObject({
+      status: 'resolved',
+      mode: 'single',
+      fallbackFrom: '86x10',
+      fallbackReason: expect.stringContaining('86x10 Set #860 unsupported'),
+    });
+  });
+
+  it('falls back to one verified 85 when multiple 86x10 candidates are ambiguous', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        set({ id: 860, name: '10x 86+ Upgrade', repeats: 3, timesCompleted: 0 }),
+        set({ id: 861, name: '10x 86+ Upgrade', repeats: 2, timesCompleted: 0 }),
+        set({ id: 850, name: '10x 85+ Upgrade', repeats: null }),
+      ],
+    });
+
+    expect(session.rollingLoops).toHaveLength(1);
+    expect(session.rollingLoops[0]).toMatchObject({ id: 'rolling-upgrade-850-85', sbcSetIds: [850] });
+    expect(session.rollingPlan).toMatchObject({
+      status: 'resolved',
+      fallbackReason: 'multiple 86x10 candidates are ambiguous',
+    });
+  });
+
+  it('does not use a valid 86 candidate to bypass incomplete 85 identity evidence', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [
+        set({ id: 860, name: '10x 86+ Upgrade', repeats: null }),
+        set({
+          id: 850,
+          name: '10x 85+ Upgrade',
+          repeats: null,
+          challenges: [{ ...set().challenges[0], id: null }],
+        }),
+      ],
+    });
+
+    expect(session.rollingLoops).toEqual([]);
+    expect(session.rollingPlan).toMatchObject({
+      status: 'unavailable',
+      reason: expect.stringContaining('85x10 Set #850 unsupported'),
+    });
+  });
+
+  it('rejects duplicate Challenge identity inside a Rolling candidate', () => {
+    const duplicateChallenge = set({
+      id: 850,
+      name: '10x 85+ Upgrade',
+      repeats: null,
+      challenges: [
+        set().challenges[0],
+        { ...set().challenges[0] },
+      ],
+    });
+    const session = buildUpgradeDiscoverySession({ configuredLoops: [], sets: [duplicateChallenge] });
+    expect(session.rollingLoops).toEqual([]);
+    expect(session.rollingPlan.reason).toContain('identity is incomplete');
   });
 });

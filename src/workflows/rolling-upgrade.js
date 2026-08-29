@@ -638,6 +638,24 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     let leftoverRecoveryBatchActive = false;
     let leftoverRecoveryRewardsExhausted = false;
     let shortageProvisionsPacksOpened = 0;
+    let refreshedPrimaryStage = null;
+
+    // Composite Rolling loops re-read the live Set progress at the start of
+    // every iteration. The callback must only switch after the previous
+    // iteration has reconciled its submission, so a bounded 86x10 reward can
+    // never be replaced by its 85x10 fallback prematurely.
+    if (typeof options.refreshPrimaryStage === 'function') {
+      refreshedPrimaryStage = await options.refreshPrimaryStage({ result, iteration: result.iterations });
+      if (isStopped(refreshedPrimaryStage)) return finish('stopped', refreshedPrimaryStage, 'stopped while refreshing the active Rolling stage');
+      if (isBlocked(refreshedPrimaryStage)) {
+        return finish(
+          refreshedPrimaryStage?.status === 'unavailable' ? 'unavailable' : 'blocked',
+          refreshedPrimaryStage,
+          'active Rolling stage could not be resolved',
+          reasonCode(refreshedPrimaryStage) || 'PRIMARY_STAGE_UNAVAILABLE',
+        );
+      }
+    }
 
     const resumedPrimary = resumedPrimaryPending;
     await enter(ROLLING_UPGRADE_PHASES.BOOTSTRAP_OR_FIND_REWARD, { resumedPrimary });
@@ -646,7 +664,12 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       : await options.findPrimaryPack({ result, iteration: result.iterations });
     if (isStopped(packResult)) return finish('stopped', packResult, 'stopped while finding primary reward');
     if (packResult?.status === 'blocked' || packResult?.status === 'failed') {
-      return finish('blocked', packResult, 'primary reward lookup failed', 'PRIMARY_REWARD_LOOKUP_FAILED');
+      return finish(
+        'blocked',
+        packResult,
+        'primary reward lookup failed',
+        reasonCode(packResult) || 'PRIMARY_REWARD_LOOKUP_FAILED',
+      );
     }
     const pack = packResult?.pack || (
       packResult && !packResult.status && !packResult.reason ? packResult : null
@@ -671,6 +694,29 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       }
       result.packsOpened++;
       progressed = true;
+
+      // A submitted reward is opened before the next squad is planned. Re-read
+      // the live Set at this boundary so an exhausted bounded 86x10 cannot
+      // receive one extra submission before switching to 85x10.
+      if (refreshedPrimaryStage?.pendingReward === true
+        && typeof options.refreshPrimaryStage === 'function') {
+        const postRewardStage = await options.refreshPrimaryStage({
+          result,
+          iteration: result.iterations,
+          afterPendingReward: true,
+        });
+        if (isStopped(postRewardStage)) {
+          return finish('stopped', postRewardStage, 'stopped while refreshing the Rolling stage after its pending reward');
+        }
+        if (isBlocked(postRewardStage)) {
+          return finish(
+            postRewardStage?.status === 'unavailable' ? 'unavailable' : 'blocked',
+            postRewardStage,
+            'active Rolling stage could not be resolved after its pending reward',
+            reasonCode(postRewardStage) || 'PRIMARY_STAGE_UNAVAILABLE',
+          );
+        }
+      }
 
       await enter(ROLLING_UPGRADE_PHASES.CLASSIFY_OPENED_ITEMS);
       const classified = await options.classifyOpenedItems?.({ opened, pack, result, iteration: result.iterations })
