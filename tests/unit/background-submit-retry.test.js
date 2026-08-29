@@ -35,9 +35,15 @@ describe('background submit retry helpers', () => {
     expect(hasItemViolationConflict({ status: 409, data: { itemViolations: [] } })).toBe(false);
     expect(hasItemViolationConflict({ status: 429, data: { itemViolations: [{ itemIds: [1] }] } })).toBe(false);
     expect(hasItemViolationConflict({ status: 409, data: { itemViolations: [{ itemIds: [1] }] } }, '429')).toBe(true);
-    const conflict = { status: 409, data: { itemViolations: [{ itemIds: [1] }] } };
-    expect(shouldStopForProtectedItemViolation({ protectionEnabled: false, result: conflict })).toBe(false);
-    expect(shouldStopForProtectedItemViolation({ protectionEnabled: true, result: conflict })).toBe(true);
+    const activeSquad = { status: 409, data: { itemViolations: [{ name: 'ACTIVE_SQUAD', itemIds: [1] }] } };
+    const evolution = { status: 409, data: { itemViolations: [{ name: 'Evo', itemIds: [1] }] } };
+    const unknown = { status: 409, data: { itemViolations: [{ name: 'NEW_EA_WARNING', itemIds: [1] }] } };
+    const unnamed = { status: 409, data: { itemViolations: [{ itemIds: [1] }] } };
+    expect(shouldStopForProtectedItemViolation({ protectionEnabled: false, result: activeSquad })).toBe(false);
+    expect(shouldStopForProtectedItemViolation({ protectionEnabled: true, result: activeSquad })).toBe(true);
+    expect(shouldStopForProtectedItemViolation({ protectionEnabled: true, result: evolution })).toBe(false);
+    expect(shouldStopForProtectedItemViolation({ protectionEnabled: true, result: unknown })).toBe(true);
+    expect(shouldStopForProtectedItemViolation({ protectionEnabled: true, result: unnamed })).toBe(true);
   });
 
   it('recognizes conflicts, rate limits, and transient EA service codes', () => {
@@ -107,6 +113,23 @@ describe('background submit retry helpers', () => {
       reloadChallenge: false,
       violationNames: ['ACTIVE_SQUAD', 'ANOTHER_WARNING'],
       violationItemIds: [101, 102, 103],
+      violations: [
+        {
+          name: 'ACTIVE_SQUAD',
+          normalizedName: 'ACTIVE_SQUAD',
+          kind: 'active-squad',
+          itemIds: [101, 102],
+        },
+        {
+          name: 'ANOTHER_WARNING',
+          normalizedName: 'ANOTHER_WARNING',
+          kind: 'unknown',
+          itemIds: [103],
+        },
+      ],
+      activeSquadItemIds: [101, 102],
+      evolutionItemIds: [],
+      unknownItemIds: [103],
     });
   });
 
@@ -125,6 +148,15 @@ describe('background submit retry helpers', () => {
       reloadChallenge: false,
       violationNames: ['ACTIVE_SQUAD'],
       violationItemIds: [102],
+      violations: [{
+        name: 'ACTIVE_SQUAD',
+        normalizedName: 'ACTIVE_SQUAD',
+        kind: 'active-squad',
+        itemIds: [102],
+      }],
+      activeSquadItemIds: [102],
+      evolutionItemIds: [],
+      unknownItemIds: [],
     });
     expect(inspectItemViolationConflict({
       detail: '409',
@@ -134,6 +166,40 @@ describe('background submit retry helpers', () => {
         data: { itemViolations: [{ name: 'ACTIVE_SQUAD', itemIds: [999] }] },
       },
     })).toMatchObject({ reason: 'foreign-item-violation', violationItemIds: [] });
+  });
+
+  it('preserves the exact item IDs for mixed Active Squad and Evo warnings', () => {
+    expect(inspectItemViolationConflict({
+      detail: '409',
+      submittedItemIds: [101, 102, 103],
+      result: {
+        status: 409,
+        data: {
+          itemViolations: [
+            { name: 'ACTIVE_SQUAD', itemIds: [101] },
+            { name: 'Evo', itemIds: [102, 103] },
+          ],
+        },
+      },
+    })).toMatchObject({
+      violations: [
+        {
+          name: 'ACTIVE_SQUAD',
+          normalizedName: 'ACTIVE_SQUAD',
+          kind: 'active-squad',
+          itemIds: [101],
+        },
+        {
+          name: 'Evo',
+          normalizedName: 'EVO',
+          kind: 'evolution',
+          itemIds: [102, 103],
+        },
+      ],
+      activeSquadItemIds: [101],
+      evolutionItemIds: [102, 103],
+      unknownItemIds: [],
+    });
   });
 
   it.each([

@@ -1,3 +1,5 @@
+import { normalizeRollingStorageRecoveryPriority } from '../config/runtime-options.js';
+
 export const ROLLING_UPGRADE_PHASES = Object.freeze({
   PREFLIGHT: 'PREFLIGHT',
   INDEX_INVENTORY: 'INDEX_INVENTORY',
@@ -125,9 +127,9 @@ export async function runRollingUpgradeWorkflow(options = {}) {
   const surplusCraftingEnabled = options.surplusCraftingEnabled === true;
   const provisionsShortageRecoveryEnabled = options.provisionsShortageRecoveryEnabled === true;
   const requiredSpecialRecoveryEnabled = options.requiredSpecialRecoveryEnabled === true;
-  const storageRecoveryPriority = options.storageRecoveryPriority === 'provisions'
-    ? 'provisions'
-    : 'storage-pressure';
+  const storageRecoveryPriority = normalizeRollingStorageRecoveryPriority(
+    options.storageRecoveryPriority,
+  );
   const shortageProvisionsPackLimit = boundedPositive(
     options.shortageProvisionsPackLimit,
     DEFAULT_SHORTAGE_PROVISIONS_PACK_LIMIT,
@@ -172,6 +174,14 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     storageMaintenance: 0,
   };
   let duplicateTransactionReplans = 0;
+  // A pressure event may span several replans and recovery-reward boundaries.
+  // In hybrid mode, remember the one Provisions attempt until Storage routing
+  // is confirmed ready so repeated replans cannot loop on Provisions forever.
+  let pressureEvent = {
+    type: null,
+    provisionsAttempted: false,
+    provisions: null,
+  };
 
   function rememberReceipt(receipt) {
     if (!receipt || (receipt.status === 'replan' && receipt.submitted !== true)) return;
@@ -391,62 +401,109 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     };
   }
 
-  // Both recovery paths can release Storage pressure. The configured first
-  // choice is attempted first, while the other path remains a fallback when
-  // the preferred path is unavailable or cannot make progress.
+  function resetPressureEvent(type = null) {
+    if (type !== null && pressureEvent.type !== type) return;
+    pressureEvent = { type: null, provisionsAttempted: false, provisions: null };
+  }
+
+  // Storage recovery has three explicit modes. The hybrid mode is bounded to
+  // one Provisions attempt for a continuous pressure event; it only moves to
+  // Storage Pressure after a fresh blocked check, or immediately when
+  // Provisions is unavailable/skipped. Hard failures remain terminal.
   async function recoverStorageBlocked(context = {}) {
-    const order = storageRecoveryPriority === 'provisions'
-      ? ['provisions', 'storageSink']
-      : ['storageSink', 'provisions'];
-    let last = null;
-    let lastKind = null;
-    let attempted = false;
-    let firstAttemptedValue = null;
-    let lastAttemptedValue = null;
-    let storageSinkAttempted = false;
-    for (const kind of order) {
-      const attemptContext = {
-        ...context,
-        ...(kind === 'provisions' && context.provisionsTrigger
-          ? { trigger: context.provisionsTrigger }
-          : {}),
-        ...(kind === 'storageSink' && lastKind === 'provisions' ? { provisions: last } : {}),
-        ...(kind === 'provisions' && lastKind === 'storageSink' ? { storageSink: last } : {}),
+    const pressureEventType = context.source === 'primary-rating-excess'
+      ? 'rating-excess'
+      : 'storage-routing';
+    if (pressureEvent.type !== pressureEventType) {
+      pressureEvent = {
+        type: pressureEventType,
+        provisionsAttempted: false,
+        provisions: null,
       };
-      const actionAttempted = kind === 'provisions'
-        ? provisionsShortageRecoveryEnabled === true
-          && typeof options.recoverProvisions === 'function'
-        : options.storageSinkEnabled === true
-          && typeof options.recoverStorageSink === 'function';
-      attempted = attempted || actionAttempted;
-      if (kind === 'storageSink') storageSinkAttempted = storageSinkAttempted || actionAttempted;
-      const value = kind === 'provisions'
-        ? await recoverProvisions(attemptContext)
-        : options.storageSinkEnabled === true
-          ? await recoverStorageSink(attemptContext)
-          : { status: 'skipped', reason: 'Storage pressure recovery is disabled in Settings' };
-      if (actionAttempted) {
-        if (firstAttemptedValue === null) firstAttemptedValue = value;
-        lastAttemptedValue = value;
+    }
+    const storageEnabled = options.storageSinkEnabled === true
+      && typeof options.recoverStorageSink === 'function';
+    const provisionsEnabled = provisionsShortageRecoveryEnabled === true
+      && typeof options.recoverProvisions === 'function';
+    const runStorage = async (provisions = null) => {
+      const value = storageEnabled
+        ? await recoverStorageSink({
+          ...context,
+          ...(provisions ? { provisions } : {}),
+        })
+        : { status: 'skipped', reason: 'Storage pressure recovery is disabled in Settings' };
+      return {
+        value,
+        attempted: storageEnabled,
+        storageSinkAttempted: storageEnabled,
+      };
+    };
+
+    if (storageRecoveryPriority === 'storage-pressure-only') {
+      const storage = await runStorage();
+      if (isProgressed(storage.value)) return { progressed: true, value: storage.value, kind: 'storageSink' };
+      if (isStopped(storage.value)
+        || storage.value?.status === 'planned'
+        || reasonCode(storage.value) === 'STORAGE_SINK_SELECTION_REQUIRED') {
+        return { terminal: storage.value, ...storage };
       }
-      if (isProgressed(value)) return { progressed: true, value, kind };
-      if (isStopped(value)
-        || value?.status === 'planned'
-        || reasonCode(value) === 'STORAGE_SINK_SELECTION_REQUIRED') {
-        return { terminal: value, value, kind, attempted, storageSinkAttempted };
+      return storage;
+    }
+
+    if (storageRecoveryPriority === 'provisions-only') {
+      const provisions = provisionsEnabled
+        ? await recoverProvisions({
+          ...context,
+          ...(context.provisionsTrigger ? { trigger: context.provisionsTrigger } : {}),
+        })
+        : { status: 'skipped', reason: 'Provisions shortage recovery is disabled in Settings' };
+      if (isProgressed(provisions)) return { progressed: true, value: provisions, kind: 'provisions' };
+      if (isStopped(provisions) || provisions?.status === 'planned') {
+        return { terminal: provisions, value: provisions, attempted: provisionsEnabled, storageSinkAttempted: false };
       }
-      last = value;
-      lastKind = kind;
+      return { value: provisions, attempted: provisionsEnabled, storageSinkAttempted: false };
+    }
+
+    let provisions = pressureEvent.provisions;
+    if (!pressureEvent.provisionsAttempted) {
+      pressureEvent.provisionsAttempted = true;
+      provisions = provisionsEnabled
+        ? await recoverProvisions({
+          ...context,
+          ...(context.provisionsTrigger ? { trigger: context.provisionsTrigger } : {}),
+        })
+        : { status: 'skipped', reason: 'Provisions shortage recovery is disabled in Settings' };
+      pressureEvent.provisions = provisions;
+      if (isProgressed(provisions)) return { progressed: true, value: provisions, kind: 'provisions' };
+      if (isStopped(provisions) || provisions?.status === 'planned') {
+        return { terminal: provisions, value: provisions, attempted: provisionsEnabled, storageSinkAttempted: false };
+      }
+      const provisionsStatus = String(provisions?.status || '');
+      if (!['unavailable', 'skipped'].includes(provisionsStatus)) {
+        return { terminal: provisions, value: provisions, attempted: provisionsEnabled, storageSinkAttempted: false };
+      }
+    }
+
+    const storage = await runStorage(provisions);
+    if (isProgressed(storage.value)) return { progressed: true, value: storage.value, kind: 'storageSink' };
+    if (isStopped(storage.value)
+      || storage.value?.status === 'planned'
+      || reasonCode(storage.value) === 'STORAGE_SINK_SELECTION_REQUIRED') {
+      return { terminal: storage.value, ...storage };
     }
     return {
-      value: attempted
-        ? storageRecoveryPriority === 'storage-pressure'
-          ? (firstAttemptedValue || last)
-          : (lastAttemptedValue || firstAttemptedValue)
-        : null,
-      attempted,
-      storageSinkAttempted,
+      ...storage,
+      value: storage.value || provisions,
     };
+  }
+
+  function storageRecoveryFailureValue(recovery, original) {
+    const value = recovery.terminal || recovery.value || original;
+    const preserveOriginalStorageBlock = storageRecoveryPriority !== 'provisions-only'
+      && options.storageSinkEnabled !== true
+      && !recovery.storageSinkAttempted
+      && ['unavailable', 'skipped'].includes(String(value?.status || ''));
+    return preserveOriginalStorageBlock ? original : value;
   }
 
   async function recoverBlockedRewardStorage(reward, context = {}) {
@@ -459,12 +516,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       source: context.source || 'recovery-reward-pre-open',
     });
     if (recovery.progressed) return { matched: true, progressed: true };
-    const value = recovery.terminal || recovery.value || reward;
-    const failureValue = options.storageSinkEnabled !== true
-      && !recovery.storageSinkAttempted
-      && ['unavailable', 'skipped'].includes(String(value?.status || ''))
-      ? reward
-      : value;
+    const failureValue = storageRecoveryFailureValue(recovery, reward);
     return {
       matched: true,
       failure: finishRecoveryFailure(
@@ -807,11 +859,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
         }
         const recovery = await recoverStorageBlocked({ trigger: 'storage-pressure', storage });
         if (recovery.progressed) continue;
-        const failure = options.storageSinkEnabled !== true
-          && !recovery.storageSinkAttempted
-          && ['unavailable', 'skipped'].includes(String(recovery.value?.status || ''))
-          ? storage
-          : recovery.terminal || recovery.value || storage;
+        const failure = storageRecoveryFailureValue(recovery, storage);
         if (isStopped(failure) || isBlocked(failure) || failure?.status === 'planned') {
           return finishRecoveryFailure(
             failure,
@@ -825,6 +873,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           storageCode,
         );
       }
+      resetPressureEvent('storage-routing');
 
       if (!primaryDuplicateReserveResolved) {
         const recoveryState = await options.readRecoveryState?.({
@@ -917,11 +966,15 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       result.lastPlan = planned || null;
       if (isStopped(planned)) return finish('stopped', planned, 'stopped while planning the primary squad');
       if (planned?.ok || planned?.status === 'ready') {
+        resetPressureEvent();
         plan = planned;
         break;
       }
 
       const planCode = reasonCode(planned) || 'PRIMARY_SQUAD_INFEASIBLE';
+      if (planCode !== 'SQUAD_RATING_EXCESS') {
+        resetPressureEvent();
+      }
       if (planCode === 'REQUIRED_SPECIAL_SHORTAGE') {
         if (!requiredSpecialRecoveryEnabled) {
           return finish(
@@ -1006,13 +1059,10 @@ export async function runRollingUpgradeWorkflow(options = {}) {
         const recovery = await recoverStorageBlocked({
           trigger: 'storage-pressure',
           storage: planned,
+          source: 'primary-plan-storage',
         });
         if (recovery.progressed) continue;
-        const failure = options.storageSinkEnabled !== true
-          && !recovery.storageSinkAttempted
-          && ['unavailable', 'skipped'].includes(String(recovery.value?.status || ''))
-          ? planned
-          : recovery.terminal || recovery.value || planned;
+        const failure = storageRecoveryFailureValue(recovery, planned);
         return finishRecoveryFailure(
           failure?.status ? failure : planned,
           'primary-pack duplicate Storage recovery failed',
@@ -1027,7 +1077,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           shortageProvisionsPacksOpened = 0;
           continue;
         }
-        if (planCode === 'SQUAD_RATING_EXCESS' && options.storageSinkEnabled === true) {
+        if (planCode === 'SQUAD_RATING_EXCESS') {
           const recovery = await recoverStorageBlocked({
             trigger: 'storage-pressure',
             provisionsTrigger: 'primary-fodder-shortage',

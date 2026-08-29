@@ -111,6 +111,7 @@ export async function loadUserscript(options = {}) {
       validateRatingSbcModelAgainstItems,
       inspectSbcItems,
       isRatingSbcCandidateSafe,
+      validateRollingItemViolationOverride,
       rollingDuplicateMaterializationPair,
       duplicateSwapSelectionSnapshot,
       prepareRollingUntradeableDuplicateSwaps,

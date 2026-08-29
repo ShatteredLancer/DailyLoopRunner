@@ -72,7 +72,11 @@ export function shouldStopForProtectedItemViolation({
   result = null,
   detail = '',
 } = {}) {
-  return protectionEnabled === true && hasItemViolationConflict(result, detail);
+  if (protectionEnabled !== true || !hasItemViolationConflict(result, detail)) return false;
+  return result.data.itemViolations.some((violation) => {
+    const kind = classifyItemViolationName(violation?.name);
+    return kind === 'active-squad' || kind === 'unknown';
+  });
 }
 
 function positiveItemId(value) {
@@ -88,7 +92,26 @@ function rejectedItemViolationOverride(reason) {
     reloadChallenge: false,
     violationNames: [],
     violationItemIds: [],
+    violations: [],
+    activeSquadItemIds: [],
+    evolutionItemIds: [],
+    unknownItemIds: [],
   };
+}
+
+function normalizeItemViolationName(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+export function classifyItemViolationName(value) {
+  const name = normalizeItemViolationName(value);
+  if (name === 'ACTIVE_SQUAD' || name === 'ACTIVESQUAD') return 'active-squad';
+  if (name === 'EVO' || name === 'EVOLUTION') return 'evolution';
+  return 'unknown';
 }
 
 export function inspectItemViolationConflict({
@@ -109,6 +132,7 @@ export function inspectItemViolationConflict({
 
   const violationItemIds = [];
   const violationNames = [];
+  const structuredViolations = [];
   for (const violation of violations) {
     if (!violation || typeof violation !== 'object' || !Array.isArray(violation.itemIds) || !violation.itemIds.length) {
       return rejectedItemViolationOverride('invalid-item-violations');
@@ -121,7 +145,17 @@ export function inspectItemViolationConflict({
     violationItemIds.push(...ids);
     const name = String(violation.name || '').trim();
     if (name) violationNames.push(name);
+    structuredViolations.push({
+      name,
+      normalizedName: normalizeItemViolationName(name),
+      kind: classifyItemViolationName(name),
+      itemIds: [...new Set(ids)],
+    });
   }
+
+  const idsForKind = (kind) => [...new Set(structuredViolations
+    .filter((violation) => violation.kind === kind)
+    .flatMap((violation) => violation.itemIds))];
 
   return {
     retry: false,
@@ -130,6 +164,10 @@ export function inspectItemViolationConflict({
     reloadChallenge: false,
     violationNames: [...new Set(violationNames)],
     violationItemIds: [...new Set(violationItemIds)],
+    violations: structuredViolations,
+    activeSquadItemIds: idsForKind('active-squad'),
+    evolutionItemIds: idsForKind('evolution'),
+    unknownItemIds: idsForKind('unknown'),
   };
 }
 
@@ -164,5 +202,9 @@ export function planItemViolationOverride({
     reloadChallenge: false,
     violationNames: inspected.violationNames,
     violationItemIds: inspected.violationItemIds,
+    violations: inspected.violations,
+    activeSquadItemIds: inspected.activeSquadItemIds,
+    evolutionItemIds: inspected.evolutionItemIds,
+    unknownItemIds: inspected.unknownItemIds,
   };
 }

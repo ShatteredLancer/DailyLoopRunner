@@ -78,6 +78,7 @@ import {
   assertRollingRuntimePreflight,
   loopUsesRounds,
   normalizePickRuntimeOptions,
+  rollingStorageRecoveryModeLabel,
   resolveRuntimeQuantity,
   shouldAutoSelectPlayerPick,
 } from './config/runtime-options.js';
@@ -8403,19 +8404,22 @@ function updateLoopControls() {
           packInventory,
         });
         lastDetail = serviceResultErrorText(result) || result?.status || 'unknown';
+        const inspected = inspectItemViolationConflict({
+          detail: lastDetail,
+          result,
+          submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean),
+        });
         let protectedConflictResolution = null;
         if (shouldStopForProtectedItemViolation({
           protectionEnabled: options.protectActiveSquadPlayers,
           result,
           detail: lastDetail,
         })) {
-          const inspected = inspectItemViolationConflict({
-            detail: lastDetail,
-            result,
-            submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean),
-          });
           if (inspected.reason !== 'item-violations') {
             fail(`${label}: Active Squad conflict response failed closed (${inspected.reason}); no skipValidation confirmation was sent`);
+          }
+          if (inspected.unknownItemIds.length) {
+            fail(`${label}: unknown EA item violation warning(s) ${inspected.violationNames.join('/') || 'unnamed'}; no skipValidation confirmation was sent`);
           }
           if (typeof options.resolveProtectedItemViolation !== 'function') {
             fail(`${label}: Active Squad protection stopped submission after EA reported ${inspected.violationItemIds.length} item conflict(s); no Rolling replacement handler is available`);
@@ -8424,8 +8428,11 @@ function updateLoopControls() {
             label,
             result,
             players,
-            violationNames: inspected.violationNames,
-            violationItemIds: inspected.violationItemIds,
+            violationNames: inspected.violations
+              .filter((violation) => violation.kind === 'active-squad')
+              .map((violation) => violation.name),
+            violationItemIds: inspected.activeSquadItemIds,
+            violations: inspected.violations,
           });
           if (protectedConflictResolution?.action === 'replan') {
             return {
@@ -8442,7 +8449,12 @@ function updateLoopControls() {
         }
         const overridePlan = planItemViolationOverride({
           allowOverride: options.allowItemViolationOverride === true
-            && (options.protectActiveSquadPlayers !== true || protectedConflictResolution?.action === 'override'),
+            && (options.protectActiveSquadPlayers !== true
+              || protectedConflictResolution?.action === 'override'
+              || (inspected.reason === 'item-violations'
+                && inspected.activeSquadItemIds.length === 0
+                && inspected.unknownItemIds.length === 0
+                && inspected.evolutionItemIds.length > 0)),
           attempt,
           maxAttempts,
           detail: lastDetail,
@@ -8451,6 +8463,44 @@ function updateLoopControls() {
           skipValidation,
         });
         if (overridePlan.retry) {
+          let revalidation = null;
+          if (typeof options.revalidateSubmission !== 'function') {
+            fail(`${label}: item violation confirmation has no submission revalidation callback; no skipValidation confirmation was sent`);
+          }
+          try {
+            revalidation = await options.revalidateSubmission();
+          } catch (error) {
+            fail(`${label}: submission revalidation before skipValidation confirmation failed: ${error?.message || error}`);
+          }
+          if (revalidation?.ok === false) {
+            fail(`${label}: submission revalidation before skipValidation confirmation was rejected: ${revalidation.reason || 'unknown reason'}`);
+          }
+          const originalPlayerIds = players
+            .map((item) => Number(item?.id || 0))
+            .filter(Boolean)
+            .sort((left, right) => left - right);
+          const revalidatedPlayerIds = (revalidation?.players?.length ? revalidation.players : players)
+            .map((item) => Number(item?.id || 0))
+            .filter(Boolean)
+            .sort((left, right) => left - right);
+          if (originalPlayerIds.length !== revalidatedPlayerIds.length
+            || originalPlayerIds.some((id, index) => id !== revalidatedPlayerIds[index])) {
+            fail(`${label}: submission revalidation changed the saved squad item IDs; no skipValidation confirmation was sent`);
+          }
+          if (typeof options.validateItemViolationOverride !== 'function') {
+            fail(`${label}: item violation confirmation has no exact-entity validator; no skipValidation confirmation was sent`);
+          }
+          const validation = await options.validateItemViolationOverride({
+            label,
+            result,
+            players: revalidation?.players?.length ? revalidation.players : players,
+            violations: inspected.violations,
+            violationItemIds: inspected.violationItemIds,
+            evolutionItemIds: inspected.evolutionItemIds,
+          });
+          if (validation?.ok === false) {
+            fail(`${label}: item violation confirmation failed closed: ${validation.reason || 'unsafe entity'}`);
+          }
           const forcedOptions = { skipValidation: true, chemistryEnabled };
           const names = overridePlan.violationNames.join('/') || 'unnamed warning';
           log(`${label}: EA rejected ${overridePlan.violationItemIds.length} submitted item(s) with ${names}; confirming the same saved squad once with skipValidation:true`);
@@ -9646,7 +9696,10 @@ function updateLoopControls() {
     const storageSink = options.rollingStorageSinkMode === 'selected'
       ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ''}`.trim()
       : options.rollingStorageSinkMode;
-    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Storage recovery priority ${options.rollingStorageRecoveryPriority === 'provisions' ? 'Provisions-first' : 'Storage-Pressure-first'}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Club current-pool Provisions ${options.rollingAllowClubCurrentPoolSpecialsForProvisions && !options.rollingProtectAllClubNonTotwSpecials ? 'last-resort allowed' : 'off'}; Storage Pressure Club normal-gold boosters ${options.rollingStoragePressureClubBoostersEnabled ? `enabled (87-${options.rollingProvisionsMaxRating})` : 'off'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
+    const storageRecoveryMode = rollingStorageRecoveryModeLabel(
+      options.rollingStorageRecoveryPriority,
+    );
+    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Pressure relief strategy ${storageRecoveryMode}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Club current-pool Provisions ${options.rollingAllowClubCurrentPoolSpecialsForProvisions && !options.rollingProtectAllClubNonTotwSpecials ? 'last-resort allowed' : 'off'}; Storage Pressure Club normal-gold boosters ${options.rollingStoragePressureClubBoostersEnabled ? `enabled (87-${options.rollingProvisionsMaxRating})` : 'off'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
     renderCurrentSelectionPolicySummary();
     return options;
   }
@@ -10985,6 +11038,7 @@ function updateLoopControls() {
             ? context.savedPlayers
             : context.players || [];
           const configuredConflictResolver = options.backgroundSubmitOptions?.resolveProtectedItemViolation;
+          const configuredItemViolationValidator = options.backgroundSubmitOptions?.validateItemViolationOverride;
           const backgroundResult = await submitRatingSbcInBackground(
             context.set,
             context.challenge,
@@ -10994,6 +11048,10 @@ function updateLoopControls() {
               ...(typeof configuredConflictResolver === 'function' ? {
                 resolveProtectedItemViolation: (conflict) => configuredConflictResolver(conflict, context),
               } : {}),
+              ...(typeof configuredItemViolationValidator === 'function' ? {
+                validateItemViolationOverride: (conflict) => configuredItemViolationValidator(conflict, context),
+              } : {}),
+              revalidateSubmission: context.revalidateSubmission,
               players: submittedPlayers,
             },
           );
@@ -14698,6 +14756,11 @@ function updateLoopControls() {
                 model: null,
               },
             ),
+            validateItemViolationOverride: (conflict) => validateRollingItemViolationOverride(
+              activeDef,
+              runtime,
+              conflict,
+            ),
             allowKnownRewardFallback: Number(activeDef.dynamicChallengeCount || 1) <= 1,
             failureInventoryDiagnostic: ({ players }) => (
               rollingBackgroundSubmitInventoryDiagnostic(runtime, players)
@@ -15110,6 +15173,12 @@ function updateLoopControls() {
                 model: fill.model,
               },
             ),
+            validateItemViolationOverride: (conflict) => validateRollingItemViolationOverride(
+              loopDef,
+              runtime,
+              conflict,
+            ),
+            revalidateSubmission: context.revalidateSubmission,
             allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
             failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
               rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
@@ -17525,6 +17594,145 @@ function updateLoopControls() {
     )) || null;
   }
 
+  function rollingItemViolationEntityDiagnostic(context = {}, records = []) {
+    const definitionIds = [...new Set(records
+      .map((record) => Number(record?.item?.definitionId || 0))
+      .filter(Boolean))];
+    const piles = Object.fromEntries(
+      ['unassigned', 'storage', 'transfer', 'club']
+        .map((pileName) => [pileName, getPileItemsByName(pileName)]),
+    );
+    return {
+      warnings: (context.violations || []).slice(0, 8).map((violation) => ({
+        name: String(violation?.name || ''),
+        normalizedName: String(violation?.normalizedName || ''),
+        kind: String(violation?.kind || 'unknown'),
+        itemIds: (violation?.itemIds || []).slice(0, 16).map(Number).filter(Boolean),
+      })),
+      exactItems: records.slice(0, 16).map((record) => ({
+        expectedId: Number(record?.expectedId || 0),
+        submitted: captureRuntimeInventoryItem(record?.submitted, {
+          identify: identifyRuntimeInventoryItem,
+        }),
+        item: captureRuntimeInventoryItem(record?.item, {
+          identify: identifyRuntimeInventoryItem,
+        }),
+        pile: record?.pileName || null,
+        protectionReasons: [...(record?.protectionReasons || [])],
+      })),
+      definitionPiles: definitionIds.slice(0, 8).map((definitionId) => ({
+        definitionId,
+        piles: captureDefinitionPileState(piles, definitionId, {
+          identify: identifyRuntimeInventoryItem,
+        }),
+      })),
+    };
+  }
+
+  async function validateRollingItemViolationOverride(loopDef, runtime, context = {}) {
+    const label = context.label || loopDef.name;
+    const violations = Array.isArray(context.violations) ? context.violations : [];
+    if (!violations.length) {
+      return {
+        ok: false,
+        reasonCode: 'ITEM_VIOLATION_KIND_UNAVAILABLE',
+        reason: 'EA item violation warning identity is unavailable',
+      };
+    }
+    const nonActiveViolations = violations.filter((violation) => violation?.kind !== 'active-squad');
+    if (nonActiveViolations.some((violation) => violation?.kind !== 'evolution')) {
+      return {
+        ok: false,
+        reasonCode: 'ITEM_VIOLATION_KIND_UNSAFE',
+        reason: 'only explicit Evo warnings can use Rolling validation confirmation',
+      };
+    }
+    const violationIds = [...new Set((context.violationItemIds || [])
+      .map(Number)
+      .filter((id) => Number.isSafeInteger(id) && id > 0))];
+    const playersById = new Map((context.players || [])
+      .map((item) => [Number(item?.id || 0), item])
+      .filter(([id]) => id > 0));
+    if (!violationIds.length || violationIds.some((id) => !playersById.has(id))) {
+      return {
+        ok: false,
+        reasonCode: 'ITEM_VIOLATION_SUBMISSION_IDENTITY_CHANGED',
+        reason: 'EA item violation IDs no longer match the revalidated saved squad',
+      };
+    }
+
+    const evolutionIds = [...new Set((context.evolutionItemIds || [])
+      .map(Number)
+      .filter((id) => Number.isSafeInteger(id) && id > 0))];
+    const structuredEvolutionIds = [...new Set(violations
+      .filter((violation) => violation?.kind === 'evolution')
+      .flatMap((violation) => violation?.itemIds || [])
+      .map(Number)
+      .filter((id) => Number.isSafeInteger(id) && id > 0))];
+    if (structuredEvolutionIds.length !== evolutionIds.length
+      || structuredEvolutionIds.some((id) => !evolutionIds.includes(id))) {
+      return {
+        ok: false,
+        reasonCode: 'ITEM_VIOLATION_EVOLUTION_IDENTITY_UNSAFE',
+        reason: 'Evo warning item IDs changed before exact-entity confirmation',
+      };
+    }
+    if (evolutionIds.length === 0) {
+      return { ok: true, exactItemIds: violationIds.filter((id) => (
+        violations.some((violation) => violation?.kind === 'active-squad'
+          && (violation.itemIds || []).map(Number).includes(id))
+      )) };
+    }
+    const records = violationIds.map((id) => ({
+      expectedId: id,
+      submitted: playersById.get(id),
+      ...(findCachedItemById(id, ['storage', 'club', 'unassigned', 'transfer']) || {}),
+      protectionReasons: [],
+    }));
+    let rejection = null;
+    for (const id of evolutionIds) {
+      const record = records.find((candidate) => candidate.expectedId === id);
+      const submittedDefinitionId = Number(record?.submitted?.definitionId || 0);
+      const liveDefinitionId = Number(record?.item?.definitionId || 0);
+      if (!record?.item || record.pileName !== 'storage' || !submittedDefinitionId
+        || submittedDefinitionId !== liveDefinitionId) {
+        rejection = {
+          reasonCode: 'ITEM_VIOLATION_EVOLUTION_IDENTITY_UNSAFE',
+          reason: `Evo warning item #${id} is not the same exact Storage entity after submission revalidation`,
+        };
+        break;
+      }
+      record.protectionReasons = rollingBaseProtectionReasons(
+        record.item,
+        runtime?.primaryContext?.activeLoopDef || loopDef,
+        'storage',
+      );
+      if (isEvolutionItem(record.item)
+        || record.protectionReasons.includes('fsu-exclude-evolution')
+        || record.protectionReasons.includes('rolling-any-special-evolution')) {
+        rejection = {
+          reasonCode: 'ITEM_VIOLATION_EVOLUTION_ENTITY_UNSAFE',
+          reason: `Evo warning item #${id} is itself an Evolution card and remains protected`,
+        };
+        break;
+      }
+      if (record.protectionReasons.length) {
+        rejection = {
+          reasonCode: 'ITEM_VIOLATION_ENTITY_PROTECTED',
+          reason: `Evo warning item #${id} failed current protection checks (${record.protectionReasons.join(',')})`,
+        };
+        break;
+      }
+    }
+
+    emitDiagnostic(log, () => `${label}: item violation exact-entity diagnostic ${diagnosticJson({
+      status: rejection ? 'rejected' : 'confirmed',
+      ...rollingItemViolationEntityDiagnostic(context, records),
+    })}`);
+    if (rejection) return { ok: false, ...rejection };
+    return { ok: true, exactItemIds: violationIds };
+  }
+
   async function resolveRollingActiveSquadConflict(loopDef, runtime, context = {}) {
     const violationIds = new Set((context.violationItemIds || []).map(Number).filter(Boolean));
     const players = (context.players || []).filter((item) => violationIds.has(Number(item?.id || 0)));
@@ -18107,6 +18315,12 @@ function updateLoopControls() {
                 model: context.model,
               },
             ),
+            validateItemViolationOverride: (conflict) => validateRollingItemViolationOverride(
+              loopDef,
+              runtime,
+              conflict,
+            ),
+            revalidateSubmission: submitContext.revalidateSubmission,
             rewardObservationAttempts: 1,
             allowKnownRewardFallback: false,
             failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
@@ -21178,6 +21392,12 @@ function updateLoopControls() {
                     model: fill.model,
                   },
                 ),
+                validateItemViolationOverride: (conflict) => validateRollingItemViolationOverride(
+                  activeLoopDef,
+                  runtime,
+                  conflict,
+                ),
+                revalidateSubmission: context.revalidateSubmission,
                 allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
                 failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
                   rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
@@ -21443,7 +21663,7 @@ function updateLoopControls() {
         const storageSinkSummary = loopDef.rollingStorageSinkEnabled
           ? `${loopDef.rollingStorageSink?.mode || 'automatic'}/configured:${loopDef.rollingStorageSinkSetName || `Set #${loopDef.rollingStorageSinkSetId || '?'}`}/bound:${loopDef.rollingStorageSink?.capability?.setName || 'unavailable'} (Set #${loopDef.rollingStorageSink?.capability?.setId || '?'})`
           : 'off';
-        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Storage recovery priority ${loopDef.rollingStorageRecoveryPriority === 'provisions' ? 'Provisions-first' : 'Storage-Pressure-first'}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Club current-pool Provisions ${loopDef.rollingAllowClubCurrentPoolSpecialsForProvisions && !loopDef.rollingProtectAllClubNonTotwSpecials ? 'last-resort allowed' : 'off'}; Storage Pressure Club normal-gold boosters ${loopDef.rollingStoragePressureClubBoostersEnabled ? `enabled (87-${rollingProvisionsMaxRating(loopDef)})` : 'off'}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || 'special-only'})` : 'off; Storage route only'}; Storage pressure SBC ${storageSinkSummary}`);
+        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; Pressure relief strategy ${rollingStorageRecoveryModeLabel(loopDef.rollingStorageRecoveryPriority)}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Club current-pool Provisions ${loopDef.rollingAllowClubCurrentPoolSpecialsForProvisions && !loopDef.rollingProtectAllClubNonTotwSpecials ? 'last-resort allowed' : 'off'}; Storage Pressure Club normal-gold boosters ${loopDef.rollingStoragePressureClubBoostersEnabled ? `enabled (87-${rollingProvisionsMaxRating(loopDef)})` : 'off'}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || 'special-only'})` : 'off; Storage route only'}; Storage pressure SBC ${storageSinkSummary}`);
       } else {
         log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
       }

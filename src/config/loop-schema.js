@@ -377,8 +377,14 @@ function validatePickOptions(value, path, errors) {
     errors.push(`${path}.rollingStorageSinkMode must be off, automatic, or selected`);
   }
   if (value.rollingStorageRecoveryPriority !== undefined
-    && !['storage-pressure', 'provisions'].includes(value.rollingStorageRecoveryPriority)) {
-    errors.push(`${path}.rollingStorageRecoveryPriority must be storage-pressure or provisions`);
+    && ![
+      'storage-pressure-only',
+      'provisions-only',
+      'provisions-then-storage-pressure',
+      'storage-pressure',
+      'provisions',
+    ].includes(value.rollingStorageRecoveryPriority)) {
+    errors.push(`${path}.rollingStorageRecoveryPriority must be one of: storage-pressure-only, provisions-only, provisions-then-storage-pressure`);
   }
   if (value.rollingDuplicateSwapMode !== undefined
     && !['off', 'special-only', 'safe-only', 'all-eligible'].includes(value.rollingDuplicateSwapMode)) {

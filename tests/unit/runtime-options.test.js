@@ -39,7 +39,7 @@ describe('loop runtime option projection', () => {
       rollingDuplicateSwapMode: 'off',
       rollingProvisionsMaxRating: 88,
       rollingRecoveryStorageFirst: false,
-      rollingStorageRecoveryPriority: 'storage-pressure',
+      rollingStorageRecoveryPriority: 'storage-pressure-only',
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
       protectFsuLockedPlayers: false,
@@ -72,7 +72,7 @@ describe('loop runtime option projection', () => {
       rollingDuplicateSwapMode: 'off',
       rollingProvisionsMaxRating: 88,
       rollingRecoveryStorageFirst: false,
-      rollingStorageRecoveryPriority: 'storage-pressure',
+      rollingStorageRecoveryPriority: 'storage-pressure-only',
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
       protectFsuLockedPlayers: false,
@@ -586,10 +586,16 @@ describe('loop runtime option projection', () => {
     expect(normalizePickRuntimeOptions({ rollingRecoveryStorageFirst: true })).toMatchObject({
       rollingRecoveryStorageFirst: true,
     });
+    expect(normalizePickRuntimeOptions({ rollingStorageRecoveryPriority: 'provisions-only' }))
+      .toMatchObject({ rollingStorageRecoveryPriority: 'provisions-only' });
+    expect(normalizePickRuntimeOptions({ rollingStorageRecoveryPriority: 'provisions-then-storage-pressure' }))
+      .toMatchObject({ rollingStorageRecoveryPriority: 'provisions-then-storage-pressure' });
     expect(normalizePickRuntimeOptions({ rollingStorageRecoveryPriority: 'provisions' }))
-      .toMatchObject({ rollingStorageRecoveryPriority: 'provisions' });
+      .toMatchObject({ rollingStorageRecoveryPriority: 'provisions-then-storage-pressure' });
+    expect(normalizePickRuntimeOptions({ rollingStorageRecoveryPriority: 'storage-pressure' }))
+      .toMatchObject({ rollingStorageRecoveryPriority: 'storage-pressure-only' });
     expect(normalizePickRuntimeOptions({ rollingStorageRecoveryPriority: 'unknown' }))
-      .toMatchObject({ rollingStorageRecoveryPriority: 'storage-pressure' });
+      .toMatchObject({ rollingStorageRecoveryPriority: 'storage-pressure-only' });
     expect(normalizePickRuntimeOptions({ rollingShortageProvisionsPackLimit: 0 }))
       .toMatchObject({ rollingShortageProvisionsPackLimit: 1 });
     expect(normalizePickRuntimeOptions({ rollingShortageProvisionsPackLimit: 99 }))
@@ -605,7 +611,7 @@ describe('loop runtime option projection', () => {
       pickOptions: {
         rollingProvisionsMaxRating: 89,
         rollingRecoveryStorageFirst: true,
-        rollingStorageRecoveryPriority: 'provisions',
+        rollingStorageRecoveryPriority: 'provisions-only',
         rollingOpenDuplicateProvisionsRewards: true,
         rollingShortageProvisionsPackLimit: 4,
       },
@@ -613,7 +619,7 @@ describe('loop runtime option projection', () => {
     expect(loopDef).toMatchObject({
       runtimeProvisionsMaxRating: 89,
       runtimeRecoveryStorageFirst: true,
-      rollingStorageRecoveryPriority: 'provisions',
+      rollingStorageRecoveryPriority: 'provisions-only',
       rollingOpenDuplicateProvisionsRewards: true,
       rollingShortageProvisionsPackLimit: 4,
       rollingProvisionsUpgrade: { requirements: [{ maxRating: 89 }] },
@@ -701,5 +707,10 @@ describe('loop runtime option projection', () => {
         capability: { setId: 1382, setName: 'Maxwel Cornet' },
       },
     })).toMatchObject({ rollingStorageSinkSetId: 1382 });
+    expect(assertRollingRuntimePreflight({
+      ...base,
+      rollingStorageRecoveryPriority: 'provisions-only',
+      rollingStorageSink: { mode: 'selected', status: 'unavailable' },
+    })).toMatchObject({ rollingStorageRecoveryPriority: 'provisions-only' });
   });
 });

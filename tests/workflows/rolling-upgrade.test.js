@@ -615,7 +615,7 @@ describe('10x85+ Rolling workflow', () => {
     const recoverStorageSink = vi.fn(async () => ({ status: 'submitted', submitted: true }));
     const options = harness({
       storageSinkEnabled: true,
-      storageRecoveryPriority: 'provisions',
+      storageRecoveryPriority: 'provisions-then-storage-pressure',
       recoverProvisions,
       recoverStorageSink,
       resolveProtectedStorage: vi.fn()
@@ -645,6 +645,7 @@ describe('10x85+ Rolling workflow', () => {
     const recoverStorageSink = vi.fn(async () => ({ status: 'submitted', submitted: true }));
     const options = harness({
       storageSinkEnabled: false,
+      storageRecoveryPriority: 'provisions-only',
       recoverProvisions,
       recoverStorageSink,
       resolveProtectedStorage: vi.fn(async () => ({
@@ -1445,6 +1446,7 @@ describe('10x85+ Rolling workflow', () => {
       missing: { code: 'SQUAD_RATING_EXCESS' },
     };
     const options = harness({
+      storageRecoveryPriority: 'provisions-only',
       findPrimaryPack: vi.fn(async () => null),
       getProgressFingerprint: vi.fn(async () => inventoryVersion),
       planPrimarySquad: vi.fn(async () => ready
@@ -1474,7 +1476,7 @@ describe('10x85+ Rolling workflow', () => {
     const calls = [];
     const options = harness({
       storageSinkEnabled: true,
-      storageRecoveryPriority: 'storage-pressure',
+      storageRecoveryPriority: 'storage-pressure-only',
       findPrimaryPack: vi.fn(async () => null),
       getProgressFingerprint: vi.fn(async () => inventoryVersion),
       planPrimarySquad: vi.fn(async () => {
@@ -1507,57 +1509,73 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.recoverProvisions).not.toHaveBeenCalled();
   });
 
-  it('falls back to Provisions when the preferred Storage Pressure SBC cannot handle rating excess', async () => {
-    let inventoryVersion = 1;
-    let ready = false;
+  it('does not fall back to Provisions when Storage Pressure-only recovery is unavailable', async () => {
     const calls = [];
     const options = harness({
       storageSinkEnabled: true,
-      storageRecoveryPriority: 'storage-pressure',
+      storageRecoveryPriority: 'storage-pressure-only',
       findPrimaryPack: vi.fn(async () => null),
-      getProgressFingerprint: vi.fn(async () => inventoryVersion),
       planPrimarySquad: vi.fn(async () => {
         calls.push('plan');
-        return ready
-          ? { ok: true, itemRefs: [{ id: 1 }] }
-          : { ok: false, missing: { code: 'SQUAD_RATING_EXCESS' } };
+        return { ok: false, missing: { code: 'SQUAD_RATING_EXCESS' } };
       }),
       recoverStorageSink: vi.fn(async () => {
         calls.push('storage-pressure');
-        return { status: 'unavailable', reason: 'selected Storage Pressure SBC is unavailable' };
+        return {
+          status: 'unavailable',
+          reason: 'selected Storage Pressure SBC is unavailable',
+          reasonCode: 'STORAGE_SINK_UNAVAILABLE',
+        };
       }),
-      recoverProvisions: vi.fn(async ({ context }) => {
+      recoverProvisions: vi.fn(async () => {
         calls.push('provisions');
-        expect(context).toMatchObject({
-          trigger: 'primary-fodder-shortage',
-          source: 'primary-rating-excess',
-          storageSink: { status: 'unavailable' },
-        });
-        ready = true;
-        inventoryVersion++;
         return { status: 'submitted', submitted: true };
       }),
     });
 
     expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
-      status: 'completed',
-      recoveries: { storageSink: 0, provisions: 1 },
+      status: 'unavailable',
+      reasonCode: 'STORAGE_SINK_UNAVAILABLE',
+      recoveries: { storageSink: 0, provisions: 0 },
     });
-    expect(calls).toEqual(['plan', 'storage-pressure', 'provisions', 'plan']);
+    expect(calls).toEqual(['plan', 'storage-pressure']);
+    expect(options.recoverProvisions).not.toHaveBeenCalled();
   });
 
-  it('keeps Provisions first for primary rating excess when that priority is configured', async () => {
+  it('does not use Provisions when Storage Pressure-only recovery is disabled', async () => {
+    const options = harness({
+      storageSinkEnabled: false,
+      storageRecoveryPriority: 'storage-pressure-only',
+      findPrimaryPack: vi.fn(async () => null),
+      planPrimarySquad: vi.fn(async () => ({
+        ok: false,
+        missing: { code: 'SQUAD_RATING_EXCESS' },
+      })),
+      recoverProvisions: vi.fn(async () => ({ status: 'submitted', submitted: true })),
+      recoverStorageSink: vi.fn(async () => ({ status: 'submitted', submitted: true })),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'SQUAD_RATING_EXCESS',
+      recoveries: { provisions: 0, storageSink: 0 },
+    });
+    expect(options.recoverProvisions).not.toHaveBeenCalled();
+    expect(options.recoverStorageSink).not.toHaveBeenCalled();
+  });
+
+  it('uses only Provisions for repeated pressure when Provisions-only recovery is configured', async () => {
     let inventoryVersion = 1;
-    let ready = false;
+    let attempts = 0;
     const calls = [];
     const options = harness({
       storageSinkEnabled: true,
-      storageRecoveryPriority: 'provisions',
+      storageRecoveryPriority: 'provisions-only',
       findPrimaryPack: vi.fn(async () => null),
       getProgressFingerprint: vi.fn(async () => inventoryVersion),
       planPrimarySquad: vi.fn(async () => {
         calls.push('plan');
-        return ready
+        return attempts >= 2
           ? { ok: true, itemRefs: [{ id: 1 }] }
           : { ok: false, missing: { code: 'SQUAD_RATING_EXCESS' } };
       }),
@@ -1567,7 +1585,7 @@ describe('10x85+ Rolling workflow', () => {
           trigger: 'primary-fodder-shortage',
           source: 'primary-rating-excess',
         });
-        ready = true;
+        attempts++;
         inventoryVersion++;
         return { status: 'submitted', submitted: true };
       }),
@@ -1579,17 +1597,132 @@ describe('10x85+ Rolling workflow', () => {
 
     expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
       status: 'completed',
-      recoveries: { storageSink: 0, provisions: 1 },
+      recoveries: { storageSink: 0, provisions: 2 },
     });
-    expect(calls).toEqual(['plan', 'provisions', 'plan']);
+    expect(calls).toEqual(['plan', 'provisions', 'plan', 'provisions', 'plan']);
     expect(options.recoverStorageSink).not.toHaveBeenCalled();
+  });
+
+  it('tries Provisions once, then Storage Pressure when the same pressure remains', async () => {
+    let inventoryVersion = 1;
+    let pressureChecks = 0;
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      storageRecoveryPriority: 'provisions-then-storage-pressure',
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      resolveProtectedStorage: vi.fn(async () => {
+        calls.push('storage-check');
+        pressureChecks++;
+        return pressureChecks >= 3
+          ? { status: 'ready' }
+          : { status: 'blocked', reasonCode: 'PROTECTED_STORAGE_BLOCKED' };
+      }),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('provisions');
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+      recoverStorageSink: vi.fn(async () => {
+        calls.push('storage-pressure');
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      recoveries: { provisions: 1, storageSink: 1 },
+    });
+    expect(calls).toEqual([
+      'storage-check',
+      'provisions',
+      'storage-check',
+      'storage-pressure',
+      'storage-check',
+    ]);
+  });
+
+  it('does not run Storage Pressure when one Provisions attempt clears the pressure', async () => {
+    let inventoryVersion = 1;
+    let storageReady = false;
+    const options = harness({
+      storageSinkEnabled: true,
+      storageRecoveryPriority: 'provisions-then-storage-pressure',
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      resolveProtectedStorage: vi.fn(async () => storageReady
+        ? { status: 'ready' }
+        : { status: 'blocked', reasonCode: 'PROTECTED_STORAGE_BLOCKED' }),
+      recoverProvisions: vi.fn(async () => {
+        storageReady = true;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+      recoverStorageSink: vi.fn(async () => ({ status: 'submitted', submitted: true })),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      recoveries: { provisions: 1, storageSink: 0 },
+    });
+    expect(options.recoverProvisions).toHaveBeenCalledOnce();
+    expect(options.recoverStorageSink).not.toHaveBeenCalled();
+  });
+
+  it('keeps a rating-excess pressure event across inventory-ready replans', async () => {
+    let inventoryVersion = 1;
+    let recoveryCount = 0;
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      storageRecoveryPriority: 'provisions-then-storage-pressure',
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      resolveProtectedStorage: vi.fn(async () => {
+        calls.push('storage-ready');
+        return { status: 'ready' };
+      }),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push('plan');
+        return recoveryCount >= 2
+          ? { ok: true, itemRefs: [{ id: 1 }] }
+          : { ok: false, missing: { code: 'SQUAD_RATING_EXCESS' } };
+      }),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('provisions');
+        recoveryCount++;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+      recoverStorageSink: vi.fn(async () => {
+        calls.push('storage-pressure');
+        recoveryCount++;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      recoveries: { provisions: 1, storageSink: 1 },
+    });
+    expect(calls).toEqual([
+      'storage-ready',
+      'plan',
+      'provisions',
+      'storage-ready',
+      'plan',
+      'storage-pressure',
+      'storage-ready',
+      'plan',
+    ]);
   });
 
   it('stops once without replanning when neither rating-excess recovery is available', async () => {
     const calls = [];
     const options = harness({
       storageSinkEnabled: true,
-      storageRecoveryPriority: 'storage-pressure',
+      storageRecoveryPriority: 'storage-pressure-only',
       findPrimaryPack: vi.fn(async () => null),
       planPrimarySquad: vi.fn(async () => {
         calls.push('plan');
@@ -1619,7 +1752,7 @@ describe('10x85+ Rolling workflow', () => {
       reasonCode: 'STORAGE_SINK_UNAVAILABLE',
       recoveries: { storageSink: 0, provisions: 0 },
     });
-    expect(calls).toEqual(['plan', 'storage-pressure', 'provisions']);
+    expect(calls).toEqual(['plan', 'storage-pressure']);
     expect(options.planPrimarySquad).toHaveBeenCalledOnce();
   });
 
@@ -1778,6 +1911,7 @@ describe('10x85+ Rolling workflow', () => {
     let inventoryVersion = 1;
     let storageReady = false;
     const options = harness({
+      storageRecoveryPriority: 'provisions-only',
       getProgressFingerprint: vi.fn(async () => inventoryVersion),
       resolveProtectedStorage: vi.fn(async () => storageReady
         ? { status: 'ready' }
@@ -1812,6 +1946,7 @@ describe('10x85+ Rolling workflow', () => {
     let inventoryVersion = 1;
     let storageFree = 0;
     const options = harness({
+      storageRecoveryPriority: 'provisions-only',
       getProgressFingerprint: vi.fn(async () => inventoryVersion),
       resolveProtectedStorage: vi.fn(async () => {
         if (routing.pendingItems.length > storageFree) {
@@ -1863,7 +1998,7 @@ describe('10x85+ Rolling workflow', () => {
     let storageReady = false;
     const options = harness({
       storageSinkEnabled: true,
-      storageRecoveryPriority: 'provisions',
+      storageRecoveryPriority: 'provisions-then-storage-pressure',
       getProgressFingerprint: vi.fn(async () => inventoryVersion),
       resolveProtectedStorage: vi.fn(async () => storageReady
         ? { status: 'ready' }
@@ -2177,7 +2312,7 @@ describe('10x85+ Rolling workflow', () => {
     expect(normal.recoverStorageSink).not.toHaveBeenCalled();
 
     const blocked = harness({
-      storageRecoveryPriority: 'provisions',
+      storageRecoveryPriority: 'provisions-only',
       resolveProtectedStorage: vi.fn(async () => ({ status: 'blocked', reasonCode: 'PROTECTED_STORAGE_BLOCKED' })),
       recoverProvisions: vi.fn(async () => ({ status: 'blocked', reason: 'EA submit failed' })),
       recoverStorageSink: vi.fn(),

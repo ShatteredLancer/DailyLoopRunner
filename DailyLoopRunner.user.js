@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.60
+// @version      0.8.61
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.60",
+    version: "0.8.61",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -4006,10 +4006,15 @@
   var INVENTORY_MODES = Object.freeze(["inherit", "inventory-only", "normal"]);
   var RUNTIME_QUANTITY_MODES = Object.freeze(["user", "ea-remaining", "exhaust", "fixed"]);
   var ROLLING_STORAGE_RECOVERY_PRIORITIES = Object.freeze([
-    "storage-pressure",
-    "provisions"
+    "storage-pressure-only",
+    "provisions-only",
+    "provisions-then-storage-pressure"
   ]);
-  var DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY = "storage-pressure";
+  var DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY = "storage-pressure-only";
+  var LEGACY_ROLLING_STORAGE_RECOVERY_PRIORITY_MIGRATIONS = Object.freeze({
+    "storage-pressure": "storage-pressure-only",
+    provisions: "provisions-then-storage-pressure"
+  });
   var RUNTIME_QUANTITY_TARGETS = Object.freeze([
     "maxCompletions",
     "rounds",
@@ -4018,7 +4023,19 @@
   ]);
   var PICK_OPTIONS_APPLIED = /* @__PURE__ */ Symbol("pick-options-applied");
   function normalizeRollingStorageRecoveryPriority(value) {
-    return ROLLING_STORAGE_RECOVERY_PRIORITIES.includes(String(value || "").trim().toLowerCase()) ? String(value).trim().toLowerCase() : DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY;
+    const normalized = String(value || "").trim().toLowerCase();
+    return ROLLING_STORAGE_RECOVERY_PRIORITIES.includes(normalized) ? normalized : LEGACY_ROLLING_STORAGE_RECOVERY_PRIORITY_MIGRATIONS[normalized] || DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY;
+  }
+  function rollingStorageRecoveryModeLabel(value) {
+    const labels = {
+      "storage-pressure-only": "Storage Pressure only",
+      "provisions-only": "Provisions only",
+      "provisions-then-storage-pressure": "Provisions once, then Storage Pressure"
+    };
+    return labels[normalizeRollingStorageRecoveryPriority(value)] || labels["storage-pressure-only"];
+  }
+  function rollingStorageRecoveryUsesStoragePressure(value) {
+    return normalizeRollingStorageRecoveryPriority(value) !== "provisions-only";
   }
   function boundedNumber(value, fallback, min, max) {
     const parsed = Number(value);
@@ -4389,7 +4406,7 @@
     if (loopDef.rollingWorkflowEnabled !== true) {
       throw new Error("Rolling Upgrade workflow is staged but not enabled in this build");
     }
-    if (loopDef.rollingStorageSinkEnabled === true && loopDef.rollingStorageSinkMode === "selected") {
+    if (rollingStorageRecoveryUsesStoragePressure(loopDef.rollingStorageRecoveryPriority) && loopDef.rollingStorageSinkEnabled === true && loopDef.rollingStorageSinkMode === "selected") {
       const selectedSetId = Number(loopDef.rollingStorageSinkSetId || 0);
       const selectedSetName = String(loopDef.rollingStorageSinkSetName || "").trim();
       const capability = loopDef.rollingStorageSink?.capability || {};
@@ -5652,8 +5669,14 @@
     if (value.rollingStorageSinkMode !== void 0 && !["off", "automatic", "selected"].includes(value.rollingStorageSinkMode)) {
       errors.push(`${path}.rollingStorageSinkMode must be off, automatic, or selected`);
     }
-    if (value.rollingStorageRecoveryPriority !== void 0 && !["storage-pressure", "provisions"].includes(value.rollingStorageRecoveryPriority)) {
-      errors.push(`${path}.rollingStorageRecoveryPriority must be storage-pressure or provisions`);
+    if (value.rollingStorageRecoveryPriority !== void 0 && ![
+      "storage-pressure-only",
+      "provisions-only",
+      "provisions-then-storage-pressure",
+      "storage-pressure",
+      "provisions"
+    ].includes(value.rollingStorageRecoveryPriority)) {
+      errors.push(`${path}.rollingStorageRecoveryPriority must be one of: storage-pressure-only, provisions-only, provisions-then-storage-pressure`);
     }
     if (value.rollingDuplicateSwapMode !== void 0 && !["off", "special-only", "safe-only", "all-eligible"].includes(value.rollingDuplicateSwapMode)) {
       errors.push(`${path}.rollingDuplicateSwapMode must be off, special-only, safe-only, or all-eligible`);
@@ -15930,6 +15953,30 @@
         context.finalPlayers = await options.readFinalPlayers(context);
       }
       await runValidators(options.finalValidators, context, "final");
+      let submissionRevalidated = false;
+      context.revalidateSubmission = async () => {
+        if (submissionRevalidated) {
+          throw new Error("submission revalidation is already consumed");
+        }
+        submissionRevalidated = true;
+        const readLatestPlayers = options.readFinalPlayers || options.readSavedPlayers;
+        if (readLatestPlayers) {
+          const latestPlayers = await readLatestPlayers(context);
+          if (!Array.isArray(latestPlayers) || !latestPlayers.length) {
+            throw new Error("submission revalidation could not read the saved squad");
+          }
+          context.finalPlayers = latestPlayers;
+          context.players = latestPlayers;
+          context.savedPlayers = latestPlayers;
+        }
+        await runValidators(options.preSaveValidators, context, "confirmation pre-save");
+        await runValidators(options.postSaveValidators, context, "confirmation post-save");
+        await runValidators(options.finalValidators, context, "confirmation final");
+        return {
+          ok: true,
+          players: context.finalPlayers?.length ? context.finalPlayers : context.savedPlayers?.length ? context.savedPlayers : context.players
+        };
+      };
       const runCommittedSubmit = typeof options.runCommittedSubmit === "function" ? options.runCommittedSubmit : async (operation) => operation();
       return await runCommittedSubmit(async () => {
         const transportResult = await options.submitTransport?.(context);
@@ -27571,7 +27618,11 @@
     result = null,
     detail = ""
   } = {}) {
-    return protectionEnabled === true && hasItemViolationConflict(result, detail);
+    if (protectionEnabled !== true || !hasItemViolationConflict(result, detail)) return false;
+    return result.data.itemViolations.some((violation) => {
+      const kind = classifyItemViolationName(violation?.name);
+      return kind === "active-squad" || kind === "unknown";
+    });
   }
   function positiveItemId(value) {
     const id = Number(value);
@@ -27584,8 +27635,21 @@
       skipValidation: false,
       reloadChallenge: false,
       violationNames: [],
-      violationItemIds: []
+      violationItemIds: [],
+      violations: [],
+      activeSquadItemIds: [],
+      evolutionItemIds: [],
+      unknownItemIds: []
     };
+  }
+  function normalizeItemViolationName(value) {
+    return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  }
+  function classifyItemViolationName(value) {
+    const name = normalizeItemViolationName(value);
+    if (name === "ACTIVE_SQUAD" || name === "ACTIVESQUAD") return "active-squad";
+    if (name === "EVO" || name === "EVOLUTION") return "evolution";
+    return "unknown";
   }
   function inspectItemViolationConflict({
     detail = "",
@@ -27602,6 +27666,7 @@
     if (!submittedIds.size) return rejectedItemViolationOverride("missing-submitted-items");
     const violationItemIds = [];
     const violationNames = [];
+    const structuredViolations = [];
     for (const violation of violations) {
       if (!violation || typeof violation !== "object" || !Array.isArray(violation.itemIds) || !violation.itemIds.length) {
         return rejectedItemViolationOverride("invalid-item-violations");
@@ -27614,14 +27679,25 @@
       violationItemIds.push(...ids);
       const name = String(violation.name || "").trim();
       if (name) violationNames.push(name);
+      structuredViolations.push({
+        name,
+        normalizedName: normalizeItemViolationName(name),
+        kind: classifyItemViolationName(name),
+        itemIds: [...new Set(ids)]
+      });
     }
+    const idsForKind = (kind) => [...new Set(structuredViolations.filter((violation) => violation.kind === kind).flatMap((violation) => violation.itemIds))];
     return {
       retry: false,
       reason: "item-violations",
       skipValidation: false,
       reloadChallenge: false,
       violationNames: [...new Set(violationNames)],
-      violationItemIds: [...new Set(violationItemIds)]
+      violationItemIds: [...new Set(violationItemIds)],
+      violations: structuredViolations,
+      activeSquadItemIds: idsForKind("active-squad"),
+      evolutionItemIds: idsForKind("evolution"),
+      unknownItemIds: idsForKind("unknown")
     };
   }
   function planItemViolationOverride({
@@ -27646,7 +27722,11 @@
       skipValidation: true,
       reloadChallenge: false,
       violationNames: inspected.violationNames,
-      violationItemIds: inspected.violationItemIds
+      violationItemIds: inspected.violationItemIds,
+      violations: inspected.violations,
+      activeSquadItemIds: inspected.activeSquadItemIds,
+      evolutionItemIds: inspected.evolutionItemIds,
+      unknownItemIds: inspected.unknownItemIds
     };
   }
 
@@ -29406,7 +29486,9 @@
     const surplusCraftingEnabled = options.surplusCraftingEnabled === true;
     const provisionsShortageRecoveryEnabled = options.provisionsShortageRecoveryEnabled === true;
     const requiredSpecialRecoveryEnabled = options.requiredSpecialRecoveryEnabled === true;
-    const storageRecoveryPriority = options.storageRecoveryPriority === "provisions" ? "provisions" : "storage-pressure";
+    const storageRecoveryPriority = normalizeRollingStorageRecoveryPriority(
+      options.storageRecoveryPriority
+    );
     const shortageProvisionsPackLimit = boundedPositive(
       options.shortageProvisionsPackLimit,
       DEFAULT_SHORTAGE_PROVISIONS_PACK_LIMIT,
@@ -29451,6 +29533,11 @@
       storageMaintenance: 0
     };
     let duplicateTransactionReplans = 0;
+    let pressureEvent = {
+      type: null,
+      provisionsAttempted: false,
+      provisions: null
+    };
     function rememberReceipt(receipt) {
       if (!receipt || receipt.status === "replan" && receipt.submitted !== true) return;
       result.receiptCount++;
@@ -29647,41 +29734,82 @@
         }
       };
     }
+    function resetPressureEvent(type = null) {
+      if (type !== null && pressureEvent.type !== type) return;
+      pressureEvent = { type: null, provisionsAttempted: false, provisions: null };
+    }
     async function recoverStorageBlocked(context = {}) {
-      const order = storageRecoveryPriority === "provisions" ? ["provisions", "storageSink"] : ["storageSink", "provisions"];
-      let last = null;
-      let lastKind = null;
-      let attempted = false;
-      let firstAttemptedValue = null;
-      let lastAttemptedValue = null;
-      let storageSinkAttempted = false;
-      for (const kind of order) {
-        const attemptContext = {
-          ...context,
-          ...kind === "provisions" && context.provisionsTrigger ? { trigger: context.provisionsTrigger } : {},
-          ...kind === "storageSink" && lastKind === "provisions" ? { provisions: last } : {},
-          ...kind === "provisions" && lastKind === "storageSink" ? { storageSink: last } : {}
+      const pressureEventType = context.source === "primary-rating-excess" ? "rating-excess" : "storage-routing";
+      if (pressureEvent.type !== pressureEventType) {
+        pressureEvent = {
+          type: pressureEventType,
+          provisionsAttempted: false,
+          provisions: null
         };
-        const actionAttempted = kind === "provisions" ? provisionsShortageRecoveryEnabled === true && typeof options.recoverProvisions === "function" : options.storageSinkEnabled === true && typeof options.recoverStorageSink === "function";
-        attempted = attempted || actionAttempted;
-        if (kind === "storageSink") storageSinkAttempted = storageSinkAttempted || actionAttempted;
-        const value = kind === "provisions" ? await recoverProvisions(attemptContext) : options.storageSinkEnabled === true ? await recoverStorageSink(attemptContext) : { status: "skipped", reason: "Storage pressure recovery is disabled in Settings" };
-        if (actionAttempted) {
-          if (firstAttemptedValue === null) firstAttemptedValue = value;
-          lastAttemptedValue = value;
+      }
+      const storageEnabled = options.storageSinkEnabled === true && typeof options.recoverStorageSink === "function";
+      const provisionsEnabled = provisionsShortageRecoveryEnabled === true && typeof options.recoverProvisions === "function";
+      const runStorage = async (provisions2 = null) => {
+        const value = storageEnabled ? await recoverStorageSink({
+          ...context,
+          ...provisions2 ? { provisions: provisions2 } : {}
+        }) : { status: "skipped", reason: "Storage pressure recovery is disabled in Settings" };
+        return {
+          value,
+          attempted: storageEnabled,
+          storageSinkAttempted: storageEnabled
+        };
+      };
+      if (storageRecoveryPriority === "storage-pressure-only") {
+        const storage2 = await runStorage();
+        if (isProgressed(storage2.value)) return { progressed: true, value: storage2.value, kind: "storageSink" };
+        if (isStopped(storage2.value) || storage2.value?.status === "planned" || reasonCode(storage2.value) === "STORAGE_SINK_SELECTION_REQUIRED") {
+          return { terminal: storage2.value, ...storage2 };
         }
-        if (isProgressed(value)) return { progressed: true, value, kind };
-        if (isStopped(value) || value?.status === "planned" || reasonCode(value) === "STORAGE_SINK_SELECTION_REQUIRED") {
-          return { terminal: value, value, kind, attempted, storageSinkAttempted };
+        return storage2;
+      }
+      if (storageRecoveryPriority === "provisions-only") {
+        const provisions2 = provisionsEnabled ? await recoverProvisions({
+          ...context,
+          ...context.provisionsTrigger ? { trigger: context.provisionsTrigger } : {}
+        }) : { status: "skipped", reason: "Provisions shortage recovery is disabled in Settings" };
+        if (isProgressed(provisions2)) return { progressed: true, value: provisions2, kind: "provisions" };
+        if (isStopped(provisions2) || provisions2?.status === "planned") {
+          return { terminal: provisions2, value: provisions2, attempted: provisionsEnabled, storageSinkAttempted: false };
         }
-        last = value;
-        lastKind = kind;
+        return { value: provisions2, attempted: provisionsEnabled, storageSinkAttempted: false };
+      }
+      let provisions = pressureEvent.provisions;
+      if (!pressureEvent.provisionsAttempted) {
+        pressureEvent.provisionsAttempted = true;
+        provisions = provisionsEnabled ? await recoverProvisions({
+          ...context,
+          ...context.provisionsTrigger ? { trigger: context.provisionsTrigger } : {}
+        }) : { status: "skipped", reason: "Provisions shortage recovery is disabled in Settings" };
+        pressureEvent.provisions = provisions;
+        if (isProgressed(provisions)) return { progressed: true, value: provisions, kind: "provisions" };
+        if (isStopped(provisions) || provisions?.status === "planned") {
+          return { terminal: provisions, value: provisions, attempted: provisionsEnabled, storageSinkAttempted: false };
+        }
+        const provisionsStatus = String(provisions?.status || "");
+        if (!["unavailable", "skipped"].includes(provisionsStatus)) {
+          return { terminal: provisions, value: provisions, attempted: provisionsEnabled, storageSinkAttempted: false };
+        }
+      }
+      const storage = await runStorage(provisions);
+      if (isProgressed(storage.value)) return { progressed: true, value: storage.value, kind: "storageSink" };
+      if (isStopped(storage.value) || storage.value?.status === "planned" || reasonCode(storage.value) === "STORAGE_SINK_SELECTION_REQUIRED") {
+        return { terminal: storage.value, ...storage };
       }
       return {
-        value: attempted ? storageRecoveryPriority === "storage-pressure" ? firstAttemptedValue || last : lastAttemptedValue || firstAttemptedValue : null,
-        attempted,
-        storageSinkAttempted
+        ...storage,
+        value: storage.value || provisions
       };
+    }
+    function storageRecoveryFailureValue(recovery, original) {
+      const value = recovery.terminal || recovery.value || original;
+      const preserveOriginalStorageBlock = storageRecoveryPriority !== "provisions-only" && options.storageSinkEnabled !== true && !recovery.storageSinkAttempted && ["unavailable", "skipped"].includes(String(value?.status || ""));
+      return preserveOriginalStorageBlock ? original : value;
     }
     async function recoverBlockedRewardStorage(reward, context = {}) {
       if (!isBlocked(reward) || reasonCode(reward) !== "PROTECTED_STORAGE_BLOCKED") {
@@ -29693,8 +29821,7 @@
         source: context.source || "recovery-reward-pre-open"
       });
       if (recovery.progressed) return { matched: true, progressed: true };
-      const value = recovery.terminal || recovery.value || reward;
-      const failureValue = options.storageSinkEnabled !== true && !recovery.storageSinkAttempted && ["unavailable", "skipped"].includes(String(value?.status || "")) ? reward : value;
+      const failureValue = storageRecoveryFailureValue(recovery, reward);
       return {
         matched: true,
         failure: finishRecoveryFailure(
@@ -30002,7 +30129,7 @@
           }
           const recovery = await recoverStorageBlocked({ trigger: "storage-pressure", storage });
           if (recovery.progressed) continue;
-          const failure2 = options.storageSinkEnabled !== true && !recovery.storageSinkAttempted && ["unavailable", "skipped"].includes(String(recovery.value?.status || "")) ? storage : recovery.terminal || recovery.value || storage;
+          const failure2 = storageRecoveryFailureValue(recovery, storage);
           if (isStopped(failure2) || isBlocked(failure2) || failure2?.status === "planned") {
             return finishRecoveryFailure(
               failure2,
@@ -30016,6 +30143,7 @@
             storageCode
           );
         }
+        resetPressureEvent("storage-routing");
         if (!primaryDuplicateReserveResolved) {
           const recoveryState = await options.readRecoveryState?.({
             result,
@@ -30103,10 +30231,14 @@
         result.lastPlan = planned || null;
         if (isStopped(planned)) return finish("stopped", planned, "stopped while planning the primary squad");
         if (planned?.ok || planned?.status === "ready") {
+          resetPressureEvent();
           plan = planned;
           break;
         }
         const planCode = reasonCode(planned) || "PRIMARY_SQUAD_INFEASIBLE";
+        if (planCode !== "SQUAD_RATING_EXCESS") {
+          resetPressureEvent();
+        }
         if (planCode === "REQUIRED_SPECIAL_SHORTAGE") {
           if (!requiredSpecialRecoveryEnabled) {
             return finish(
@@ -30188,10 +30320,11 @@
         if (planCode === "PROTECTED_STORAGE_BLOCKED") {
           const recovery = await recoverStorageBlocked({
             trigger: "storage-pressure",
-            storage: planned
+            storage: planned,
+            source: "primary-plan-storage"
           });
           if (recovery.progressed) continue;
-          const failure2 = options.storageSinkEnabled !== true && !recovery.storageSinkAttempted && ["unavailable", "skipped"].includes(String(recovery.value?.status || "")) ? planned : recovery.terminal || recovery.value || planned;
+          const failure2 = storageRecoveryFailureValue(recovery, planned);
           return finishRecoveryFailure(
             failure2?.status ? failure2 : planned,
             "primary-pack duplicate Storage recovery failed",
@@ -30204,7 +30337,7 @@
             shortageProvisionsPacksOpened = 0;
             continue;
           }
-          if (planCode === "SQUAD_RATING_EXCESS" && options.storageSinkEnabled === true) {
+          if (planCode === "SQUAD_RATING_EXCESS") {
             const recovery2 = await recoverStorageBlocked({
               trigger: "storage-pressure",
               provisionsTrigger: "primary-fodder-shortage",
@@ -31731,13 +31864,15 @@
       pickOptions.rollingProvisionsMaxRating
     );
     const recoveryPileOrder = pickOptions.rollingRecoveryStorageFirst === true ? "Storage first" : "Unassigned first";
-    const storageRecoveryPriority = pickOptions.rollingStorageRecoveryPriority === "provisions" ? "Provisions first" : "Storage Pressure first";
+    const storageRecoveryPriority = rollingStorageRecoveryModeLabel(
+      pickOptions.rollingStorageRecoveryPriority
+    );
     const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true ? "immediate" : "on shortage";
     const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
     const fsuLockedProtection = pickOptions.protectFsuLockedPlayers === true ? "on" : "off";
     const activeSquadProtection = pickOptions.protectActiveSquadPlayers === true ? "replace/review" : "confirm";
     summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickModeLabel}`;
-    summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; normal recovery order ${recoveryPileOrder}; Storage recovery priority ${storageRecoveryPriority}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; Club current-pool Provisions ${clubCurrentPoolProvisions}; Storage Pressure Club normal-gold boosters ${storagePressureClubBoosters}; duplicate swap experimental ${duplicateSwap}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}; FSU locked players ${fsuLockedProtection}; Active Squad 409 ${activeSquadProtection}`;
+    summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; normal recovery order ${recoveryPileOrder}; Pressure relief strategy ${storageRecoveryPriority}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; Club current-pool Provisions ${clubCurrentPoolProvisions}; Storage Pressure Club normal-gold boosters ${storagePressureClubBoosters}; duplicate swap experimental ${duplicateSwap}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}; FSU locked players ${fsuLockedProtection}; Active Squad 409 ${activeSquadProtection}`;
   }
   function renderMainPanelScanProgress(options = {}) {
     const panel = options.panel;
@@ -36548,8 +36683,9 @@
       "bronze-loop-policy-rolling-storage-recovery-priority",
       pickOptions.rollingStorageRecoveryPriority,
       [
-        ["storage-pressure", "Storage Pressure first"],
-        ["provisions", "Provisions first"]
+        ["storage-pressure-only", "Storage Pressure only"],
+        ["provisions-only", "Provisions only"],
+        ["provisions-then-storage-pressure", "Provisions once, then Storage Pressure"]
       ],
       mode
     );
@@ -36701,9 +36837,9 @@
       rollingDuplicateSwap.label,
       wideField(dom, "Duplicate swap scope", rollingDuplicateSwapMode, mode, "Controlled modes require both entities to be untradeable and have identical value fingerprints; all eligible is retained only for legacy experiments"),
       rollingOpenDuplicateProvisionsRewards.label,
-      wideField(dom, "Storage pressure recovery", rollingStorageSinkMode, mode, "Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set"),
+      wideField(dom, "Storage Pressure SBC mode", rollingStorageSinkMode, mode, "Off disables the Storage Pressure SBC path; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set"),
       wideField(dom, "Storage pressure SBC", rollingStorageSinkSet, mode, "Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility"),
-      wideField(dom, "Storage recovery priority", rollingStorageRecoveryPriority, mode, "When protected cards cannot enter Storage, try the selected Storage Pressure SBC or Provisions first; the other path remains a fallback"),
+      wideField(dom, "Pressure relief strategy", rollingStorageRecoveryPriority, mode, "Choose exactly one recovery strategy: Storage Pressure only, Provisions only, or one Provisions attempt followed by Storage Pressure if the same pressure remains"),
       sectionTitle(dom, "Submission guards"),
       protectFsuLockedPlayers.label,
       protectActiveSquadPlayers.label,
@@ -47491,19 +47627,22 @@
             packInventory
           });
           lastDetail = serviceResultErrorText(result) || result?.status || "unknown";
+          const inspected = inspectItemViolationConflict({
+            detail: lastDetail,
+            result,
+            submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean)
+          });
           let protectedConflictResolution = null;
           if (shouldStopForProtectedItemViolation({
             protectionEnabled: options.protectActiveSquadPlayers,
             result,
             detail: lastDetail
           })) {
-            const inspected = inspectItemViolationConflict({
-              detail: lastDetail,
-              result,
-              submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean)
-            });
             if (inspected.reason !== "item-violations") {
               fail2(`${label}: Active Squad conflict response failed closed (${inspected.reason}); no skipValidation confirmation was sent`);
+            }
+            if (inspected.unknownItemIds.length) {
+              fail2(`${label}: unknown EA item violation warning(s) ${inspected.violationNames.join("/") || "unnamed"}; no skipValidation confirmation was sent`);
             }
             if (typeof options.resolveProtectedItemViolation !== "function") {
               fail2(`${label}: Active Squad protection stopped submission after EA reported ${inspected.violationItemIds.length} item conflict(s); no Rolling replacement handler is available`);
@@ -47512,8 +47651,9 @@
               label,
               result,
               players,
-              violationNames: inspected.violationNames,
-              violationItemIds: inspected.violationItemIds
+              violationNames: inspected.violations.filter((violation) => violation.kind === "active-squad").map((violation) => violation.name),
+              violationItemIds: inspected.activeSquadItemIds,
+              violations: inspected.violations
             });
             if (protectedConflictResolution?.action === "replan") {
               return {
@@ -47529,7 +47669,7 @@
             }
           }
           const overridePlan = planItemViolationOverride({
-            allowOverride: options.allowItemViolationOverride === true && (options.protectActiveSquadPlayers !== true || protectedConflictResolution?.action === "override"),
+            allowOverride: options.allowItemViolationOverride === true && (options.protectActiveSquadPlayers !== true || protectedConflictResolution?.action === "override" || inspected.reason === "item-violations" && inspected.activeSquadItemIds.length === 0 && inspected.unknownItemIds.length === 0 && inspected.evolutionItemIds.length > 0),
             attempt,
             maxAttempts,
             detail: lastDetail,
@@ -47538,6 +47678,37 @@
             skipValidation
           });
           if (overridePlan.retry) {
+            let revalidation = null;
+            if (typeof options.revalidateSubmission !== "function") {
+              fail2(`${label}: item violation confirmation has no submission revalidation callback; no skipValidation confirmation was sent`);
+            }
+            try {
+              revalidation = await options.revalidateSubmission();
+            } catch (error) {
+              fail2(`${label}: submission revalidation before skipValidation confirmation failed: ${error?.message || error}`);
+            }
+            if (revalidation?.ok === false) {
+              fail2(`${label}: submission revalidation before skipValidation confirmation was rejected: ${revalidation.reason || "unknown reason"}`);
+            }
+            const originalPlayerIds = players.map((item) => Number(item?.id || 0)).filter(Boolean).sort((left, right) => left - right);
+            const revalidatedPlayerIds = (revalidation?.players?.length ? revalidation.players : players).map((item) => Number(item?.id || 0)).filter(Boolean).sort((left, right) => left - right);
+            if (originalPlayerIds.length !== revalidatedPlayerIds.length || originalPlayerIds.some((id, index) => id !== revalidatedPlayerIds[index])) {
+              fail2(`${label}: submission revalidation changed the saved squad item IDs; no skipValidation confirmation was sent`);
+            }
+            if (typeof options.validateItemViolationOverride !== "function") {
+              fail2(`${label}: item violation confirmation has no exact-entity validator; no skipValidation confirmation was sent`);
+            }
+            const validation = await options.validateItemViolationOverride({
+              label,
+              result,
+              players: revalidation?.players?.length ? revalidation.players : players,
+              violations: inspected.violations,
+              violationItemIds: inspected.violationItemIds,
+              evolutionItemIds: inspected.evolutionItemIds
+            });
+            if (validation?.ok === false) {
+              fail2(`${label}: item violation confirmation failed closed: ${validation.reason || "unsafe entity"}`);
+            }
             const forcedOptions = { skipValidation: true, chemistryEnabled };
             const names = overridePlan.violationNames.join("/") || "unnamed warning";
             log(`${label}: EA rejected ${overridePlan.violationItemIds.length} submitted item(s) with ${names}; confirming the same saved squad once with skipValidation:true`);
@@ -48624,7 +48795,10 @@
         log("Player Pick scan: scanned metadata preference disabled; configured Pick Loops reverted to static fallback");
       }
       const storageSink = options.rollingStorageSinkMode === "selected" ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ""}`.trim() : options.rollingStorageSinkMode;
-      log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? "; open Picks at end" : ""}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? "Storage-first" : "Unassigned-first"}; Storage recovery priority ${options.rollingStorageRecoveryPriority === "provisions" ? "Provisions-first" : "Storage-Pressure-first"}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? "enabled" : "off"}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? "allowed" : "off"}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? "allowed" : "off"}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; Club current-pool Provisions ${options.rollingAllowClubCurrentPoolSpecialsForProvisions && !options.rollingProtectAllClubNonTotwSpecials ? "last-resort allowed" : "off"}; Storage Pressure Club normal-gold boosters ${options.rollingStoragePressureClubBoostersEnabled ? `enabled (87-${options.rollingProvisionsMaxRating})` : "off"}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? "immediate" : "on shortage"}; Storage pressure SBC ${storageSink}`);
+      const storageRecoveryMode = rollingStorageRecoveryModeLabel(
+        options.rollingStorageRecoveryPriority
+      );
+      log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? "; open Picks at end" : ""}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? "Storage-first" : "Unassigned-first"}; Pressure relief strategy ${storageRecoveryMode}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? "enabled" : "off"}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? "allowed" : "off"}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? "allowed" : "off"}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; Club current-pool Provisions ${options.rollingAllowClubCurrentPoolSpecialsForProvisions && !options.rollingProtectAllClubNonTotwSpecials ? "last-resort allowed" : "off"}; Storage Pressure Club normal-gold boosters ${options.rollingStoragePressureClubBoostersEnabled ? `enabled (87-${options.rollingProvisionsMaxRating})` : "off"}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? "immediate" : "on shortage"}; Storage pressure SBC ${storageSink}`);
       renderCurrentSelectionPolicySummary();
       return options;
     }
@@ -49820,6 +49994,7 @@
           if (useBackgroundSubmission) {
             const submittedPlayers = context.savedPlayers?.length ? context.savedPlayers : context.players || [];
             const configuredConflictResolver = options.backgroundSubmitOptions?.resolveProtectedItemViolation;
+            const configuredItemViolationValidator = options.backgroundSubmitOptions?.validateItemViolationOverride;
             const backgroundResult = await submitRatingSbcInBackground(
               context.set,
               context.challenge,
@@ -49829,6 +50004,10 @@
                 ...typeof configuredConflictResolver === "function" ? {
                   resolveProtectedItemViolation: (conflict) => configuredConflictResolver(conflict, context)
                 } : {},
+                ...typeof configuredItemViolationValidator === "function" ? {
+                  validateItemViolationOverride: (conflict) => configuredItemViolationValidator(conflict, context)
+                } : {},
+                revalidateSubmission: context.revalidateSubmission,
                 players: submittedPlayers
               }
             );
@@ -53099,6 +53278,11 @@
                   model: null
                 }
               ),
+              validateItemViolationOverride: (conflict) => validateRollingItemViolationOverride(
+                activeDef,
+                runtime,
+                conflict
+              ),
               allowKnownRewardFallback: Number(activeDef.dynamicChallengeCount || 1) <= 1,
               failureInventoryDiagnostic: ({ players }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, players)
             },
@@ -53479,6 +53663,12 @@
                     model: fill.model
                   }
                 ),
+                validateItemViolationOverride: (conflict) => validateRollingItemViolationOverride(
+                  loopDef,
+                  runtime,
+                  conflict
+                ),
+                revalidateSubmission: context.revalidateSubmission,
                 allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
                 failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
               }
@@ -55561,6 +55751,121 @@
       const id = Number(item?.id || 0);
       return (selection?.entries || []).find((entry) => Number(entry?.item?.id || 0) === id || Number(entry?.itemRef?.id || 0) === id) || null;
     }
+    function rollingItemViolationEntityDiagnostic(context = {}, records = []) {
+      const definitionIds2 = [...new Set(records.map((record) => Number(record?.item?.definitionId || 0)).filter(Boolean))];
+      const piles = Object.fromEntries(
+        ["unassigned", "storage", "transfer", "club"].map((pileName) => [pileName, getPileItemsByName(pileName)])
+      );
+      return {
+        warnings: (context.violations || []).slice(0, 8).map((violation) => ({
+          name: String(violation?.name || ""),
+          normalizedName: String(violation?.normalizedName || ""),
+          kind: String(violation?.kind || "unknown"),
+          itemIds: (violation?.itemIds || []).slice(0, 16).map(Number).filter(Boolean)
+        })),
+        exactItems: records.slice(0, 16).map((record) => ({
+          expectedId: Number(record?.expectedId || 0),
+          submitted: captureRuntimeInventoryItem(record?.submitted, {
+            identify: identifyRuntimeInventoryItem
+          }),
+          item: captureRuntimeInventoryItem(record?.item, {
+            identify: identifyRuntimeInventoryItem
+          }),
+          pile: record?.pileName || null,
+          protectionReasons: [...record?.protectionReasons || []]
+        })),
+        definitionPiles: definitionIds2.slice(0, 8).map((definitionId3) => ({
+          definitionId: definitionId3,
+          piles: captureDefinitionPileState(piles, definitionId3, {
+            identify: identifyRuntimeInventoryItem
+          })
+        }))
+      };
+    }
+    async function validateRollingItemViolationOverride(loopDef, runtime, context = {}) {
+      const label = context.label || loopDef.name;
+      const violations = Array.isArray(context.violations) ? context.violations : [];
+      if (!violations.length) {
+        return {
+          ok: false,
+          reasonCode: "ITEM_VIOLATION_KIND_UNAVAILABLE",
+          reason: "EA item violation warning identity is unavailable"
+        };
+      }
+      const nonActiveViolations = violations.filter((violation) => violation?.kind !== "active-squad");
+      if (nonActiveViolations.some((violation) => violation?.kind !== "evolution")) {
+        return {
+          ok: false,
+          reasonCode: "ITEM_VIOLATION_KIND_UNSAFE",
+          reason: "only explicit Evo warnings can use Rolling validation confirmation"
+        };
+      }
+      const violationIds = [...new Set((context.violationItemIds || []).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))];
+      const playersById = new Map((context.players || []).map((item) => [Number(item?.id || 0), item]).filter(([id]) => id > 0));
+      if (!violationIds.length || violationIds.some((id) => !playersById.has(id))) {
+        return {
+          ok: false,
+          reasonCode: "ITEM_VIOLATION_SUBMISSION_IDENTITY_CHANGED",
+          reason: "EA item violation IDs no longer match the revalidated saved squad"
+        };
+      }
+      const evolutionIds = [...new Set((context.evolutionItemIds || []).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))];
+      const structuredEvolutionIds = [...new Set(violations.filter((violation) => violation?.kind === "evolution").flatMap((violation) => violation?.itemIds || []).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))];
+      if (structuredEvolutionIds.length !== evolutionIds.length || structuredEvolutionIds.some((id) => !evolutionIds.includes(id))) {
+        return {
+          ok: false,
+          reasonCode: "ITEM_VIOLATION_EVOLUTION_IDENTITY_UNSAFE",
+          reason: "Evo warning item IDs changed before exact-entity confirmation"
+        };
+      }
+      if (evolutionIds.length === 0) {
+        return { ok: true, exactItemIds: violationIds.filter((id) => violations.some((violation) => violation?.kind === "active-squad" && (violation.itemIds || []).map(Number).includes(id))) };
+      }
+      const records = violationIds.map((id) => ({
+        expectedId: id,
+        submitted: playersById.get(id),
+        ...findCachedItemById(id, ["storage", "club", "unassigned", "transfer"]) || {},
+        protectionReasons: []
+      }));
+      let rejection = null;
+      for (const id of evolutionIds) {
+        const record = records.find((candidate) => candidate.expectedId === id);
+        const submittedDefinitionId = Number(record?.submitted?.definitionId || 0);
+        const liveDefinitionId = Number(record?.item?.definitionId || 0);
+        if (!record?.item || record.pileName !== "storage" || !submittedDefinitionId || submittedDefinitionId !== liveDefinitionId) {
+          rejection = {
+            reasonCode: "ITEM_VIOLATION_EVOLUTION_IDENTITY_UNSAFE",
+            reason: `Evo warning item #${id} is not the same exact Storage entity after submission revalidation`
+          };
+          break;
+        }
+        record.protectionReasons = rollingBaseProtectionReasons(
+          record.item,
+          runtime?.primaryContext?.activeLoopDef || loopDef,
+          "storage"
+        );
+        if (isEvolutionItem(record.item) || record.protectionReasons.includes("fsu-exclude-evolution") || record.protectionReasons.includes("rolling-any-special-evolution")) {
+          rejection = {
+            reasonCode: "ITEM_VIOLATION_EVOLUTION_ENTITY_UNSAFE",
+            reason: `Evo warning item #${id} is itself an Evolution card and remains protected`
+          };
+          break;
+        }
+        if (record.protectionReasons.length) {
+          rejection = {
+            reasonCode: "ITEM_VIOLATION_ENTITY_PROTECTED",
+            reason: `Evo warning item #${id} failed current protection checks (${record.protectionReasons.join(",")})`
+          };
+          break;
+        }
+      }
+      emitDiagnostic(log, () => `${label}: item violation exact-entity diagnostic ${diagnosticJson({
+        status: rejection ? "rejected" : "confirmed",
+        ...rollingItemViolationEntityDiagnostic(context, records)
+      })}`);
+      if (rejection) return { ok: false, ...rejection };
+      return { ok: true, exactItemIds: violationIds };
+    }
     async function resolveRollingActiveSquadConflict(loopDef, runtime, context = {}) {
       const violationIds = new Set((context.violationItemIds || []).map(Number).filter(Boolean));
       const players = (context.players || []).filter((item) => violationIds.has(Number(item?.id || 0)));
@@ -56059,6 +56364,12 @@
                     model: context.model
                   }
                 ),
+                validateItemViolationOverride: (conflict) => validateRollingItemViolationOverride(
+                  loopDef,
+                  runtime,
+                  conflict
+                ),
+                revalidateSubmission: submitContext.revalidateSubmission,
                 rewardObservationAttempts: 1,
                 allowKnownRewardFallback: false,
                 failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
@@ -58809,6 +59120,12 @@
                           model: fill.model
                         }
                       ),
+                      validateItemViolationOverride: (conflict) => validateRollingItemViolationOverride(
+                        activeLoopDef,
+                        runtime,
+                        conflict
+                      ),
+                      revalidateSubmission: context.revalidateSubmission,
                       allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
                       failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
                     }
@@ -59037,7 +59354,7 @@
         const fodderPolicy = getSbcFodderPolicy(loopDef);
         if (loopDef.strategy === "rollingUpgrade") {
           const storageSinkSummary = loopDef.rollingStorageSinkEnabled ? `${loopDef.rollingStorageSink?.mode || "automatic"}/configured:${loopDef.rollingStorageSinkSetName || `Set #${loopDef.rollingStorageSinkSetId || "?"}`}/bound:${loopDef.rollingStorageSink?.capability?.setName || "unavailable"} (Set #${loopDef.rollingStorageSink?.capability?.setId || "?"})` : "off";
-          log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? "Storage-first" : "Unassigned-first"}; Storage recovery priority ${loopDef.rollingStorageRecoveryPriority === "provisions" ? "Provisions-first" : "Storage-Pressure-first"}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? "enabled" : "off"}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? "allowed" : "off"}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? "allowed" : "off"}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; Club current-pool Provisions ${loopDef.rollingAllowClubCurrentPoolSpecialsForProvisions && !loopDef.rollingProtectAllClubNonTotwSpecials ? "last-resort allowed" : "off"}; Storage Pressure Club normal-gold boosters ${loopDef.rollingStoragePressureClubBoostersEnabled ? `enabled (87-${rollingProvisionsMaxRating(loopDef)})` : "off"}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || "special-only"})` : "off; Storage route only"}; Storage pressure SBC ${storageSinkSummary}`);
+          log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? "Storage-first" : "Unassigned-first"}; Pressure relief strategy ${rollingStorageRecoveryModeLabel(loopDef.rollingStorageRecoveryPriority)}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? "enabled" : "off"}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? "allowed" : "off"}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? "allowed" : "off"}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; Club current-pool Provisions ${loopDef.rollingAllowClubCurrentPoolSpecialsForProvisions && !loopDef.rollingProtectAllClubNonTotwSpecials ? "last-resort allowed" : "off"}; Storage Pressure Club normal-gold boosters ${loopDef.rollingStoragePressureClubBoostersEnabled ? `enabled (87-${rollingProvisionsMaxRating(loopDef)})` : "off"}; native duplicate swaps ${loopDef.rollingDuplicateSwapEnabled ? `enabled (${loopDef.rollingDuplicateSwapMode || "special-only"})` : "off; Storage route only"}; Storage pressure SBC ${storageSinkSummary}`);
         } else {
           log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
         }

@@ -79,12 +79,16 @@ describe('current direct side-effect call baseline', () => {
   it('keeps item-violation confirmation bounded to Rolling submissions without a Challenge reload', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     expect(source.match(/allowItemViolationOverride:\s*true/g) || []).toHaveLength(4);
+    expect(source.match(/validateItemViolationOverride:\s*\(conflict\)\s*=>\s*validateRollingItemViolationOverride/g) || []).toHaveLength(4);
+    expect(source.match(/revalidateSubmission:\s*(?:context|submitContext)\.revalidateSubmission/g) || []).toHaveLength(4);
     const protectedConflictStart = source.indexOf('if (shouldStopForProtectedItemViolation({');
     const overrideStart = source.indexOf('if (overridePlan.retry) {');
     const ordinaryRetryStart = source.indexOf('const plan = planBackgroundSubmitRetry({', overrideStart);
     expect(protectedConflictStart).toBeGreaterThan(-1);
     expect(protectedConflictStart).toBeLessThan(overrideStart);
     expect(source.slice(protectedConflictStart, overrideStart)).toContain('resolveProtectedItemViolation');
+    expect(source.slice(protectedConflictStart, overrideStart)).toContain('inspected.activeSquadItemIds');
+    expect(source.slice(protectedConflictStart, overrideStart)).toContain('inspected.unknownItemIds');
     expect(source.slice(protectedConflictStart, overrideStart)).toContain("status: 'replan'");
     expect(source.slice(protectedConflictStart, overrideStart)).toContain("action !== 'override'");
     expect(source).toContain('resolveProtectedItemViolation: (conflict) => configuredConflictResolver(conflict, context)');
@@ -92,6 +96,8 @@ describe('current direct side-effect call baseline', () => {
     expect(overrideStart).toBeGreaterThan(-1);
     expect(ordinaryRetryStart).toBeGreaterThan(overrideStart);
     const overrideBlock = source.slice(overrideStart, ordinaryRetryStart);
+    expect(overrideBlock).toContain('await options.revalidateSubmission()');
+    expect(overrideBlock).toContain('await options.validateItemViolationOverride({');
     expect(overrideBlock).toContain('const forcedOptions = { skipValidation: true, chemistryEnabled };');
     expect(overrideBlock).toContain('eaSbcAdapter().submitChallenge(currentChallenge, set, forcedOptions)');
     expect(overrideBlock).not.toContain('loadRatingSbcChallenge');

@@ -205,8 +205,9 @@ export function showSelectionPolicySettings(options = {}) {
     'bronze-loop-policy-rolling-storage-recovery-priority',
     pickOptions.rollingStorageRecoveryPriority,
     [
-      ['storage-pressure', 'Storage Pressure first'],
-      ['provisions', 'Provisions first'],
+      ['storage-pressure-only', 'Storage Pressure only'],
+      ['provisions-only', 'Provisions only'],
+      ['provisions-then-storage-pressure', 'Provisions once, then Storage Pressure'],
     ],
     mode,
   );
@@ -362,9 +363,9 @@ export function showSelectionPolicySettings(options = {}) {
     rollingDuplicateSwap.label,
     wideField(dom, 'Duplicate swap scope', rollingDuplicateSwapMode, mode, 'Controlled modes require both entities to be untradeable and have identical value fingerprints; all eligible is retained only for legacy experiments'),
     rollingOpenDuplicateProvisionsRewards.label,
-    wideField(dom, 'Storage pressure recovery', rollingStorageSinkMode, mode, 'Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set'),
+    wideField(dom, 'Storage Pressure SBC mode', rollingStorageSinkMode, mode, 'Off disables the Storage Pressure SBC path; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set'),
     wideField(dom, 'Storage pressure SBC', rollingStorageSinkSet, mode, 'Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility'),
-    wideField(dom, 'Storage recovery priority', rollingStorageRecoveryPriority, mode, 'When protected cards cannot enter Storage, try the selected Storage Pressure SBC or Provisions first; the other path remains a fallback'),
+    wideField(dom, 'Pressure relief strategy', rollingStorageRecoveryPriority, mode, 'Choose exactly one recovery strategy: Storage Pressure only, Provisions only, or one Provisions attempt followed by Storage Pressure if the same pressure remains'),
     sectionTitle(dom, 'Submission guards'),
     protectFsuLockedPlayers.label,
     protectActiveSquadPlayers.label,

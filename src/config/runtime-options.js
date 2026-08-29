@@ -25,10 +25,16 @@ import {
 export const INVENTORY_MODES = Object.freeze(['inherit', 'inventory-only', 'normal']);
 export const RUNTIME_QUANTITY_MODES = Object.freeze(['user', 'ea-remaining', 'exhaust', 'fixed']);
 export const ROLLING_STORAGE_RECOVERY_PRIORITIES = Object.freeze([
-  'storage-pressure',
-  'provisions',
+  'storage-pressure-only',
+  'provisions-only',
+  'provisions-then-storage-pressure',
 ]);
-export const DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY = 'storage-pressure';
+export const DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY = 'storage-pressure-only';
+
+const LEGACY_ROLLING_STORAGE_RECOVERY_PRIORITY_MIGRATIONS = Object.freeze({
+  'storage-pressure': 'storage-pressure-only',
+  provisions: 'provisions-then-storage-pressure',
+});
 export const RUNTIME_QUANTITY_TARGETS = Object.freeze([
   'maxCompletions',
   'rounds',
@@ -39,9 +45,24 @@ export { DUPLICATE_SWAP_MODES, PLAYER_PICK_SELECTION_MODES };
 const PICK_OPTIONS_APPLIED = Symbol('pick-options-applied');
 
 export function normalizeRollingStorageRecoveryPriority(value) {
-  return ROLLING_STORAGE_RECOVERY_PRIORITIES.includes(String(value || '').trim().toLowerCase())
-    ? String(value).trim().toLowerCase()
-    : DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY;
+  const normalized = String(value || '').trim().toLowerCase();
+  return ROLLING_STORAGE_RECOVERY_PRIORITIES.includes(normalized)
+    ? normalized
+    : LEGACY_ROLLING_STORAGE_RECOVERY_PRIORITY_MIGRATIONS[normalized]
+      || DEFAULT_ROLLING_STORAGE_RECOVERY_PRIORITY;
+}
+
+export function rollingStorageRecoveryModeLabel(value) {
+  const labels = {
+    'storage-pressure-only': 'Storage Pressure only',
+    'provisions-only': 'Provisions only',
+    'provisions-then-storage-pressure': 'Provisions once, then Storage Pressure',
+  };
+  return labels[normalizeRollingStorageRecoveryPriority(value)] || labels['storage-pressure-only'];
+}
+
+export function rollingStorageRecoveryUsesStoragePressure(value) {
+  return normalizeRollingStorageRecoveryPriority(value) !== 'provisions-only';
 }
 
 function boundedNumber(value, fallback, min, max) {
@@ -475,7 +496,8 @@ export function assertRollingRuntimePreflight(loopDef = {}) {
   if (loopDef.rollingWorkflowEnabled !== true) {
     throw new Error('Rolling Upgrade workflow is staged but not enabled in this build');
   }
-  if (loopDef.rollingStorageSinkEnabled === true
+  if (rollingStorageRecoveryUsesStoragePressure(loopDef.rollingStorageRecoveryPriority)
+    && loopDef.rollingStorageSinkEnabled === true
     && loopDef.rollingStorageSinkMode === 'selected') {
     const selectedSetId = Number(loopDef.rollingStorageSinkSetId || 0);
     const selectedSetName = String(loopDef.rollingStorageSinkSetName || '').trim();

@@ -273,6 +273,41 @@ describe('submitSbcAttempt', () => {
     expect(calls).toEqual(['ready', 'read-final', 'final', 'submit']);
   });
 
+  it('exposes a bounded submission revalidation callback to the transport', async () => {
+    const calls = [];
+    const result = await submitSbcAttempt(baseOptions({
+      preSaveValidators: [async () => { calls.push('pre'); }],
+      postSaveValidators: [async () => { calls.push('post'); }],
+      finalValidators: [async () => { calls.push('final'); }],
+      submitTransport: async ({ revalidateSubmission }) => {
+        calls.push('transport');
+        await revalidateSubmission();
+        calls.push('confirmed');
+        return { submitted: true };
+      },
+    }));
+
+    expect(result).toMatchObject({ submitted: true });
+    expect(calls).toEqual([
+      'pre', 'post', 'final', 'transport',
+      'pre', 'post', 'final', 'confirmed',
+    ]);
+  });
+
+  it('consumes submission revalidation only once', async () => {
+    let revalidate;
+    const result = await submitSbcAttempt(baseOptions({
+      submitTransport: async (context) => {
+        revalidate = context.revalidateSubmission;
+        await revalidate();
+        return { submitted: true };
+      },
+    }));
+
+    expect(result).toMatchObject({ submitted: true });
+    await expect(revalidate()).rejects.toThrow('already consumed');
+  });
+
   it('never reaches transport when the final saved-squad guard rejects', async () => {
     const options = baseOptions({
       readFinalPlayers: async () => [{ id: 99 }],

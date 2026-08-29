@@ -17,8 +17,26 @@
 85x10 限次、次数未知、候选重复或 Set/Challenge/Pack 身份不完整时不生成 Rolling，
 10x84+ 等其它 Upgrade 继续保留 generic Loop。运行时每轮重读 Set repeatability，并用绑定
 Loop、阶段、Set、Challenge 集合、实际 Challenge、Pack 和时间戳的 pending reward journal
-阻止延迟奖励导致提前切换。Node release gate 当前覆盖 202 个测试文件、1899 项测试；
+阻止延迟奖励导致提前切换。Node release gate 当前覆盖 202 个测试文件、1908 项测试；
 真实 EA Web App 仍需分别验证 86 无限、86 限次切 85、86 已耗尽三种会话状态。
+
+当前开发修正：Rolling 后台提交不再把所有 `409 itemViolations` 当作 Active Squad。
+warning 解析保留 name 与 item IDs 的逐条关系；只有 `ACTIVE_SQUAD` 进入既有替换/人工确认，
+`Evo` 在重新读取同一 saved squad、重跑全部提交 validator，并确认精确 warning item 是
+非 Evolution 的 Storage 实体后，才允许一次 `skipValidation:true`。同 definition 的 Club EVO
+只进入有界诊断，不会替换或污染 Storage 身份；实际 EVO、实体/阵容变化及 Active Squad
+保护开启时的未知 warning 均停止。Node fixture 覆盖 90 Ronaldo Storage 基础卡与 Club EVO
+副本共存、真实 Storage EVO、混合 Active Squad/Evo warning 和一次性确认预算；真实页面仍需
+验证该 Ronaldo Provisions 提交及强制确认失败后的停止行为。
+
+当前开发修正：Rolling 的 Storage 压力缓解改为三个互斥策略：
+`storage-pressure-only` 只执行用户启用并绑定的 Storage Pressure SBC；
+`provisions-only` 只执行紧急 Provisions；`provisions-then-storage-pressure` 在同一连续压力
+事件中最多先执行一次 Provisions，重新读取库存后压力仍存在才执行 Storage Pressure。
+默认值为 `storage-pressure-only`；旧 `storage-pressure` 迁移到该默认值，旧 `provisions`
+迁移到混合策略。不同压力来源独立记账，Storage 路由恢复或主阵重新可规划后立即清除事件
+状态；Provisions 硬失败不绕过到 Storage Pressure。待存 Unassigned duplicate signal、
+Storage 净消费、FSU/Lock/Evolution/Active Squad、Automatic-use 与提交前身份保护均不变。
 
 当前开发修正：Selection Policy 新增默认关闭的
 `rollingStoragePressureClubBoostersEnabled`。启用后，动态 Storage Pressure 阵容在仍需

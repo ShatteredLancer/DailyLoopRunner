@@ -145,6 +145,8 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('normal recovery order Unassigned first');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Pressure relief strategy Storage Pressure only');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('shortage Provisions batch 2');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('FSU locked players off');

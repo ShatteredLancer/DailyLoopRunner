@@ -156,6 +156,32 @@ export async function submitSbcAttempt(options = {}) {
       context.finalPlayers = await options.readFinalPlayers(context);
     }
     await runValidators(options.finalValidators, context, 'final');
+    let submissionRevalidated = false;
+    context.revalidateSubmission = async () => {
+      if (submissionRevalidated) {
+        throw new Error('submission revalidation is already consumed');
+      }
+      submissionRevalidated = true;
+      const readLatestPlayers = options.readFinalPlayers || options.readSavedPlayers;
+      if (readLatestPlayers) {
+        const latestPlayers = await readLatestPlayers(context);
+        if (!Array.isArray(latestPlayers) || !latestPlayers.length) {
+          throw new Error('submission revalidation could not read the saved squad');
+        }
+        context.finalPlayers = latestPlayers;
+        context.players = latestPlayers;
+        context.savedPlayers = latestPlayers;
+      }
+      await runValidators(options.preSaveValidators, context, 'confirmation pre-save');
+      await runValidators(options.postSaveValidators, context, 'confirmation post-save');
+      await runValidators(options.finalValidators, context, 'confirmation final');
+      return {
+        ok: true,
+        players: context.finalPlayers?.length
+          ? context.finalPlayers
+          : context.savedPlayers?.length ? context.savedPlayers : context.players,
+      };
+    };
 
     const runCommittedSubmit = typeof options.runCommittedSubmit === 'function'
       ? options.runCommittedSubmit

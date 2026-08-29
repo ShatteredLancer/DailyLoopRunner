@@ -257,6 +257,84 @@ describe('Rolling squad safety inspection', () => {
     })).toBe(false);
   });
 
+  it('confirms an Evo warning only for the exact non-EVO Storage entity when the Club copy is evolved', async () => {
+    const storageRonaldo = makePlayer({
+      id: 904471909754,
+      definitionId: 100684097,
+      rating: 90,
+      rareflag: 108,
+      name: 'Cristiano Ronaldo',
+      groups: [17, 19, 83],
+    });
+    const clubRonaldo = makePlayer({
+      id: 904471900001,
+      definitionId: 100684097,
+      rating: 90,
+      rareflag: 108,
+      name: 'Cristiano Ronaldo',
+      upgrades: { evolutionId: 42 },
+    });
+    const { api } = await loadUserscript({
+      storage: [storageRonaldo],
+      club: [clubRonaldo],
+    });
+    api.setFsuSettingsOverride({ excludeEvolution: true });
+
+    await expect(api.validateRollingItemViolationOverride({
+      name: '10x 85+ Rolling',
+      expectedPlayerCount: 11,
+    }, {
+      primaryContext: { activeLoopDef: { name: '10x 85+ Rolling', expectedPlayerCount: 11 } },
+    }, {
+      label: 'Scanned Provisions Recovery',
+      players: [storageRonaldo],
+      violations: [{
+        name: 'Evo',
+        normalizedName: 'EVO',
+        kind: 'evolution',
+        itemIds: [storageRonaldo.id],
+      }],
+      violationItemIds: [storageRonaldo.id],
+      evolutionItemIds: [storageRonaldo.id],
+    })).resolves.toMatchObject({
+      ok: true,
+      exactItemIds: [storageRonaldo.id],
+    });
+  });
+
+  it('does not confirm an Evo warning for an actually evolved Storage entity', async () => {
+    const evolvedStorage = makePlayer({
+      id: 904471909754,
+      definitionId: 100684097,
+      rating: 90,
+      rareflag: 108,
+      upgrades: { evolutionId: 42 },
+    });
+    const { api } = await loadUserscript({ storage: [evolvedStorage] });
+    api.setFsuSettingsOverride({ excludeEvolution: true });
+
+    await expect(api.validateRollingItemViolationOverride({
+      name: '10x 85+ Rolling',
+      expectedPlayerCount: 11,
+    }, {
+      primaryContext: { activeLoopDef: { name: '10x 85+ Rolling', expectedPlayerCount: 11 } },
+    }, {
+      label: 'Scanned Provisions Recovery',
+      players: [evolvedStorage],
+      violations: [{
+        name: 'Evo',
+        normalizedName: 'EVO',
+        kind: 'evolution',
+        itemIds: [evolvedStorage.id],
+      }],
+      violationItemIds: [evolvedStorage.id],
+      evolutionItemIds: [evolvedStorage.id],
+    })).resolves.toMatchObject({
+      ok: false,
+      reasonCode: 'ITEM_VIOLATION_EVOLUTION_ENTITY_UNSAFE',
+    });
+  });
+
   it('builds transaction refs from snapshots but fingerprints the complete EA entities', async () => {
     const source = makePlayer({ id: 501, definitionId: 5001, rating: 90, rareflag: 22 });
     source.playStyle = 250;
