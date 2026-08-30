@@ -3033,6 +3033,35 @@ describe('Rolling runtime recovery helpers', () => {
     });
   });
 
+  it('counts an authorized pending Unassigned duplicate as pressure progress alongside Storage consumption', async () => {
+    const pending = Array.from({ length: 2 }, (_, index) => makePlayer({
+      id: 709 + index,
+      definitionId: 9709 + index,
+      duplicate: true,
+    }));
+    const { api } = await loadUserscript({ unassigned: pending });
+    const runtime = {
+      openRouting: { storageItems: pending },
+      coordinator: {
+        getLedger: () => ({
+          summary: () => ({ capacities: { storage: { free: 0 } } }),
+        }),
+      },
+    };
+
+    expect(api.validateRollingEmergencyProvisionsSelection(runtime, 1, {
+      allowIncremental: true,
+      maximumRelease: 2,
+      consumedPendingRefs: [pending[0]],
+    })).toMatchObject({
+      ok: true,
+      requiredRelease: 2,
+      storageItemsConsumed: 1,
+      pendingSignalsConsumed: 1,
+      effectiveRelease: 2,
+    });
+  });
+
   it('enforces the minimum real Storage release requested by rating-excess recovery', async () => {
     const { api } = await loadUserscript();
     const runtime = {
@@ -3190,6 +3219,137 @@ describe('Rolling runtime recovery helpers', () => {
     }, reserveIds)).toEqual([
       expect.objectContaining({ id: ordinary.id, pile: 'unassigned' }),
     ]);
+  });
+
+  it('uses the configured Provision reserve range for safe pressure duplicate signals', async () => {
+    const safeSignal = makePlayer({
+      id: 771,
+      definitionId: 9771,
+      rating: 88,
+      duplicate: true,
+      duplicateId: 1771,
+    });
+    const safeTarget = makePlayer({ id: 1771, definitionId: 9771, rating: 88 });
+    const highSignal = makePlayer({
+      id: 772,
+      definitionId: 9772,
+      rating: 89,
+      duplicate: true,
+      duplicateId: 1772,
+    });
+    const highTarget = makePlayer({ id: 1772, definitionId: 9772, rating: 89 });
+    const lowSignal = makePlayer({
+      id: 776,
+      definitionId: 9776,
+      rating: 86,
+      duplicate: true,
+      duplicateId: 1776,
+    });
+    const lowTarget = makePlayer({ id: 1776, definitionId: 9776, rating: 86 });
+    const overSignal = makePlayer({
+      id: 777,
+      definitionId: 9777,
+      rating: 90,
+      duplicate: true,
+      duplicateId: 1777,
+    });
+    const overTarget = makePlayer({ id: 1777, definitionId: 9777, rating: 90 });
+    const specialSignal = makePlayer({
+      id: 773,
+      definitionId: 9773,
+      rating: 88,
+      rareflag: 22,
+      duplicate: true,
+      duplicateId: 1773,
+    });
+    const specialTarget = makePlayer({ id: 1773, definitionId: 9773, rating: 88, rareflag: 22 });
+    const { api } = await loadUserscript({
+      unassigned: [safeSignal, highSignal, lowSignal, overSignal, specialSignal],
+      club: [safeTarget, highTarget, lowTarget, overTarget, specialTarget],
+    });
+    const runtime = {
+      duplicateSwapEnabled: false,
+      pendingUnassignedRefs: [safeSignal, highSignal, lowSignal, overSignal, specialSignal],
+      openRouting: {
+        storageItems: [safeSignal, highSignal, lowSignal, overSignal, specialSignal],
+      },
+      primaryDuplicateRefs: [],
+    };
+    const loopDef = { name: 'pressure provisions', runtimeProtectionRating: 95 };
+
+    expect(api.rollingStoragePressureConsumablePendingRefs(runtime, loopDef)).toEqual([
+      expect.objectContaining({ id: safeSignal.id, definitionId: safeSignal.definitionId, pile: 'unassigned' }),
+    ]);
+    const expandedLoopDef = {
+      ...loopDef,
+      runtimeProvisionsMaxRating: 89,
+    };
+    expect(api.rollingStoragePressureConsumablePendingRefs(runtime, expandedLoopDef)).toEqual([
+      expect.objectContaining({ id: safeSignal.id }),
+      expect.objectContaining({ id: highSignal.id }),
+    ]);
+    expect(api.assertRollingRecoveryItems(expandedLoopDef, runtime, [highTarget], {
+      allowProvisionsReserve: true,
+      allowSpecial: true,
+      allowedPendingUnassignedRefs: [highSignal],
+      allowedRatings: [87, 88, 89],
+      minRating: 87,
+      maxRating: 89,
+      selection: {
+        entries: [{ pileName: 'unassigned', signal: highSignal, item: highTarget }],
+      },
+    })).toBe(true);
+    expect(api.rollingEmergencyProvisionsProtectedRefs(
+      runtime,
+      new Set(),
+      [{ id: safeSignal.id, definitionId: safeSignal.definitionId, pile: 'unassigned' }],
+    )).toEqual([
+      expect.objectContaining({ id: highSignal.id }),
+      expect.objectContaining({ id: lowSignal.id }),
+      expect.objectContaining({ id: overSignal.id }),
+      expect.objectContaining({ id: specialSignal.id }),
+    ]);
+  });
+
+  it('does not authorize a safe-looking duplicate when its target is protected or has a different card version', async () => {
+    const protectedSignal = makePlayer({
+      id: 774,
+      definitionId: 9774,
+      rating: 88,
+      duplicate: true,
+      duplicateId: 1774,
+    });
+    const protectedTarget = makePlayer({ id: 1774, definitionId: 9774, rating: 88, evolutionId: 9 });
+    const mismatchedSignal = makePlayer({
+      id: 775,
+      definitionId: 9775,
+      rating: 88,
+      duplicate: true,
+      duplicateId: 1775,
+    });
+    const mismatchedTarget = makePlayer({ id: 1775, definitionId: 9775, rating: 88, rareflag: 22 });
+    const { api } = await loadUserscript({
+      unassigned: [protectedSignal, mismatchedSignal],
+      club: [protectedTarget, mismatchedTarget],
+    });
+    const runtime = {
+      pendingUnassignedRefs: [protectedSignal, mismatchedSignal],
+      openRouting: { storageItems: [protectedSignal, mismatchedSignal] },
+      primaryDuplicateRefs: [],
+      coordinator: {
+        getLedger: () => ({
+          classifiedEntries: () => [{
+            item: protectedTarget,
+            pile: 'club',
+            classification: { protected: true },
+          }],
+        }),
+      },
+    };
+    expect(api.rollingStoragePressureConsumablePendingRefs(runtime, {
+      name: 'pressure provisions',
+      runtimeProtectionRating: 95,
+    })).toEqual([]);
   });
 
   it('releases only explicitly eligible pending Storage cards from Sink protection', async () => {

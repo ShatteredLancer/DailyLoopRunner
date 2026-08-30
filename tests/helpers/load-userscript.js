@@ -169,6 +169,7 @@ export async function loadUserscript(options = {}) {
       rollingRatingRecoveryStoragePressure,
       rollingStorageSinkConsumablePendingRefs,
       rollingEmergencyProvisionsProtectedRefs,
+      rollingStoragePressureConsumablePendingRefs,
       rollingStoragePressureProvisionsReserveEntries,
       rollingStoragePressureRequiredSpecialEntries,
       rollingStorageSinkSelectionPolicy,

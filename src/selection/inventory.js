@@ -188,43 +188,54 @@ export function selectInventoryPlayers(input = {}) {
     for (const phase of requirementSelectionPhases(requirement, preferredSignalRefs.length > 0)) {
       if (need <= 0) break;
       const phaseRequirement = phase.requirement;
-      for (const pileName of piles) {
-        if (need <= 0) break;
-        if (phase.preferredOnly && pileName !== 'unassigned' && pileName !== 'transfer') continue;
+      const pileCandidates = piles.flatMap((pileName) => {
+        if (phase.preferredOnly && pileName !== 'unassigned' && pileName !== 'transfer') return [];
         const preferredRefs = pileName === 'unassigned' || pileName === 'transfer'
           ? preferredSignalRefs
           : [];
-        const candidates = sortCandidates(snapshot.piles[pileName] || [], phaseRequirement, fsuPolicy, preferredRefs);
-        for (const candidate of candidates) {
-          if (need <= 0) break;
-          if (phase.preferredOnly && !isPreferredItem(candidate, preferredSignalRefs)) continue;
-          if (selectedIds.has(candidate.id) || selectedDefinitionIds.has(candidate.definitionId)) continue;
-          const reasons = rejectionReasons(candidate, phaseRequirement, fsuPolicy, requirementProtection);
-          if (reasons.length) {
-            diagnostics.push({ pileName, itemRef: candidate.ref, reasons });
-            continue;
-          }
-
-          let item = candidate;
-          let signal = null;
-          if (pileName === 'unassigned' || pileName === 'transfer') {
-            if (!candidate.duplicateSignal && !candidate.duplicate) continue;
-            item = findSubmissionItem(candidate, snapshot, submissionIds, phaseRequirement, fsuPolicy, requirementProtection);
-            if (!item || selectedDefinitionIds.has(item.definitionId)) continue;
-            signal = candidate;
-            duplicateSignals.push({ pileName, signalRef: signal.ref, itemRef: item.ref });
-            selectedIds.add(signal.id);
-          }
-
-          if (submissionIds.has(item.id) || selectedIds.has(item.id) || selectedDefinitionIds.has(item.definitionId)) continue;
-          selectedIds.add(item.id);
-          selectedDefinitionIds.add(item.definitionId);
-          submissionIds.add(item.id);
-          selected.push(item);
-          entries.push({ pileName, signalRef: signal?.ref || null, itemRef: item.ref });
-          pileCounts[pileName] = (pileCounts[pileName] || 0) + 1;
-          need--;
+        return sortCandidates(snapshot.piles[pileName] || [], phaseRequirement, fsuPolicy, preferredRefs)
+          .map((candidate) => ({ pileName, candidate }));
+      });
+      // Pressure Provisions must exhaust ordinary gold across every enabled
+      // pile before using an explicitly authorized special card. This is a
+      // path-local ordering rule; callers that do not opt in retain the
+      // historical pile-first ordering.
+      const orderedCandidates = input.specialFallbackAfterNormal === true
+        && phaseRequirement.allowSpecial === true
+        ? [
+            ...pileCandidates.filter(({ candidate }) => candidate.special !== true),
+            ...pileCandidates.filter(({ candidate }) => candidate.special === true),
+          ]
+        : pileCandidates;
+      for (const { pileName, candidate } of orderedCandidates) {
+        if (need <= 0) break;
+        if (phase.preferredOnly && !isPreferredItem(candidate, preferredSignalRefs)) continue;
+        if (selectedIds.has(candidate.id) || selectedDefinitionIds.has(candidate.definitionId)) continue;
+        const reasons = rejectionReasons(candidate, phaseRequirement, fsuPolicy, requirementProtection);
+        if (reasons.length) {
+          diagnostics.push({ pileName, itemRef: candidate.ref, reasons });
+          continue;
         }
+
+        let item = candidate;
+        let signal = null;
+        if (pileName === 'unassigned' || pileName === 'transfer') {
+          if (!candidate.duplicateSignal && !candidate.duplicate) continue;
+          item = findSubmissionItem(candidate, snapshot, submissionIds, phaseRequirement, fsuPolicy, requirementProtection);
+          if (!item || selectedDefinitionIds.has(item.definitionId)) continue;
+          signal = candidate;
+          duplicateSignals.push({ pileName, signalRef: signal.ref, itemRef: item.ref });
+          selectedIds.add(signal.id);
+        }
+
+        if (submissionIds.has(item.id) || selectedIds.has(item.id) || selectedDefinitionIds.has(item.definitionId)) continue;
+        selectedIds.add(item.id);
+        selectedDefinitionIds.add(item.definitionId);
+        submissionIds.add(item.id);
+        selected.push(item);
+        entries.push({ pileName, signalRef: signal?.ref || null, itemRef: item.ref });
+        pileCounts[pileName] = (pileCounts[pileName] || 0) + 1;
+        need--;
       }
     }
 

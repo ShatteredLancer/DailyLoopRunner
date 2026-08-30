@@ -810,7 +810,7 @@ describe('dynamic EA player-group policy', () => {
     const approved = [1, 2].map((id) => makePlayer({
       id: 9200 + id,
       definitionId: 19200 + id,
-      rating: id === 1 ? 88 : 90,
+      rating: 88,
       rareflag: 120 + id,
       groups: [19, 83],
       name: `Provision Special ${id}`,
@@ -849,6 +849,30 @@ describe('dynamic EA player-group policy', () => {
       groups: [19, 83],
       name: 'Over-protection Provision Special',
     });
+    const overRange = makePlayer({
+      id: 9208,
+      definitionId: 19208,
+      rating: 89,
+      rareflag: 153,
+      groups: [19, 83],
+      name: 'Over-range Provision Special',
+    });
+    const belowRange = makePlayer({
+      id: 9209,
+      definitionId: 19209,
+      rating: 86,
+      rareflag: 154,
+      groups: [19, 83],
+      name: 'Below-range Provision Special',
+    });
+    const aboveExpandedRange = makePlayer({
+      id: 9210,
+      definitionId: 19210,
+      rating: 90,
+      rareflag: 155,
+      groups: [19, 83],
+      name: 'Above-expanded-range Provision Special',
+    });
     const ordinary89 = makePlayer({
       id: 9207,
       definitionId: 19207,
@@ -858,7 +882,17 @@ describe('dynamic EA player-group policy', () => {
       name: 'Ordinary Gold 89',
     });
     const { api } = await loadUserscript({
-      storage: [...approved, unrelated, cosmetic, evolved, overProtection, ordinary89],
+      storage: [
+        ...approved,
+        unrelated,
+        cosmetic,
+        evolved,
+        overProtection,
+        overRange,
+        belowRange,
+        aboveExpandedRange,
+        ordinary89,
+      ],
     });
     const primaryLoopDef = {
       name: 'Expanded primary context',
@@ -876,13 +910,26 @@ describe('dynamic EA player-group policy', () => {
       eligibilityRequirements: [
         requirement('TEAM_RATING', [84]),
         requirement('PLAYER_RARITY_GROUP', [83], 1, (item) => (
-          approved.some((candidate) => candidate.id === item.id)
+          [...approved, overRange, belowRange, aboveExpandedRange]
+            .some((candidate) => candidate.id === item.id)
         )),
       ],
     });
     const loopDef = { name: 'Storage Pressure', runtimeProtectionRating: 95 };
     const snapshot = createInventorySnapshot({
-      piles: { storage: [...approved, unrelated, cosmetic, evolved, overProtection, ordinary89] },
+      piles: {
+        storage: [
+          ...approved,
+          unrelated,
+          cosmetic,
+          evolved,
+          overProtection,
+          overRange,
+          belowRange,
+          aboveExpandedRange,
+          ordinary89,
+        ],
+      },
     });
     const entries = snapshot.piles.storage.map((item) => ({
       item,
@@ -901,6 +948,12 @@ describe('dynamic EA player-group policy', () => {
     }));
 
     expect(reserveEntries.map(({ item }) => item.id).sort()).toEqual(approved.map((item) => item.id).sort());
+    expect(api.rollingStoragePressureProvisionsReserveEntries(runtime, {
+      ...loopDef,
+      runtimeProvisionsMaxRating: 89,
+    }).map(({ item }) => item.id).sort()).toEqual(
+      [...approved, overRange].map((item) => item.id).sort(),
+    );
     const provisionsSelection = api.selectInventoryPlayers({
       name: 'Emergency Provisions selection',
       requirements: [{
@@ -917,6 +970,9 @@ describe('dynamic EA player-group policy', () => {
         cosmetic.id,
         evolved.id,
         overProtection.id,
+        overRange.id,
+        belowRange.id,
+        aboveExpandedRange.id,
         ordinary89.id,
       ],
       runtimeSbcFodderPolicy: {

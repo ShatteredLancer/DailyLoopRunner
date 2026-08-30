@@ -253,6 +253,75 @@ describe('pure inventory selector', () => {
     ]);
   });
 
+  it('uses ordinary Gold across Storage and Unassigned before a Storage special when explicitly requested', () => {
+    const adapter = createFakeInventoryAdapter({
+      storage: [
+        makePlayer({ id: 1, definitionId: 101, rating: 87, rareflag: 0 }),
+        makePlayer({ id: 2, definitionId: 102, rating: 87, rareflag: 20 }),
+      ],
+      unassigned: [
+        makePlayer({
+          id: 10,
+          definitionId: 110,
+          rating: 88,
+          rareflag: 0,
+          duplicate: true,
+          duplicateId: 20,
+        }),
+      ],
+      club: [makePlayer({ id: 20, definitionId: 110, rating: 88, rareflag: 0 })],
+    });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 3,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+      }],
+      priorityPiles: ['storage', 'unassigned'],
+      specialFallbackAfterNormal: true,
+      fsuPolicy,
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected.map((item) => item.id)).toEqual([1, 20, 2]);
+    expect(plan.entries.map((entry) => entry.pileName)).toEqual(['storage', 'unassigned', 'storage']);
+  });
+
+  it('keeps historical pile-first special ordering unless the fallback option is enabled', () => {
+    const adapter = createFakeInventoryAdapter({
+      storage: [makePlayer({ id: 1, definitionId: 101, rating: 87, rareflag: 20 })],
+      unassigned: [makePlayer({
+        id: 10,
+        definitionId: 110,
+        rating: 88,
+        rareflag: 0,
+        duplicate: true,
+        duplicateId: 20,
+      })],
+      club: [makePlayer({ id: 20, definitionId: 110, rating: 88, rareflag: 0 })],
+    });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 2,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+      }],
+      priorityPiles: ['storage', 'unassigned'],
+      fsuPolicy,
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected.map((item) => item.id)).toEqual([1, 20]);
+  });
+
   it('prioritizes a blocked Unassigned duplicate signal without bypassing eligibility', () => {
     const adapter = createFakeInventoryAdapter({
       unassigned: [
