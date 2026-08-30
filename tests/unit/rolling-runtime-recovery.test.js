@@ -750,6 +750,263 @@ describe('Rolling runtime recovery helpers', () => {
     expect(inventoryPiles.unassigned).toEqual([signal]);
   });
 
+  it('directly consumes only an exact authorized Pressure Provisions counterpart when swaps are disabled', async () => {
+    const signal = makePlayer({
+      id: 93,
+      definitionId: 9093,
+      rating: 88,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: 94,
+    });
+    signal.pile = 'unassigned';
+    const counterpart = makePlayer({
+      id: 94,
+      definitionId: 9093,
+      rating: 88,
+      rareflag: 1,
+    });
+    counterpart.pile = 'club';
+    const { api, window, userscriptValues } = await loadUserscript({
+      club: [counterpart],
+      unassigned: [signal],
+    });
+    const move = vi.fn(() => successfulObservable());
+    window.services = { Item: { move } };
+    const runtime = {
+      duplicateSwapEnabled: false,
+      duplicateMaterializationTransaction: null,
+      openRouting: { storageItems: [signal] },
+      coordinator: {
+        getLedger: () => ({
+          classifiedEntries: () => [{
+            item: counterpart,
+            pile: 'club',
+            classification: { protected: false, requiredSpecial: false },
+          }],
+        }),
+      },
+    };
+
+    const result = await api.prepareRollingUntradeableDuplicateSwaps({
+      label: 'Pressure Provisions authorized duplicate',
+      players: [counterpart],
+      squadPlan: {
+        selection: {
+          entries: [{ pileName: 'unassigned', signal, item: counterpart }],
+        },
+      },
+    }, runtime, {
+      allowAuthorizedPendingDuplicateConsumption: true,
+      allowedPendingUnassignedRefs: [signal],
+      allowedRatings: [87, 88],
+      loopDef: { name: 'Pressure Provisions', runtimeProtectionRating: 95 },
+    });
+
+    expect(result).toMatchObject({ ok: true, swaps: [] });
+    expect(move).not.toHaveBeenCalled();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+    expect(runtime.duplicateMaterializationTransaction).toBeNull();
+  });
+
+  it.each([
+    ['rating outside the configured reserve range', { targetRating: 89 }],
+    ['special-card identity', { rareflag: 22 }],
+    ['different card version', { definitionId: 9995 }],
+    ['protected Club counterpart', { protected: true }],
+    ['Evolution state', { evolutionId: 9 }],
+    ['cosmetic state', { cosmetics: [{ id: 7 }] }],
+    ['missing live signal', { removeSignal: true }],
+    ['changed duplicate target identity', { duplicateId: 9996 }],
+  ])('blocks authorized Pressure Provisions consumption with %s', async (_label, mutation) => {
+    const signal = makePlayer({
+      id: 95,
+      definitionId: 9095,
+      rating: 88,
+      rareflag: mutation.rareflag || 1,
+      duplicate: true,
+      duplicateId: mutation.duplicateId || 96,
+    });
+    signal.pile = 'unassigned';
+    const counterpart = makePlayer({
+      id: 96,
+      definitionId: mutation.definitionId || 9095,
+      rating: mutation.targetRating || 88,
+      rareflag: mutation.rareflag || 1,
+      evolutionId: mutation.evolutionId,
+      cosmetics: mutation.cosmetics,
+    });
+    counterpart.pile = 'club';
+    const { api, window } = await loadUserscript({
+      club: [counterpart],
+      unassigned: mutation.removeSignal ? [] : [signal],
+    });
+    const move = vi.fn(() => successfulObservable());
+    window.services = { Item: { move } };
+    const runtime = {
+      duplicateSwapEnabled: false,
+      duplicateMaterializationTransaction: null,
+      openRouting: { storageItems: [signal] },
+      coordinator: {
+        getLedger: () => ({
+          classifiedEntries: () => [{
+            item: counterpart,
+            pile: 'club',
+            classification: {
+              protected: mutation.protected === true,
+              requiredSpecial: false,
+            },
+          }],
+        }),
+      },
+    };
+
+    const result = await api.prepareRollingUntradeableDuplicateSwaps({
+      label: 'Pressure Provisions invalid authorized duplicate',
+      players: [counterpart],
+      squadPlan: {
+        selection: {
+          entries: [{ pileName: 'unassigned', signal, item: counterpart }],
+        },
+      },
+    }, runtime, {
+      allowAuthorizedPendingDuplicateConsumption: true,
+      allowedPendingUnassignedRefs: [signal],
+      allowedRatings: [87, 88],
+      loopDef: { name: 'Pressure Provisions', runtimeProtectionRating: 95 },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'AUTHORIZED_PENDING_DUPLICATE_INVALID',
+    });
+    expect(move).not.toHaveBeenCalled();
+  });
+
+  it('keeps native swap eligibility checks active when the experimental swap switch is enabled', async () => {
+    const signal = makePlayer({
+      id: 101,
+      definitionId: 9101,
+      rating: 88,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: 102,
+    });
+    signal.pile = 'unassigned';
+    const counterpart = makePlayer({ id: 102, definitionId: 9101, rating: 88, rareflag: 1 });
+    counterpart.pile = 'club';
+    const { api, window } = await loadUserscript({ club: [counterpart], unassigned: [signal] });
+    const move = vi.fn(() => successfulObservable());
+    window.services.Item.move = move;
+    const runtime = {
+      duplicateSwapEnabled: true,
+      duplicateSwapMode: 'safe-only',
+      duplicateMaterializationTransaction: null,
+      openRouting: { storageItems: [signal] },
+      coordinator: {
+        reconcile: vi.fn(async () => ({ ok: true })),
+        getLedger: () => ({
+          classifiedEntries: () => [{
+            item: counterpart,
+            pile: 'club',
+            classification: { protected: false, requiredSpecial: false },
+          }],
+          summary: () => ({ inventoryVersion: 1 }),
+        }),
+      },
+    };
+
+    const result = await api.prepareRollingUntradeableDuplicateSwaps({
+      label: 'Pressure Provisions swap-enabled duplicate',
+      players: [counterpart],
+      set: { id: 200 },
+      challenge: { id: 201 },
+      squadPlan: {
+        selection: {
+          entries: [{ pileName: 'unassigned', signal, item: counterpart }],
+        },
+      },
+    }, runtime, {
+      allowAuthorizedPendingDuplicateConsumption: true,
+      allowedPendingUnassignedRefs: [signal],
+      allowedRatings: [87, 88],
+      loopDef: { name: 'Pressure Provisions', runtimeProtectionRating: 95 },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'controlled duplicate swap value fingerprint is incomplete',
+    });
+    expect(move).not.toHaveBeenCalled();
+  });
+
+  it('still blocks a mixed unauthorized duplicate while allowing no partial bypass', async () => {
+    const allowedSignal = makePlayer({
+      id: 97,
+      definitionId: 9097,
+      rating: 87,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: 98,
+    });
+    allowedSignal.pile = 'unassigned';
+    const allowedTarget = makePlayer({ id: 98, definitionId: 9097, rating: 87, rareflag: 1 });
+    allowedTarget.pile = 'club';
+    const blockedSignal = makePlayer({
+      id: 99,
+      definitionId: 9099,
+      rating: 87,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: 100,
+    });
+    blockedSignal.pile = 'unassigned';
+    const blockedTarget = makePlayer({ id: 100, definitionId: 9099, rating: 87, rareflag: 1 });
+    blockedTarget.pile = 'club';
+    const { api, window, userscriptValues } = await loadUserscript({
+      club: [allowedTarget, blockedTarget],
+      unassigned: [allowedSignal, blockedSignal],
+    });
+    const move = vi.fn(() => successfulObservable());
+    window.services = { Item: { move } };
+    const runtime = {
+      duplicateSwapEnabled: false,
+      duplicateMaterializationTransaction: null,
+      openRouting: { storageItems: [allowedSignal, blockedSignal] },
+      coordinator: {
+        getLedger: () => ({
+          classifiedEntries: () => [allowedTarget, blockedTarget].map((item) => ({
+            item,
+            pile: 'club',
+            classification: { protected: false, requiredSpecial: false },
+          })),
+        }),
+      },
+    };
+
+    const result = await api.prepareRollingUntradeableDuplicateSwaps({
+      label: 'Pressure Provisions mixed duplicate authorization',
+      players: [allowedTarget, blockedTarget],
+      squadPlan: {
+        selection: {
+          entries: [
+            { pileName: 'unassigned', signal: allowedSignal, item: allowedTarget },
+            { pileName: 'unassigned', signal: blockedSignal, item: blockedTarget },
+          ],
+        },
+      },
+    }, runtime, {
+      allowAuthorizedPendingDuplicateConsumption: true,
+      allowedPendingUnassignedRefs: [allowedSignal],
+      allowedRatings: [87, 88],
+      loopDef: { name: 'Pressure Provisions', runtimeProtectionRating: 95 },
+    });
+
+    expect(result).toMatchObject({ ok: false, reasonCode: 'DUPLICATE_SWAP_DISABLED' });
+    expect(move).not.toHaveBeenCalled();
+    expect(userscriptValues.has(ROLLING_DUPLICATE_TRANSACTION_KEY)).toBe(false);
+  });
+
   it('reuses the exact reverse duplicate signal after native swap without starting another swap', async () => {
     const { transaction, consume, displaced } = materializedDuplicateTransaction();
     consume.tradeable = false;

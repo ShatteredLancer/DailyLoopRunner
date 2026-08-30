@@ -398,7 +398,10 @@ describe('current direct side-effect call baseline', () => {
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     expect(block).toContain("submissionMode: 'background'");
-    expect(block).toContain('prepareRollingUntradeableDuplicateSwaps(context, runtime)');
+    expect(block).toContain('prepareRollingUntradeableDuplicateSwaps(context, runtime, {');
+    expect(block).toContain('allowAuthorizedPendingDuplicateConsumption:');
+    expect(source).toMatch(/allowedPendingUnassignedRefs: consumablePendingUnassignedRefs,[\s\S]*?allowAuthorizedPendingDuplicateConsumption: storagePressure/);
+    expect(source.match(/allowAuthorizedPendingDuplicateConsumption: storagePressure/g)).toHaveLength(1);
     expect(block).toContain('allowItemViolationOverride: true');
     expect(block).toContain('protectActiveSquadPlayers:');
     expect(block).toContain('rollingBackgroundSubmitInventoryDiagnostic(runtime, players)');

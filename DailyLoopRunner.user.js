@@ -52167,7 +52167,80 @@
         };
       }
     }
-    async function prepareRollingUntradeableDuplicateSwaps(context, runtime) {
+    function validateAuthorizedPendingDuplicateConsumption(context, runtime, options = {}) {
+      const authorizedSignalIds = /* @__PURE__ */ new Set();
+      if (options.allowAuthorizedPendingDuplicateConsumption !== true || runtime?.duplicateSwapEnabled === true) {
+        return { ok: true, authorizedSignalIds };
+      }
+      const selection = context?.squadPlan?.selection;
+      const players = Array.isArray(context?.players) ? context.players : [];
+      const allowedRefs = rollingUniqueRefs(options.allowedPendingUnassignedRefs || []);
+      const allowedRatings = new Set((options.allowedRatings || []).map(Number).filter((rating) => Number.isFinite(rating) && rating > 0));
+      const selectedEntries = (selection?.entries || []).filter((entry) => entry?.pileName === "unassigned" && entry?.signal && allowedRefs.some((ref) => rollingExactItemMatchesRef(entry.signal, ref)));
+      if (!selectedEntries.length) return { ok: true, authorizedSignalIds };
+      const blocked3 = (reason, details = {}) => ({
+        ok: false,
+        reason,
+        reasonCode: "AUTHORIZED_PENDING_DUPLICATE_INVALID",
+        details
+      });
+      if (!allowedRatings.size) {
+        return blocked3("authorized pending duplicate consumption has no configured Provisions reserve rating set");
+      }
+      if (runtime?.duplicateMaterializationTransaction) {
+        return blocked3("authorized pending duplicate consumption cannot bypass an active duplicate transaction");
+      }
+      const activeLoopDef = runtime?.primaryContext?.activeLoopDef || options.loopDef || {};
+      const ledgerEntries = runtime?.coordinator?.getLedger?.()?.classifiedEntries?.() || [];
+      const pendingStorageItems = runtime?.openRouting?.storageItems || [];
+      for (const entry of selectedEntries) {
+        const signalId = Number(entry.signal?.id || entry.signal?.ref?.id || 0);
+        const signalLocation = signalId ? findCachedItemById(signalId, ["unassigned"]) : null;
+        const signal = signalLocation?.item || null;
+        const selectedTargetId = Number(entry.item?.id || entry.item?.ref?.id || 0);
+        const selectedTarget = players.find((item) => Number(item?.id || 0) === selectedTargetId);
+        const duplicateId = Number(signal?.duplicateId || signal?.duplicateSignalId || 0);
+        const targetLocation = duplicateId ? findCachedItemById(duplicateId, ["club"]) : null;
+        const target = targetLocation?.item || null;
+        const targetEntry = ledgerEntries.find(({ item, pile }) => Number(item?.id || 0) === duplicateId && String(pile || item?.pile || item?.ref?.pile || "") === "club");
+        const signalRating = Number(signal?.rating || 0);
+        const targetRating2 = Number(target?.rating || 0);
+        const signalProtected = signal ? rollingBaseProtectionReasons(signal, activeLoopDef, "unassigned") : [];
+        const targetProtected = target ? rollingBaseProtectionReasons(target, activeLoopDef, "club") : [];
+        const pending = pendingStorageItems.some((item) => rollingExactItemMatchesRef(item, entry.signal));
+        if (!signalId || !signal || !pending || !allowedRefs.some((ref) => rollingExactItemMatchesRef(signal, ref))) {
+          return blocked3(`authorized pending duplicate #${signalId || "?"} is no longer an exact pending Unassigned item`, {
+            signalId: signalId || null
+          });
+        }
+        if (!selectedTargetId || !selectedTarget || selectedTargetId !== duplicateId || !target || Number(target.id || 0) !== duplicateId || !rollingExactItemMatchesRef(selectedTarget, target)) {
+          return blocked3(`authorized pending duplicate #${signalId} no longer points to the selected Club counterpart`, {
+            signalId,
+            duplicateId: duplicateId || null,
+            selectedTargetId: selectedTargetId || null
+          });
+        }
+        if (!isDuplicate(signal) || !isPlayer2(signal) || !isPlayer2(target) || isDuplicate(target) || !isSamePlayerCardVersion(signal, target) || !isGold(signal) || !isGold(target) || isSbcSpecialItem(signal) || isSbcSpecialItem(target) || !allowedRatings.has(signalRating) || !allowedRatings.has(targetRating2)) {
+          return blocked3(`authorized pending duplicate #${signalId} no longer matches its configured ordinary Gold Provisions pair`, {
+            signalId,
+            duplicateId,
+            signalRating,
+            targetRating: targetRating2
+          });
+        }
+        if (!targetEntry?.classification || targetEntry.classification.protected === true || targetEntry.classification.requiredSpecial === true || signalProtected.length || targetProtected.length || isEvolutionItem(signal) || isEvolutionItem(target) || hasPlayerCosmetics(signal) || hasPlayerCosmetics(target) || rollingActiveSquadConflictRefs(runtime).some((ref) => Number(ref.id || 0) === duplicateId)) {
+          return blocked3(`authorized pending duplicate #${signalId} or its Club counterpart is protected`, {
+            signalId,
+            duplicateId,
+            signalProtectionReasons: signalProtected,
+            targetProtectionReasons: targetProtected
+          });
+        }
+        authorizedSignalIds.add(signalId);
+      }
+      return { ok: true, authorizedSignalIds };
+    }
+    async function prepareRollingUntradeableDuplicateSwaps(context, runtime, options = {}) {
       const selection = context?.squadPlan?.selection;
       const players = Array.isArray(context?.players) ? context.players : [];
       if (!selection?.entries?.length || !players.length) return { ok: true };
@@ -52199,8 +52272,23 @@
       const discoverySwapMode = activeMaterialization || configuredSwapMode === "off" ? "all-eligible" : configuredSwapMode;
       const resolveLiveDuplicateItem = (id, pile) => findCachedItemById(id, [pile])?.item || null;
       const livePlayers = players.map((item) => resolveLiveDuplicateItem(Number(item?.id || 0), "club") || item);
+      const authorizedConsumption = validateAuthorizedPendingDuplicateConsumption(
+        context,
+        runtime,
+        options
+      );
+      if (!authorizedConsumption.ok) return authorizedConsumption;
+      const swapSelection = authorizedConsumption.authorizedSignalIds.size ? {
+        ...selection,
+        entries: selection.entries.filter((entry) => !authorizedConsumption.authorizedSignalIds.has(
+          Number(entry?.signal?.id || entry?.signal?.ref?.id || 0)
+        ))
+      } : selection;
+      if (authorizedConsumption.authorizedSignalIds.size) {
+        log(`${context.label}: directly consuming ${authorizedConsumption.authorizedSignalIds.size} exact Pressure Provisions Club counterpart(s) without native duplicate swap`);
+      }
       const originalPlan = planUntradeableDuplicateSwaps({
-        selection: duplicateSwapSelectionSnapshot(selection, livePlayers, resolveLiveDuplicateItem),
+        selection: duplicateSwapSelectionSnapshot(swapSelection, livePlayers, resolveLiveDuplicateItem),
         players: livePlayers.map((item) => duplicateSwapSnapshot(item, "club")),
         swapMode: discoverySwapMode,
         isSpecial: isSbcSpecialItem,
@@ -53286,7 +53374,7 @@
           allowSpecial: options.allowSpecial === true,
           allowRequiredSpecial: options.allowRequiredSpecial === true,
           allowedRequiredSpecialItems: options.allowedRequiredSpecialItems || [],
-          allowedPendingUnassignedRefs,
+          allowedPendingUnassignedRefs: selectedAllowedPendingSignals,
           allowedRatings: options.allowedRatings || [],
           minRating: options.minRating,
           maxRating: options.maxRating,
@@ -53304,7 +53392,12 @@
             dryRun: activeDef.dryRun,
             handleReward: false,
             submissionMode: "background",
-            preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
+            preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime, {
+              allowAuthorizedPendingDuplicateConsumption: options.allowAuthorizedPendingDuplicateConsumption === true,
+              allowedPendingUnassignedRefs: selectedAllowedPendingSignals,
+              allowedRatings: options.allowedRatings || [],
+              loopDef
+            }),
             preSaveValidators: validators,
             postSaveValidators: validators,
             backgroundSubmitOptions: {
@@ -58623,6 +58716,7 @@
                 allowSpecial: true,
                 allowedRequiredSpecialItems: allowedRequiredSpecialEntries.map(({ item, pile }) => liveItemRef(item, pile)),
                 allowedPendingUnassignedRefs: consumablePendingUnassignedRefs,
+                allowAuthorizedPendingDuplicateConsumption: storagePressure,
                 specialFallbackAfterNormal: storagePressure,
                 softProtectClubSpecial: true,
                 preferredSignalRefs,
