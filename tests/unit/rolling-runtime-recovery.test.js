@@ -266,6 +266,79 @@ describe('Rolling runtime recovery helpers', () => {
     expect(userscriptValues.has(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toBe(false);
   });
 
+  it('clears an absent primary reward journal only after the user confirms the exact Pack is gone', async () => {
+    const loop = primaryLoop();
+    const { api, userscriptValues } = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: {
+        [ROLLING_PENDING_PRIMARY_REWARD_KEY]: {
+          version: 1,
+          loopId: loop.id,
+          stageKey: '86',
+          setId: 860,
+          challengeId: 1862,
+          challengeIds: [1861, 1862],
+          rewardPackId: 3860,
+          queuedAt: Date.now(),
+        },
+      },
+    });
+    const findRewardPack = vi.fn(async () => null);
+    const confirm = vi.fn(async () => true);
+
+    await expect(api.resolveRollingPendingPrimaryRewardJournal(loop, {
+      findRewardPack,
+      confirm,
+    })).resolves.toMatchObject({ status: 'cleared', rewardPackId: 3860 });
+
+    expect(findRewardPack).toHaveBeenCalledWith(expect.objectContaining({
+      rewardPackIds: [3860],
+    }), 3860, expect.objectContaining({
+      attempts: 6,
+      requireExactPackId: true,
+    }));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(userscriptValues.has(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toBe(false);
+  });
+
+  it('retains the primary reward journal when the exact Pack remains visible or confirmation is declined', async () => {
+    const loop = primaryLoop();
+    const journal = {
+      version: 1,
+      loopId: loop.id,
+      stageKey: '86',
+      setId: 860,
+      challengeId: 1862,
+      challengeIds: [1861, 1862],
+      rewardPackId: 3860,
+      queuedAt: Date.now(),
+    };
+    const first = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_PENDING_PRIMARY_REWARD_KEY]: journal },
+    });
+    const visiblePack = { id: 3860, name: '10x 86+ Rare Gold Players Pack' };
+
+    await expect(first.api.resolveRollingPendingPrimaryRewardJournal(loop, {
+      findRewardPack: vi.fn(async () => visiblePack),
+      confirm: vi.fn(async () => true),
+    })).resolves.toMatchObject({ status: 'preserved', rewardPackId: 3860 });
+    expect(first.userscriptValues.has(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toBe(true);
+
+    const second = await loadUserscript({
+      pageReady: true,
+      fastTimers: true,
+      userscriptStorage: { [ROLLING_PENDING_PRIMARY_REWARD_KEY]: journal },
+    });
+    await expect(second.api.resolveRollingPendingPrimaryRewardJournal(loop, {
+      findRewardPack: vi.fn(async () => null),
+      confirm: vi.fn(async () => false),
+    })).resolves.toMatchObject({ status: 'cancelled', rewardPackId: 3860 });
+    expect(second.userscriptValues.has(ROLLING_PENDING_PRIMARY_REWARD_KEY)).toBe(true);
+  });
+
   it('settles a deferred primary duplicate already normalized to Club', async () => {
     const normalizedClubItem = makePlayer({
       id: 931725349159,

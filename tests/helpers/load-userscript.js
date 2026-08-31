@@ -131,6 +131,7 @@ export async function loadUserscript(options = {}) {
       queueRollingPendingPrimaryReward,
       clearRollingPendingPrimaryReward,
       restoreRollingPendingPrimaryReward,
+      resolveRollingPendingPrimaryRewardJournal,
       detectRollingPendingRequiredSpecialReward,
       rollingMaterializedRequiredSpecialEntries,
       reconcileRollingPendingRequiredSpecialReward,

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.62
+// @version      0.8.63
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.62",
+    version: "0.8.63",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -8270,7 +8270,14 @@
       }
       return true;
     }
-    return Object.freeze({ copyText, downloadText });
+    function confirm(message) {
+      try {
+        return runtime?.confirm?.(String(message || "")) === true;
+      } catch {
+        return false;
+      }
+    }
+    return Object.freeze({ copyText, downloadText, confirm });
   }
 
   // src/adapters/browser/wait.js
@@ -30774,6 +30781,7 @@
     required(panel, "#bronze-loop-trade").addEventListener("click", (event) => commands.openTrade?.(event));
     required(panel, "#bronze-loop-recap-reopen").addEventListener("click", (event) => commands.reopenRecap?.(event));
     required(panel, "#bronze-loop-refresh").addEventListener("click", (event) => commands.refresh?.(event));
+    required(panel, "#bronze-loop-resolve-primary-reward").addEventListener("click", (event) => commands.resolvePendingPrimaryReward?.(event));
     required(panel, "#bronze-loop-scan-picks").addEventListener("click", (event) => commands.scanPicks?.(event));
     required(panel, "#bronze-loop-stop").addEventListener("click", (event) => commands.stop?.(event));
     required(panel, "#bronze-loop-copy").addEventListener("click", (event) => commands.copyLog?.(event));
@@ -30862,6 +30870,20 @@
           return true;
         } catch (error) {
           log(`Cache refresh failed: ${error?.message || error}`);
+          return false;
+        } finally {
+          state.refreshing = false;
+          setPanelState();
+        }
+      },
+      async resolvePendingPrimaryReward() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        state.refreshing = true;
+        setPanelState();
+        try {
+          return await options.resolvePendingPrimaryReward?.() === true;
+        } catch (error) {
+          log(`Pending primary reward recovery failed: ${error?.message || error}`);
           return false;
         } finally {
           state.refreshing = false;
@@ -31938,6 +31960,7 @@
       "bronze-loop-profile-select": busy,
       "bronze-loop-open-builder": busy,
       "bronze-loop-refresh": busy,
+      "bronze-loop-resolve-primary-reward": busy,
       "bronze-loop-scan-mode": busy,
       "bronze-loop-scan-picks": busy,
       "bronze-loop-open-rewards": state.running === true,
@@ -32286,7 +32309,7 @@
         </div>
         <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Config</div><button id="bronze-loop-help-config" class="bronze-loop-help-button" type="button" title="Explain configuration" aria-label="Explain configuration">?</button></div>
           <div class="row bronze-loop-profile-row"><span>Profile</span><select id="bronze-loop-profile-select" title="Load a saved Builder Profile or restore built-in loops"></select></div>
-          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button></div>
+          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button><button id="bronze-loop-resolve-primary-reward" title="Verify a missing pending Rolling primary reward, then clear its restart journal only after confirmation">Resolve reward</button></div>
           <div class="row"><span class="bronze-loop-option-summary">SBC scan</span><select id="bronze-loop-scan-mode" title="Choose incremental validation, a full Challenge refresh, or cache rebuild"><option value="incremental">Incremental scan</option><option value="full">Full rescan</option><option value="clear">Clear cache + scan</option></select><button id="bronze-loop-scan-picks" title="Scan supported dynamic Player Pick and Upgrade SBCs">Scan SBCs</button></div>
           <div class="row"><span class="bronze-loop-option-summary">Layout</span><select id="bronze-loop-layout-mode" title="Automatically choose a responsive layout or force Desktop/Mobile"><option value="auto">Auto</option><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></div>
         </div>
@@ -48824,6 +48847,38 @@
         }
       });
     }
+    async function resolvePendingPrimaryRewardFromPanel() {
+      const stored = readPersistedRollingPendingPrimaryReward();
+      if (!stored) {
+        log("No pending Rolling primary reward journal is stored");
+        return false;
+      }
+      if (stored.status !== "ready") {
+        log(`Pending Rolling primary reward journal is invalid: ${stored.reason || "unknown journal state"}`);
+        return false;
+      }
+      const loopDef = findLoopDefById(stored.loopId);
+      if (!loopDef || loopDef.strategy !== "rollingUpgrade") {
+        log(`Pending Rolling primary reward journal belongs to unavailable Loop ${stored.loopId || "?"}; it was retained`);
+        return false;
+      }
+      log(`${loopDef.name}: verifying pending primary reward Pack #${stored.rewardPackId} before any journal clear`);
+      const result = await resolveRollingPendingPrimaryRewardJournal(loopDef);
+      if (result.status === "cleared") {
+        log(`${loopDef.name}: ${result.reason}; click Start to continue`);
+        return true;
+      }
+      if (result.status === "preserved") {
+        log(`${loopDef.name}: ${result.reason}; it remains protected and no new primary SBC was submitted`);
+        return false;
+      }
+      if (result.status === "cancelled") {
+        log(`${loopDef.name}: ${result.reason}; no new primary SBC was submitted`);
+        return false;
+      }
+      log(`${loopDef.name}: pending primary reward recovery stopped: ${result.reason || "unknown state"}`);
+      return false;
+    }
     function getRoutineStepLoopDefs(loopDef) {
       return resolveRoutineStepLoopDefs(loopDef, getLoopDefs());
     }
@@ -54279,6 +54334,72 @@
         runtime.pendingPrimaryRewardJournal = null;
       }
       return true;
+    }
+    function pendingRollingPrimaryRewardDefinition(loopDef, restored) {
+      const stage = restored?.stage || null;
+      const journal = restored?.journal || null;
+      return {
+        ...cloneLoopDef(loopDef),
+        name: `${loopDef?.name || "Rolling"} pending primary reward`,
+        sbcSetIds: stage?.setId ? [Number(stage.setId)] : [],
+        sbcNames: stage?.setName ? [String(stage.setName)] : [],
+        rewardPackIds: journal?.rewardPackId ? [Number(journal.rewardPackId)] : [],
+        rewardPackNames: [...stage?.rewardPackNames || []]
+      };
+    }
+    async function resolveRollingPendingPrimaryRewardJournal(loopDef, options = {}) {
+      const restored = restoreRollingPendingPrimaryReward(loopDef);
+      if (restored.status !== "ready") return restored;
+      const rewardPackId = Number(restored.journal?.rewardPackId || 0);
+      const definition = pendingRollingPrimaryRewardDefinition(loopDef, restored);
+      if (!rewardPackId || !definition.rewardPackIds.length) {
+        return {
+          status: "blocked",
+          reason: "Rolling primary reward journal has no stable Pack identity",
+          reasonCode: "PRIMARY_REWARD_CONFIRMATION_REQUIRED"
+        };
+      }
+      const find = options.findRewardPack || findRewardPack;
+      const pack = await find(definition, rewardPackId, {
+        attempts: 6,
+        delayMs: 1200,
+        logWait: true,
+        repositoryOnly: true,
+        requireExactPackId: true
+      });
+      if (pack) {
+        return {
+          status: "preserved",
+          rewardPackId,
+          reason: `Pending primary reward Pack #${rewardPackId} is still visible in My Packs`,
+          reasonCode: "PRIMARY_REWARD_PACK_STILL_AVAILABLE"
+        };
+      }
+      const confirm = options.confirm || adapters.userEffects.confirm;
+      const confirmed = await confirm?.(
+        `Pending Rolling reward Pack #${rewardPackId} was not found after six My Packs refreshes. Select OK only after confirming this exact reward was already opened or was not granted by EA. This clears only the restart journal; the next Start may submit a new primary SBC.`
+      );
+      if (confirmed !== true) {
+        return {
+          status: "cancelled",
+          rewardPackId,
+          reason: `Pending primary reward Pack #${rewardPackId} remains protected`,
+          reasonCode: "PRIMARY_REWARD_CONFIRMATION_DECLINED"
+        };
+      }
+      if (!clearRollingPendingPrimaryReward()) {
+        return {
+          status: "blocked",
+          rewardPackId,
+          reason: "Pending primary reward journal could not be cleared after confirmation",
+          reasonCode: "PRIMARY_REWARD_JOURNAL_CLEAR_FAILED"
+        };
+      }
+      return {
+        status: "cleared",
+        rewardPackId,
+        reason: `Pending primary reward Pack #${rewardPackId} was confirmed absent and its restart journal was cleared`
+      };
     }
     function restoreRollingPendingPrimaryReward(loopDef) {
       const stored = readPersistedRollingPendingPrimaryReward();
@@ -59838,6 +59959,7 @@
         openTrade: openTradeSchedulerDialogModal,
         reopenRecap: reopenLastRecap,
         refreshInventoryCaches,
+        resolvePendingPrimaryReward: resolvePendingPrimaryRewardFromPanel,
         scanDynamicSbcs: scanDynamicSbcsWithProgress,
         scanPlayerPicks: scanDynamicSbcsWithProgress,
         getDynamicSbcScanOptions: () => {

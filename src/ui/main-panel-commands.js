@@ -74,6 +74,20 @@ export function createMainPanelCommands(options = {}) {
         setPanelState();
       }
     },
+    async resolvePendingPrimaryReward() {
+      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+      state.refreshing = true;
+      setPanelState();
+      try {
+        return (await options.resolvePendingPrimaryReward?.()) === true;
+      } catch (error) {
+        log(`Pending primary reward recovery failed: ${error?.message || error}`);
+        return false;
+      } finally {
+        state.refreshing = false;
+        setPanelState();
+      }
+    },
     async scanPicks() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
       state.scanningPicks = true;

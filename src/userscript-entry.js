@@ -9725,6 +9725,39 @@ function updateLoopControls() {
     });
   }
 
+  async function resolvePendingPrimaryRewardFromPanel() {
+    const stored = readPersistedRollingPendingPrimaryReward();
+    if (!stored) {
+      log('No pending Rolling primary reward journal is stored');
+      return false;
+    }
+    if (stored.status !== 'ready') {
+      log(`Pending Rolling primary reward journal is invalid: ${stored.reason || 'unknown journal state'}`);
+      return false;
+    }
+    const loopDef = findLoopDefById(stored.loopId);
+    if (!loopDef || loopDef.strategy !== 'rollingUpgrade') {
+      log(`Pending Rolling primary reward journal belongs to unavailable Loop ${stored.loopId || '?'}; it was retained`);
+      return false;
+    }
+    log(`${loopDef.name}: verifying pending primary reward Pack #${stored.rewardPackId} before any journal clear`);
+    const result = await resolveRollingPendingPrimaryRewardJournal(loopDef);
+    if (result.status === 'cleared') {
+      log(`${loopDef.name}: ${result.reason}; click Start to continue`);
+      return true;
+    }
+    if (result.status === 'preserved') {
+      log(`${loopDef.name}: ${result.reason}; it remains protected and no new primary SBC was submitted`);
+      return false;
+    }
+    if (result.status === 'cancelled') {
+      log(`${loopDef.name}: ${result.reason}; no new primary SBC was submitted`);
+      return false;
+    }
+    log(`${loopDef.name}: pending primary reward recovery stopped: ${result.reason || 'unknown state'}`);
+    return false;
+  }
+
   function getRoutineStepLoopDefs(loopDef) {
     return resolveRoutineStepLoopDefs(loopDef, getLoopDefs());
   }
@@ -15901,6 +15934,79 @@ function updateLoopControls() {
       runtime.pendingPrimaryRewardJournal = null;
     }
     return true;
+  }
+
+  function pendingRollingPrimaryRewardDefinition(loopDef, restored) {
+    const stage = restored?.stage || null;
+    const journal = restored?.journal || null;
+    return {
+      ...cloneLoopDef(loopDef),
+      name: `${loopDef?.name || 'Rolling'} pending primary reward`,
+      sbcSetIds: stage?.setId ? [Number(stage.setId)] : [],
+      sbcNames: stage?.setName ? [String(stage.setName)] : [],
+      rewardPackIds: journal?.rewardPackId ? [Number(journal.rewardPackId)] : [],
+      rewardPackNames: [...(stage?.rewardPackNames || [])],
+    };
+  }
+
+  async function resolveRollingPendingPrimaryRewardJournal(loopDef, options = {}) {
+    const restored = restoreRollingPendingPrimaryReward(loopDef);
+    if (restored.status !== 'ready') return restored;
+
+    const rewardPackId = Number(restored.journal?.rewardPackId || 0);
+    const definition = pendingRollingPrimaryRewardDefinition(loopDef, restored);
+    if (!rewardPackId || !definition.rewardPackIds.length) {
+      return {
+        status: 'blocked',
+        reason: 'Rolling primary reward journal has no stable Pack identity',
+        reasonCode: 'PRIMARY_REWARD_CONFIRMATION_REQUIRED',
+      };
+    }
+
+    const find = options.findRewardPack || findRewardPack;
+    const pack = await find(definition, rewardPackId, {
+      attempts: 6,
+      delayMs: 1200,
+      logWait: true,
+      repositoryOnly: true,
+      requireExactPackId: true,
+    });
+    if (pack) {
+      return {
+        status: 'preserved',
+        rewardPackId,
+        reason: `Pending primary reward Pack #${rewardPackId} is still visible in My Packs`,
+        reasonCode: 'PRIMARY_REWARD_PACK_STILL_AVAILABLE',
+      };
+    }
+
+    const confirm = options.confirm || adapters.userEffects.confirm;
+    const confirmed = await confirm?.(
+      `Pending Rolling reward Pack #${rewardPackId} was not found after six My Packs refreshes. `
+      + 'Select OK only after confirming this exact reward was already opened or was not granted by EA. '
+      + 'This clears only the restart journal; the next Start may submit a new primary SBC.',
+    );
+    if (confirmed !== true) {
+      return {
+        status: 'cancelled',
+        rewardPackId,
+        reason: `Pending primary reward Pack #${rewardPackId} remains protected`,
+        reasonCode: 'PRIMARY_REWARD_CONFIRMATION_DECLINED',
+      };
+    }
+    if (!clearRollingPendingPrimaryReward()) {
+      return {
+        status: 'blocked',
+        rewardPackId,
+        reason: 'Pending primary reward journal could not be cleared after confirmation',
+        reasonCode: 'PRIMARY_REWARD_JOURNAL_CLEAR_FAILED',
+      };
+    }
+    return {
+      status: 'cleared',
+      rewardPackId,
+      reason: `Pending primary reward Pack #${rewardPackId} was confirmed absent and its restart journal was cleared`,
+    };
   }
 
   function restoreRollingPendingPrimaryReward(loopDef) {
@@ -22209,6 +22315,7 @@ function updateLoopControls() {
       openTrade: openTradeSchedulerDialogModal,
       reopenRecap: reopenLastRecap,
       refreshInventoryCaches,
+      resolvePendingPrimaryReward: resolvePendingPrimaryRewardFromPanel,
       scanDynamicSbcs: scanDynamicSbcsWithProgress,
       scanPlayerPicks: scanDynamicSbcsWithProgress,
       getDynamicSbcScanOptions: () => {

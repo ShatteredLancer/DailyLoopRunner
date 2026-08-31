@@ -51,4 +51,13 @@ describe('Browser user effects adapter', () => {
     expect(anchor.remove).toHaveBeenCalledOnce();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:test');
   });
+
+  it('uses the native confirmation dialog only when it returns true', () => {
+    const confirm = vi.fn((message) => message === 'Clear pending reward?');
+    const adapter = createUserEffectsAdapter({ confirm }, {});
+
+    expect(adapter.confirm('Clear pending reward?')).toBe(true);
+    expect(adapter.confirm('Keep pending reward')).toBe(false);
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
 });

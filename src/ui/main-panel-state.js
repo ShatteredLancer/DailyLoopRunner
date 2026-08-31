@@ -224,6 +224,7 @@ export function renderMainPanelRuntimeState(options = {}) {
     'bronze-loop-profile-select': busy,
     'bronze-loop-open-builder': busy,
     'bronze-loop-refresh': busy,
+    'bronze-loop-resolve-primary-reward': busy,
     'bronze-loop-scan-mode': busy,
     'bronze-loop-scan-picks': busy,
     'bronze-loop-open-rewards': state.running === true,

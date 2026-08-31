@@ -19,6 +19,7 @@ const IDS = [
   'bronze-loop-trade',
   'bronze-loop-recap-reopen',
   'bronze-loop-refresh',
+  'bronze-loop-resolve-primary-reward',
   'bronze-loop-scan-picks',
   'bronze-loop-stop',
   'bronze-loop-copy',
@@ -78,7 +79,7 @@ describe('main panel bindings', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
       'selectLoop', 'selectProfile', 'setLayoutMode', 'openBuilder', 'openHelp', 'openSelectionPolicySettings', 'saveLoopOptions', 'start', 'openBatch', 'openTrade', 'reopenRecap',
-      'refresh', 'scanPicks', 'stop', 'copyLog', 'clearLog', 'downloadLog',
+      'refresh', 'resolvePendingPrimaryReward', 'scanPicks', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
     bindMainPanelCommands({ panel, commands });
@@ -104,6 +105,7 @@ describe('main panel bindings', () => {
       ['bronze-loop-trade', 'click', 'openTrade'],
       ['bronze-loop-recap-reopen', 'click', 'reopenRecap'],
       ['bronze-loop-refresh', 'click', 'refresh'],
+      ['bronze-loop-resolve-primary-reward', 'click', 'resolvePendingPrimaryReward'],
       ['bronze-loop-scan-picks', 'click', 'scanPicks'],
       ['bronze-loop-stop', 'click', 'stop'],
       ['bronze-loop-copy', 'click', 'copyLog'],

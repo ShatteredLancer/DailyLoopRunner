@@ -41,6 +41,20 @@ describe('main panel command orchestration', () => {
     expect(failure.options.refreshInventoryCaches).toHaveBeenCalledOnce();
   });
 
+  it('resolves a pending primary reward only through its explicit panel command', async () => {
+    const resolvePendingPrimaryReward = vi.fn(async () => true);
+    const current = harness({ resolvePendingPrimaryReward });
+
+    await expect(current.commands.resolvePendingPrimaryReward()).resolves.toBe(true);
+    expect(resolvePendingPrimaryReward).toHaveBeenCalledOnce();
+    expect(current.state.refreshing).toBe(false);
+    expect(current.setPanelState).toHaveBeenCalledTimes(2);
+
+    current.state.running = true;
+    await expect(current.commands.resolvePendingPrimaryReward()).resolves.toBe(false);
+    expect(resolvePendingPrimaryReward).toHaveBeenCalledOnce();
+  });
+
   it('runs a read-only Player Pick scan and restores scan state on failure', async () => {
     const success = harness();
     await expect(success.commands.scanPicks()).resolves.toBe(true);

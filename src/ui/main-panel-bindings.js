@@ -34,6 +34,7 @@ export function bindMainPanelCommands(options = {}) {
   required(panel, '#bronze-loop-trade').addEventListener('click', (event) => commands.openTrade?.(event));
   required(panel, '#bronze-loop-recap-reopen').addEventListener('click', (event) => commands.reopenRecap?.(event));
   required(panel, '#bronze-loop-refresh').addEventListener('click', (event) => commands.refresh?.(event));
+  required(panel, '#bronze-loop-resolve-primary-reward').addEventListener('click', (event) => commands.resolvePendingPrimaryReward?.(event));
   required(panel, '#bronze-loop-scan-picks').addEventListener('click', (event) => commands.scanPicks?.(event));
   required(panel, '#bronze-loop-stop').addEventListener('click', (event) => commands.stop?.(event));
   required(panel, '#bronze-loop-copy').addEventListener('click', (event) => commands.copyLog?.(event));

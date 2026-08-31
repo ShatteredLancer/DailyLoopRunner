@@ -5,6 +5,17 @@ All notable user-facing changes are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.8.63] - 2026-08-31
+
+### Fixed
+
+- Add **Resolve reward** under `Options -> Config` for a Rolling primary
+  reward journal whose exact Pack is no longer found. The action refreshes My
+  Packs six times, retains the journal when the Pack is visible, and only
+  clears it after an explicit confirmation that the exact reward was already
+  opened or was not granted by EA. This avoids a 24-hour stale-journal block
+  without silently allowing a duplicate primary SBC submission.
+
 ## [0.8.60] - 2026-08-29
 
 ### Added

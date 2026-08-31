@@ -42,5 +42,13 @@ export function createUserEffectsAdapter(runtime = globalThis, documentObject = 
     return true;
   }
 
-  return Object.freeze({ copyText, downloadText });
+  function confirm(message) {
+    try {
+      return runtime?.confirm?.(String(message || '')) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  return Object.freeze({ copyText, downloadText, confirm });
 }
