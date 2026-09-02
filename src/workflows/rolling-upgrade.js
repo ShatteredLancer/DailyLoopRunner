@@ -439,7 +439,67 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       };
     };
 
+    // A rating-excess replan is not, by itself, Storage pressure. The runtime
+    // may veto the Storage Sink after the bounded Provisions attempt when its
+    // current ledger proves that no pending card or reward headroom is needed.
+    // Keep this decision injected so the workflow remains independent from EA
+    // inventory details and real pressure events retain their existing order.
+    const storageDecision = async (provisions = null) => {
+      if (typeof options.shouldRunStorageRecovery !== 'function') {
+        return { run: true };
+      }
+      const decision = await options.shouldRunStorageRecovery({
+        ...context,
+        provisions,
+      });
+      if (decision === false || decision?.run === false) {
+        const value = {
+          status: 'unavailable',
+          reason: decision?.reason
+            || 'Storage pressure recovery is not required for the current inventory state',
+          reasonCode: decision?.reasonCode || 'STORAGE_PRESSURE_NOT_REQUIRED',
+          details: decision?.details || null,
+        };
+        return { run: false, value };
+      }
+      return { run: true };
+    };
+
     if (storageRecoveryPriority === 'storage-pressure-only') {
+      const decision = await storageDecision();
+      if (!decision.run) {
+        // Rating excess without actual Storage pressure is a fodder shortage,
+        // not a reason to craft an unrelated Storage Sink. If the user has
+        // enabled shortage recovery, let Provisions add lower-rated material
+        // and replan; otherwise preserve the explicit no-pressure stop.
+        if (context.source === 'primary-rating-excess' && provisionsEnabled) {
+          const provisions = await runRecovery(
+            'provisions',
+            ROLLING_UPGRADE_PHASES.RECOVER_PROVISIONS,
+            options.recoverProvisions,
+            {
+              ...context,
+              trigger: context.provisionsTrigger || 'primary-fodder-shortage',
+            },
+          );
+          if (isProgressed(provisions)) return { progressed: true, value: provisions, kind: 'provisions' };
+          if (isStopped(provisions) || provisions?.status === 'planned') {
+            return { terminal: provisions, value: provisions, attempted: true, storageSinkAttempted: false };
+          }
+          return {
+            terminal: provisions,
+            value: provisions?.status ? provisions : decision.value,
+            attempted: true,
+            storageSinkAttempted: false,
+          };
+        }
+        return {
+          terminal: decision.value,
+          value: decision.value,
+          attempted: false,
+          storageSinkAttempted: false,
+        };
+      }
       const storage = await runStorage();
       if (isProgressed(storage.value)) return { progressed: true, value: storage.value, kind: 'storageSink' };
       if (isStopped(storage.value)
@@ -484,6 +544,15 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       }
     }
 
+    const decision = await storageDecision(provisions);
+    if (!decision.run) {
+      return {
+        terminal: decision.value,
+        value: decision.value,
+        attempted: false,
+        storageSinkAttempted: false,
+      };
+    }
     const storage = await runStorage(provisions);
     if (isProgressed(storage.value)) return { progressed: true, value: storage.value, kind: 'storageSink' };
     if (isStopped(storage.value)
@@ -690,6 +759,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     let leftoverRecoveryBatchActive = false;
     let leftoverRecoveryRewardsExhausted = false;
     let shortageProvisionsPacksOpened = 0;
+    let primaryRunwayProvisionsAttempted = false;
     let refreshedPrimaryStage = null;
 
     // Composite Rolling loops re-read the live Set progress at the start of
@@ -966,6 +1036,111 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       result.lastPlan = planned || null;
       if (isStopped(planned)) return finish('stopped', planned, 'stopped while planning the primary squad');
       if (planned?.ok || planned?.status === 'ready') {
+        const runway = typeof options.forecastPrimaryRunway === 'function'
+          ? await options.forecastPrimaryRunway({
+              plan: planned,
+              result,
+              iteration: result.iterations,
+              recoveryAttempted: primaryRunwayProvisionsAttempted,
+            })
+          : { status: 'ready' };
+        await emit(options, 'primary-runway', { runway });
+        if (isStopped(runway)) {
+          return finish('stopped', runway, 'stopped while forecasting primary fodder runway');
+        }
+        if (runway?.status === 'recover' && !primaryRunwayProvisionsAttempted) {
+          if (typeof options.processLeftoverRecoveryReward === 'function') {
+            const existingProvisions = await runRecovery(
+              'reward',
+              ROLLING_UPGRADE_PHASES.PROCESS_RECOVERY_REWARD,
+              options.processLeftoverRecoveryReward,
+              {
+                trigger: 'primary-runway-forecast',
+                plan: planned,
+                runway,
+              },
+            );
+            if (isProgressed(existingProvisions)) continue;
+            const existingStorage = await recoverBlockedRewardStorage(existingProvisions, {
+              source: 'primary-runway-provisions-pre-open',
+              blockedReason: 'forecast Provisions reward needs more Storage headroom',
+              recoveryReason: 'Storage pressure SBC could not clear room for the forecast Provisions reward',
+            });
+            if (existingStorage.matched) {
+              if (existingStorage.progressed) continue;
+              return existingStorage.failure;
+            }
+            if (isStopped(existingProvisions) || existingProvisions?.status === 'planned') {
+              return finishRecoveryFailure(
+                existingProvisions,
+                'existing forecast Provisions reward could not be processed',
+                'RECOVERY_REWARD_BLOCKED',
+              );
+            }
+            if (isBlocked(existingProvisions)
+              && existingProvisions?.status !== 'unavailable') {
+              return finishRecoveryFailure(
+                existingProvisions,
+                'existing forecast Provisions reward could not be processed',
+                'RECOVERY_REWARD_BLOCKED',
+              );
+            }
+          }
+
+          const recoveryPlan = {
+            ...planned,
+            reasonCode: runway.reasonCode || 'SQUAD_RATING_EXCESS',
+            missing: {
+              ...(planned.missing || {}),
+              code: runway.reasonCode || 'SQUAD_RATING_EXCESS',
+            },
+          };
+          const recovery = runway.reasonCode === 'SQUAD_RATING_EXCESS'
+            ? await recoverStorageBlocked({
+                trigger: 'storage-pressure',
+                provisionsTrigger: 'primary-fodder-shortage',
+                source: 'primary-rating-excess',
+                plan: recoveryPlan,
+                runway,
+              })
+            : {
+                value: await recoverProvisions({
+                  trigger: 'primary-fodder-shortage',
+                  source: 'primary-runway-forecast',
+                  plan: recoveryPlan,
+                  runway,
+                }),
+          };
+          if (recovery.progressed || isProgressed(recovery.value)) {
+            if (recovery.kind === 'provisions') {
+              primaryRunwayProvisionsAttempted = true;
+            }
+            continue;
+          }
+          const failure = recovery.terminal || recovery.value || recovery;
+          if (isStopped(failure) || failure?.status === 'planned') {
+            return finishRecoveryFailure(
+              failure,
+              'primary runway Provisions recovery did not complete',
+              'PROVISIONS_PREFLIGHT_BLOCKED',
+            );
+          }
+          if (isBlocked(failure) && failure?.status !== 'unavailable'
+            && failure?.status !== 'skipped') {
+            return finishRecoveryFailure(
+              failure,
+              'primary runway Provisions recovery failed',
+              'PROVISIONS_PREFLIGHT_BLOCKED',
+            );
+          }
+          primaryRunwayProvisionsAttempted = true;
+          result.details.primaryRunway = {
+            ...runway,
+            recoveryReason: effectReason(failure, 'no safe Provisions batch is currently available'),
+            recoveryReasonCode: reasonCode(failure) || 'PROVISIONS_PREFLIGHT_SHORTAGE',
+          };
+          await emit(options, 'primary-runway-unavailable', result.details.primaryRunway);
+        }
         resetPressureEvent();
         plan = planned;
         break;

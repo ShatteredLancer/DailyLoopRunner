@@ -11,6 +11,7 @@ import {
   planRollingOpenedItemRouting,
   releaseRollingPrimaryDuplicateRefs,
   releaseRollingRoutingItemsAfterConsumption,
+  rollingSubmissionConsumptionRefs,
   rollingDuplicateTargetProtectionReasons,
   rollingPrimaryDuplicateProtectionConflicts,
   rollingPrimaryDuplicateRelaxationOrder,
@@ -863,6 +864,23 @@ describe('Rolling inventory policy', () => {
     expect(released.routing.provisionsItems).toEqual([]);
     expect(released.routing.reservedItems.map((value) => value.id)).toEqual([32]);
     expect(released.routing.entries.map(({ item: value }) => value.id)).toEqual([31, 32]);
+  });
+
+  it('uses confirmed Storage Sink consumption refs and keeps duplicate signals', () => {
+    const consumedStorage = item(50, 88, { pile: 'storage' });
+    const consumedSignal = item(51, 87, { pile: 'unassigned' });
+    const unconfirmedPlanItem = item(52, 86, { pile: 'club' });
+
+    expect(rollingSubmissionConsumptionRefs(
+      { consumedItemRefs: [consumedStorage.ref] },
+      {
+        itemRefs: [unconfirmedPlanItem.ref],
+        signalRefs: [consumedSignal.ref, consumedStorage.ref],
+      },
+    )).toEqual([
+      consumedStorage.ref,
+      consumedSignal.ref,
+    ]);
   });
 
   it('releases only deferred primary duplicates that were safely routed to Storage', () => {

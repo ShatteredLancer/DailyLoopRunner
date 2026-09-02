@@ -63,6 +63,134 @@ function harness(overrides = {}) {
 }
 
 describe('10x85+ Rolling workflow', () => {
+  it('crafts Provisions before a safe current squad when the next squad is forecast above the rating cap', async () => {
+    let inventoryVersion = 1;
+    let forecastCalls = 0;
+    const calls = [];
+    const options = harness({
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push('plan');
+        return { ok: true, itemRefs: [{ id: 1 }] };
+      }),
+      forecastPrimaryRunway: vi.fn(async ({ recoveryAttempted }) => {
+        calls.push(`forecast:${recoveryAttempted}`);
+        forecastCalls++;
+        return forecastCalls === 1
+          ? {
+              status: 'recover',
+              reasonCode: 'SQUAD_RATING_EXCESS',
+              projectedRating: 86,
+              targetRating: 84,
+            }
+          : { status: 'ready' };
+      }),
+      processLeftoverRecoveryReward: vi.fn(async () => {
+        calls.push('existing-provisions');
+        return { status: 'skipped' };
+      }),
+      shouldRunStorageRecovery: vi.fn(async () => ({ run: false })),
+      recoverProvisions: vi.fn(async ({ context }) => {
+        calls.push('craft-provisions');
+        expect(context.trigger).toBe('primary-fodder-shortage');
+        expect(context.plan).toMatchObject({ reasonCode: 'SQUAD_RATING_EXCESS' });
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+      submitPrimary: vi.fn(async () => {
+        calls.push('submit-primary');
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      completions: 1,
+      recoveries: { provisions: 1 },
+    });
+    expect(calls).toEqual([
+      'plan',
+      'forecast:false',
+      'existing-provisions',
+      'craft-provisions',
+      'plan',
+      'forecast:true',
+      'submit-primary',
+    ]);
+  });
+
+  it('opens an existing Provisions reward before crafting for a projected runway shortage', async () => {
+    let inventoryVersion = 1;
+    let rewardOpened = false;
+    const calls = [];
+    const options = harness({
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      forecastPrimaryRunway: vi.fn(async () => rewardOpened
+        ? { status: 'ready', projectedRating: 84, targetRating: 84 }
+        : {
+            status: 'recover',
+            reasonCode: 'SQUAD_RATING_EXCESS',
+            projectedRating: 86,
+            targetRating: 84,
+          }),
+      processLeftoverRecoveryReward: vi.fn(async () => {
+        calls.push('open-existing');
+        rewardOpened = true;
+        inventoryVersion++;
+        return { status: 'opened' };
+      }),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('craft-provisions');
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      recoveries: { reward: 1, provisions: 0 },
+    });
+    expect(calls).toEqual(['open-existing']);
+    expect(options.recoverProvisions).not.toHaveBeenCalled();
+    expect(options.planPrimarySquad).toHaveBeenCalledTimes(2);
+  });
+
+  it('submits the current safe squad once when forecast Provisions material is unavailable', async () => {
+    const events = [];
+    const options = harness({
+      forecastPrimaryRunway: vi.fn(async () => ({
+        status: 'recover',
+        reasonCode: 'SQUAD_RATING_EXCESS',
+        projectedRating: 86,
+        targetRating: 84,
+      })),
+      processLeftoverRecoveryReward: vi.fn(async () => ({ status: 'skipped' })),
+      shouldRunStorageRecovery: vi.fn(async () => ({ run: false })),
+      recoverProvisions: vi.fn(async () => ({
+        status: 'unavailable',
+        reason: 'four unique eligible Provisions definitions are unavailable',
+        reasonCode: 'RECOVERY_MATERIAL_SHORTAGE',
+      })),
+      onEvent: vi.fn(async (event, payload) => events.push([event, payload])),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      completions: 1,
+      details: {
+        primaryRunway: {
+          projectedRating: 86,
+          targetRating: 84,
+          recoveryReasonCode: 'RECOVERY_MATERIAL_SHORTAGE',
+        },
+      },
+    });
+    expect(options.recoverProvisions).toHaveBeenCalledOnce();
+    expect(options.planPrimarySquad).toHaveBeenCalledOnce();
+    expect(options.submitPrimary).toHaveBeenCalledOnce();
+    expect(events.some(([event]) => event === 'primary-runway-unavailable')).toBe(true);
+  });
+
   it('refreshes the active primary stage before looking up each iteration reward', async () => {
     const calls = [];
     const options = harness({
@@ -1716,6 +1844,133 @@ describe('10x85+ Rolling workflow', () => {
       'storage-ready',
       'plan',
     ]);
+  });
+
+  it('does not invoke Storage Pressure when rating excess has no actual Storage pressure', async () => {
+    const calls = [];
+    const recoverStorageSink = vi.fn(async () => {
+      calls.push('storage-pressure');
+      return { status: 'submitted', submitted: true };
+    });
+    const options = harness({
+      storageSinkEnabled: true,
+      storageRecoveryPriority: 'provisions-then-storage-pressure',
+      findPrimaryPack: vi.fn(async () => null),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push('plan');
+        return { ok: false, missing: { code: 'SQUAD_RATING_EXCESS' } };
+      }),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('provisions');
+        return {
+          status: 'unavailable',
+          reason: 'no safe Provisions plan',
+          reasonCode: 'PROVISIONS_UNAVAILABLE',
+        };
+      }),
+      shouldRunStorageRecovery: vi.fn(async ({ source }) => {
+        expect(source).toBe('primary-rating-excess');
+        calls.push('pressure-check');
+        return {
+          run: false,
+          reason: 'primary squad rating exceeds target, but current Storage has no pressure to recover',
+          reasonCode: 'STORAGE_PRESSURE_NOT_REQUIRED',
+        };
+      }),
+      recoverStorageSink,
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'unavailable',
+      reasonCode: 'STORAGE_PRESSURE_NOT_REQUIRED',
+    });
+    expect(calls).toEqual(['plan', 'provisions', 'pressure-check']);
+    expect(recoverStorageSink).not.toHaveBeenCalled();
+  });
+
+  it('uses enabled Provisions recovery for rating excess without Storage pressure', async () => {
+    let ready = false;
+    let inventoryVersion = 1;
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      storageRecoveryPriority: 'storage-pressure-only',
+      provisionsShortageRecoveryEnabled: true,
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push('plan');
+        return ready
+          ? { ok: true, itemRefs: [{ id: 1 }] }
+          : {
+              ok: false,
+              reasonCode: 'SQUAD_RATING_EXCESS',
+              optimizedRating: 86,
+              targetRating: 84,
+            };
+      }),
+      shouldRunStorageRecovery: vi.fn(async () => {
+        calls.push('pressure-check');
+        return { run: false, reasonCode: 'STORAGE_PRESSURE_NOT_REQUIRED' };
+      }),
+      recoverProvisions: vi.fn(async ({ context }) => {
+        calls.push('provisions');
+        expect(context.trigger).toBe('primary-fodder-shortage');
+        ready = true;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+      recoverStorageSink: vi.fn(async () => {
+        calls.push('storage-pressure');
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      recoveries: { provisions: 1, storageSink: 0 },
+    });
+    expect(calls).toEqual(['plan', 'pressure-check', 'provisions', 'plan']);
+    expect(options.recoverStorageSink).not.toHaveBeenCalled();
+  });
+
+  it('preserves a Provisions failure when rating excess has no Storage pressure', async () => {
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      storageRecoveryPriority: 'storage-pressure-only',
+      provisionsShortageRecoveryEnabled: true,
+      findPrimaryPack: vi.fn(async () => null),
+      planPrimarySquad: vi.fn(async () => ({
+        ok: false,
+        reasonCode: 'SQUAD_RATING_EXCESS',
+        reason: 'minimum available squad is 86/84',
+      })),
+      shouldRunStorageRecovery: vi.fn(async () => ({
+        run: false,
+        reasonCode: 'STORAGE_PRESSURE_NOT_REQUIRED',
+      })),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('provisions');
+        return {
+          status: 'unavailable',
+          reason: 'no safe low-rated material is available',
+          reasonCode: 'PROVISIONS_UNAVAILABLE',
+        };
+      }),
+      recoverStorageSink: vi.fn(async () => {
+        calls.push('storage-pressure');
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'unavailable',
+      reason: 'no safe low-rated material is available',
+      reasonCode: 'PROVISIONS_UNAVAILABLE',
+    });
+    expect(calls).toEqual(['provisions']);
+    expect(options.recoverStorageSink).not.toHaveBeenCalled();
   });
 
   it('stops once without replanning when neither rating-excess recovery is available', async () => {

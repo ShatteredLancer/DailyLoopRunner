@@ -1,5 +1,7 @@
 # Daily Loop Runner 架构重构与里程碑
 
+当前开发修正：Rolling 在每套已验证主阵提交前，从不可变 Inventory Ledger snapshot 精确扣除该阵的 item/signal，复用当前 Challenge 的 Required Special matcher、唯一 definition、FSU/Lock/Evolution/Active Squad 和评分 Selection Policy 预演下一阵。只有下一阵最低合法评分明确超过目标 `+1` 时，才在当前阵尚未提交前优先打开已有 Provisions 奖励，否则制作至多一批 Provisions 并重新读取库存；无法组成安全 Provisions 阵时记录 `PROVISIONS_PREFLIGHT_SHORTAGE`，只提交当前已验证合法阵容一次，避免循环恢复或放宽保护。该预测仅在 `rollingProvisionsShortageRecoveryEnabled` 显式开启时运行，不恢复默认关闭的 surplus crafting。
+
 本文档用于追踪 Daily Loop Runner 从单文件、流程型实现迁移到可测试、可组合架构的全过程。
 
 当前基线：
@@ -28,6 +30,13 @@ warning 解析保留 name 与 item IDs 的逐条关系；只有 `ACTIVE_SQUAD` �
 保护开启时的未知 warning 均停止。Node fixture 覆盖 90 Ronaldo Storage 基础卡与 Club EVO
 副本共存、真实 Storage EVO、混合 Active Squad/Evo warning 和一次性确认预算；真实页面仍需
 验证该 Ronaldo Provisions 提交及强制确认失败后的停止行为。
+
+当前开发修正：Rolling 评分超目标且准备执行 shortage Provisions 时，Storage pressure
+前置判断与 Provisions 恢复统一使用完整材料批次的容量预留。此前 `97/100` Storage 会先按
+最终 Pick 的一格预留判为“无压力”，随后又按四格 Provisions 批次预留进入 emergency
+模式，最终因恢复阵未消费 Storage 卡以 `MINIMUM_PILE_COUNT_SHORTAGE` 停止。现在该状态会
+先运行用户已启用的 Storage Sink，重新对账取得四格容量后再制作并打开 Provisions；关闭
+shortage recovery 时仍只保留原有的一格最终 Pick 预留，不会为无后续用途主动运行 Sink。
 
 当前开发修正：Rolling 的 Storage 压力缓解改为三个互斥策略：
 `storage-pressure-only` 只执行用户启用并绑定的 Storage Pressure SBC；
@@ -62,12 +71,19 @@ pressure 与 maintenance 仍使用专用 Storage-first 及净释放校验。Prov
 `0.8.20` 发布记录中的全局 Storage-first 和新安装默认 `91` 行为。
 
 `0.8.48` 发布记录：Rolling 主阵评分求解结果高于 EA 目标评分时，只保留规划结果，
-不再先清空、保存或改写当前 EA 阵容。若此时 SBC Storage 剩余空间不足以容纳
-Provisions 奖励，则把本次缺料恢复升级为 Storage-first 紧急 Provisions：至少消耗足够
-数量的真实 Storage 卡腾出完整奖励空间，并且只额外授权当前 Challenge 的 live group-83
-matcher 精确命中的 Storage 色卡；FSU lock、Evolution、高于 Automatic-use 上限、待入库
-duplicate signal 和 Club 非 TOTW 色卡继续硬保护。运行时捕获的 Provisions capability
-尚未解析时，会先执行一次有界实时扫描再决定是否停止。
+不再先清空、保存或改写当前 EA 阵容。当前主阵只有在 Storage 容量已知、无待释放
+Storage 压力且最低可行评分不超过目标 `+1` 时，才允许显式兜底保存（例如 84 阵的
+85/84）；目标 `+2` 及以上必须保持未保存，并在开启 Provisions shortage recovery 时
+进入 Provisions 规划；该恢复开关关闭则安全停止，避免用 87/88 高分卡把低分主阵长期
+顶高。若此时 SBC Storage 剩余空间不足以容纳 Provisions
+奖励，则把本次缺料恢复升级为 Storage-first 紧急 Provisions：按当前容量计算本次事件
+所需释放总量，每个 Provisions 批次至少消耗 1 张真实 Storage 卡；提交并重新读取库存
+后，再继续规划剩余释放量，直到奖励空间完整恢复。该增量例外只适用于评分超目标的
+恢复路径，普通 Storage Pressure 仍必须一次满足全部待入库容量。Provisions 只额外授权
+当前 Challenge 的 live group-83
+matcher 精确命中的 Storage 色卡；FSU lock、Evolution、高于 Automatic-use 上限、
+待入库 duplicate signal 和 Club 非 TOTW 色卡继续硬保护。运行时捕获的 Provisions
+capability 尚未解析时，会先执行一次有界实时扫描再决定是否停止。
 
 `0.8.47` 发布记录：Required Special 继续使用 EA Challenge 的 live
 `PLAYER_RARITY_GROUP=83` matcher 和原始最低数量，但 Rolling 主阵可在现有来源限制与

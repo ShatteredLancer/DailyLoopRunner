@@ -3363,6 +3363,69 @@ describe('Rolling runtime recovery helpers', () => {
     });
   });
 
+  it('allows an explicitly bounded partial rating-excess release and preserves the full pressure requirement', async () => {
+    const { api } = await loadUserscript();
+    const runtime = {
+      openRouting: { storageItems: [] },
+      coordinator: {
+        getLedger: () => ({
+          summary: () => ({ capacities: { storage: { free: 0 } } }),
+        }),
+      },
+    };
+
+    expect(api.validateRollingEmergencyProvisionsSelection(runtime, 1, {
+      allowIncremental: true,
+      allowPartialIncremental: true,
+      maximumRelease: 2,
+      minimumConsumption: 1,
+      totalMinimumConsumption: 2,
+    })).toMatchObject({
+      ok: true,
+      incremental: true,
+      requiredRelease: 1,
+      fullRequiredRelease: 2,
+      storageItemsConsumed: 1,
+    });
+  });
+
+  it('reserves the full Provisions batch before dismissing rating-excess Storage pressure', async () => {
+    const { api } = await loadUserscript();
+    const runtime = {
+      openRouting: { storageItems: [] },
+      coordinator: {
+        getLedger: () => ({
+          summary: () => ({ capacities: { storage: { free: 3 } } }),
+        }),
+      },
+    };
+    const loopDef = {
+      rollingProvisionsShortageRecoveryEnabled: true,
+      rollingProvisionsUpgrade: {
+        activityResolved: true,
+        sbcSetIds: [1300],
+        challengeIds: [2300],
+        requirements: [{ count: 4 }],
+      },
+    };
+
+    expect(api.rollingRatingExcessStorageRequirement(loopDef, runtime)).toMatchObject({
+      ok: true,
+      currentFree: 3,
+      reserveSlots: 4,
+      minimumConsumption: 1,
+    });
+    expect(api.rollingRatingExcessStorageRequirement({
+      ...loopDef,
+      rollingProvisionsShortageRecoveryEnabled: false,
+    }, runtime)).toMatchObject({
+      ok: true,
+      currentFree: 3,
+      reserveSlots: 1,
+      minimumConsumption: 0,
+    });
+  });
+
   it('counts an authorized pending Unassigned duplicate as pressure progress alongside Storage consumption', async () => {
     const pending = Array.from({ length: 2 }, (_, index) => makePlayer({
       id: 709 + index,

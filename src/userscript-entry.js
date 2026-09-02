@@ -119,6 +119,7 @@ import {
   applyRollingAutomaticUseFodderPolicy,
   bindRollingPlayerPickCapabilities,
   buildRollingStorageSinkCatalog,
+  evaluateRollingPrimaryRunway,
   ROLLING_PROVISIONS_RATING_RANGE,
   ROLLING_PROVISIONS_RECOVERY_MODES,
   resolveRollingRecoveryPriorityPiles,
@@ -170,6 +171,7 @@ import {
   planRollingOpenedItemRouting,
   releaseRollingPrimaryDuplicateRefs,
   releaseRollingRoutingItemsAfterConsumption,
+  rollingSubmissionConsumptionRefs,
   rollingDuplicateTargetProtectionReasons,
   rollingPrimaryDuplicateProtectionConflicts,
   rollingPrimaryDuplicateRelaxationOrder,
@@ -228,6 +230,7 @@ import {
   validateStorageRecoveryHeadroom,
   validateStorageSinkHeadroom,
 } from './selection/multi-squad-rating.js';
+import { removeInventorySelection } from './inventory/snapshot-selection.js';
 import {
   parseRatingSbcChallenge as parseRatingSbcChallengePure,
   readEligibilityRequirements,
@@ -5684,6 +5687,11 @@ function updateLoopControls() {
 
   function logSelectionDiagnostics(label, selection, fallbackPriorityPiles) {
     if (!selection?.missing) return [];
+    if (selection.missing.code === 'MINIMUM_PILE_COUNT_SHORTAGE') {
+      const missing = selection.missing;
+      log(`${label}: minimum ${missing.pile || 'inventory'} consumption not met; required:${missing.minimum || '?'}, selected:${missing.selected || 0}, missing:${missing.count || missing.missing || '?'}`);
+      return [];
+    }
     const diagnostics = logRequirementDiagnostics(label, selection.missing, fallbackPriorityPiles);
     logActiveFsuSelectionGuards(label, diagnostics);
     return diagnostics;
@@ -5871,6 +5879,7 @@ function updateLoopControls() {
       consumedItemIds: [...state.consumedItemIds],
       preferredSignalRefs: options.preferredSignalRefs || [],
       specialFallbackAfterNormal: options.specialFallbackAfterNormal === true,
+      minimumPileCounts: options.minimumPileCounts || {},
     });
     return resolveSelectionPlanToRuntime(plan, inventoryAdapter, transientUnassignedSignals);
   }
@@ -10011,11 +10020,27 @@ function updateLoopControls() {
     }
 
     if (options.deferAboveTarget === true
+      && options.allowAboveTarget !== true
       && Number(selection.rating || 0) > Number(model.targetRating || 0)) {
       log(`${loopDef.name}: optimized rating ${selection.rating} exceeds target ${model.targetRating}; deferring squad mutation until Rolling recovery or duplicate relaxation produces a target-rated plan`);
       return {
         ok: true,
         deferred: true,
+        reasonCode: 'SQUAD_RATING_EXCESS',
+        selection,
+        model,
+        candidates,
+        optimizedRating: selection.rating,
+      };
+    }
+
+    if (options.allowAboveTarget === true
+      && options.maxAboveTarget !== undefined
+      && Number.isFinite(Number(options.maxAboveTarget))
+      && Number(selection.rating || 0) > Number(model.targetRating || 0) + Math.max(0, Number(options.maxAboveTarget))) {
+      return {
+        ok: false,
+        reason: `optimized rating ${selection.rating} exceeds the allowed above-target fallback for ${model.targetRating}`,
         reasonCode: 'SQUAD_RATING_EXCESS',
         selection,
         model,
@@ -14857,12 +14882,14 @@ function updateLoopControls() {
     let selection = selectInventoryPlayers(activeDef, priorityPiles, {
       preferredSignalRefs: options.preferredSignalRefs || [],
       specialFallbackAfterNormal: options.specialFallbackAfterNormal === true,
+      minimumPileCounts: options.minimumPileCounts || {},
     });
     if (!selection.ok && options.softProtectClubSpecial !== false && softProtectedIds.length) {
       activeDef = buildDef(false);
       selection = selectInventoryPlayers(activeDef, priorityPiles, {
         preferredSignalRefs: options.preferredSignalRefs || [],
         specialFallbackAfterNormal: options.specialFallbackAfterNormal === true,
+        minimumPileCounts: options.minimumPileCounts || {},
       });
       if (selection.ok) {
         log(`${loopDef.name}: ${activeDef.name} uses an explicitly allowed Club special fallback only after ordinary recovery material was insufficient`);
@@ -14872,8 +14899,16 @@ function updateLoopControls() {
       logSelectionDiagnostics(`${loopDef.name} ${activeDef.name}`, selection, priorityPiles);
       return {
         status: 'unavailable',
-        reason: `${activeDef.name} has insufficient eligible recovery material`,
-        reasonCode: 'RECOVERY_MATERIAL_SHORTAGE',
+        reason: selection.missing?.reason
+          || `${activeDef.name} has insufficient eligible recovery material`,
+        reasonCode: selection.missing?.code || 'RECOVERY_MATERIAL_SHORTAGE',
+        details: selection.missing?.code === 'MINIMUM_PILE_COUNT_SHORTAGE'
+          ? {
+              minimumPileCounts: selection.plan?.details?.minimumPileCounts || options.minimumPileCounts || {},
+              quotaCounts: selection.plan?.details?.quotaCounts || null,
+              pileCounts: selection.stats || null,
+            }
+          : null,
       };
     }
     if (options.requirePreferredSignal === true
@@ -14908,12 +14943,17 @@ function updateLoopControls() {
         consumedPendingRefs: selectedAllowedPendingSignals,
       });
       if (selectionValidation?.ok === false) {
+        logInventorySelection(`${loopDef.name} ${activeDef.name} rejected selection`, selection);
         log(`${loopDef.name}: ${activeDef.name} selection rejected before submit (${selectionValidation.reasonCode || 'selection validation failed'}): ${selectionValidation.reason || 'insufficient recovery effect'}`);
         return {
           status: 'unavailable',
           reason: selectionValidation.reason || `${activeDef.name} selection did not release enough Storage capacity`,
           reasonCode: selectionValidation.reasonCode || 'RECOVERY_SELECTION_INVALID',
-          details: selectionValidation.details || null,
+          details: {
+            ...(selectionValidation.details || {}),
+            selectionStats: selection.stats || null,
+            selectedStorageItems: selectedStorageItems,
+          },
         };
       }
     }
@@ -17347,10 +17387,17 @@ function updateLoopControls() {
       if (!requirement.ok) return requirement;
       const maximumRelease = Math.max(1, Number(options.maximumRelease || 1) || 1);
       const requestedMinimum = Math.max(0, Number(options.minimumConsumption || 0) || 0);
-      const requiredRelease = Math.min(
-        Math.max(requirement.minimumConsumption, requestedMinimum),
+      const totalMinimum = Math.max(
+        requestedMinimum,
+        Number(options.totalMinimumConsumption || 0) || 0,
+      );
+      const fullRequiredRelease = Math.min(
+        Math.max(requirement.minimumConsumption, totalMinimum),
         maximumRelease,
       );
+      const requiredRelease = options.allowPartialIncremental === true
+        ? Math.min(fullRequiredRelease, Math.max(1, requestedMinimum || 1))
+        : fullRequiredRelease;
       const pendingSignalsConsumed = consumedPendingRefs.length;
       const effectiveRelease = storageItemsConsumed + pendingSignalsConsumed;
       if (effectiveRelease < requiredRelease) {
@@ -17362,6 +17409,7 @@ function updateLoopControls() {
             currentFree: requirement.currentFree,
             pendingStorageItems: requirement.pendingStorageItems,
             requiredRelease,
+            fullRequiredRelease,
             storageItemsConsumed,
             pendingSignalsConsumed,
             effectiveRelease,
@@ -17375,6 +17423,7 @@ function updateLoopControls() {
         requiredFree: requirement.requiredFree,
         pendingStorageItems: requirement.pendingStorageItems,
         requiredRelease,
+        fullRequiredRelease,
         storageItemsConsumed,
         pendingSignalsConsumed,
         effectiveRelease,
@@ -18301,12 +18350,128 @@ function updateLoopControls() {
     const routing = rollingPendingStorageRoutingState(runtime);
     if (!routing.ok) return routing;
     const currentFree = runtime.coordinator.getLedger().summary().capacities?.storage?.free;
+    const requestedReserveSlots = Number(options.reserveSlots);
+    const reserveSlots = Number.isFinite(requestedReserveSlots)
+      ? Math.max(0, Math.floor(requestedReserveSlots))
+      : options.reservePickResult === true ? 1 : 0;
     const requirement = storagePressureRequirement({
       currentFree,
       pendingStorageItems: routing.pendingRefs.length,
-      reserveSlots: options.reservePickResult === true ? 1 : 0,
+      reserveSlots,
     });
     return requirement.ok ? { ...requirement, pendingRefs: routing.pendingRefs } : requirement;
+  }
+
+  function rollingRatingExcessStorageRequirement(loopDef, runtime) {
+    const reserveSlots = loopDef.rollingProvisionsShortageRecoveryEnabled === true
+      ? rollingProvisionsRequiredCount(loopDef, latestRollingCapability(
+          loopDef,
+          'rollingProvisionsUpgrade',
+        ))
+      : 1;
+    return rollingStorageSinkPressureRequirement(runtime, { reserveSlots });
+  }
+
+  async function forecastRollingPrimaryRunway(loopDef, runtime, plan, options = {}) {
+    if (loopDef.rollingProvisionsShortageRecoveryEnabled !== true) {
+      return { status: 'ready', reasonCode: 'PROVISIONS_SHORTAGE_RECOVERY_DISABLED' };
+    }
+    const ledger = runtime.coordinator?.getLedger?.();
+    const selection = plan?.fill?.selection;
+    const model = plan?.fill?.model || runtime.primaryContext?.model;
+    const activeLoopDef = plan?.activeLoopDef || runtime.primaryContext?.activeLoopDef;
+    if (!ledger || !selection || !model || !activeLoopDef) {
+      return {
+        status: 'diagnostic',
+        reason: 'primary runway forecast lacks a stable inventory selection or live Challenge model',
+        reasonCode: 'PRIMARY_RUNWAY_CONTEXT_UNAVAILABLE',
+      };
+    }
+
+    const projectedSnapshot = removeInventorySelection(
+      ledger.inventorySnapshot(),
+      selection,
+      { includeSignals: true },
+    );
+    if (!projectedSnapshot) {
+      log(`${loopDef.name}: primary runway forecast could not deduct the exact current squad from the immutable inventory snapshot; keeping the current safe submission plan`);
+      return {
+        status: 'diagnostic',
+        reason: 'current primary selection could not be deducted from the inventory snapshot',
+        reasonCode: 'PRIMARY_RUNWAY_SNAPSHOT_MISMATCH',
+      };
+    }
+
+    const requiredSpecialSourceFilter = createRollingRequiredSpecialSourceFilter({
+      constraintIndexes: rollingRequiredSpecialConstraintIndexes(model),
+      isClubTotw: isTotwItem,
+      isSpecial: isSbcSpecialItem,
+      resolveSubmissionPile: rollingSelectionSubmissionPile,
+      requireSpecialRoleMatch: allowsAllMatchingSpecials(activeLoopDef),
+    });
+    const selectionPolicy = {
+      ...createRollingPrimarySelectionPolicy({
+        ledger,
+        model,
+        protectionRating: rollingProtectionRating(loopDef),
+        reserveRatings: loopDef.rollingSurplusCraftingEnabled === true
+          ? rollingProvisionsReserveRatings(loopDef)
+          : false,
+        primaryDuplicateRefs: [],
+        includeUnroutedUnassignedDuplicates: false,
+        isTransientSubmissionAllowed: (item) => (
+          isRollingTransientSubmissionAllowed(item, activeLoopDef)
+        ),
+        protectedItems: rollingActiveSquadConflictRefs(runtime),
+      }),
+      candidateFilter: requiredSpecialSourceFilter,
+    };
+    const candidates = buildRatingSbcCandidateEntries(
+      activeLoopDef,
+      model,
+      selectionPolicy,
+      projectedSnapshot,
+    );
+    const projectedSelection = await findOptimalRatingSbcSelection(
+      candidates.entries,
+      model,
+      candidates.piles,
+      { selectionPolicy },
+    );
+    const runway = evaluateRollingPrimaryRunway(projectedSelection, {
+      targetRating: model.targetRating,
+      maxAboveTarget: 1,
+    });
+    const currentRatings = (selection.selected || [])
+      .map((item) => Number(item?.rating || 0))
+      .filter(Boolean);
+    const details = {
+      targetRating: runway.targetRating || Number(model.targetRating || 0) || null,
+      projectedRating: runway.projectedRating,
+      maxAboveTarget: runway.maxAboveTarget,
+      projectedRatings: projectedSelection.ratings || [],
+      currentLowFodderConsumed: currentRatings.filter((rating) => rating < 85).length,
+      projectedCandidateDefinitions: candidates.entries.length,
+      projectedReasonCode: runway.reasonCode,
+    };
+    if (runway.status === 'recover') {
+      const action = options.recoveryAttempted === true
+        ? 'the bounded Provisions preflight was already attempted, so the current verified squad will submit once before the next inventory snapshot is forecast'
+        : 'planning Provisions before submitting the current squad';
+      log(`${loopDef.name}: primary runway forecast projects the next minimum squad at ${runway.projectedRating || '?'}/${runway.targetRating || '?'} after the current submission, above the +${runway.maxAboveTarget} cap; ${action}`);
+      return {
+        ...runway,
+        reason: 'projected next primary squad would exceed the allowed rating fallback',
+        reasonCode: runway.reasonCode || 'SQUAD_RATING_EXCESS',
+        details,
+      };
+    }
+    if (runway.status === 'diagnostic') {
+      log(`${loopDef.name}: primary runway forecast is inconclusive (${runway.reasonCode || 'unknown'}); keeping the current safe submission plan`);
+    } else {
+      log(`${loopDef.name}: primary runway forecast remains within the +${runway.maxAboveTarget} cap (${runway.projectedRating}/${runway.targetRating}) after the current submission`);
+    }
+    return { ...runway, details };
   }
 
   function rollingStorageSinkConsumablePendingRefs(runtime, pendingRefs = []) {
@@ -19004,12 +19169,18 @@ function updateLoopControls() {
         runtime.primaryDuplicateRefs = (runtime.primaryDuplicateRefs || []).filter((ref) => (
           !consumedSignalRefs.some((consumedRef) => rollingItemMatchesRef(ref, consumedRef))
         ));
+        log(`${loopDef.name}: ${pickDef.name} consumed ${consumedSignalRefs.length} Unassigned duplicate signal(s); ${runtime.primaryDuplicateRefs.length} remain reserved for the primary SBC`);
+      }
+      const consumedRoutingRefs = rollingSubmissionConsumptionRefs(result, plan);
+      if (consumedRoutingRefs.length) {
         const released = releaseRollingRoutingItemsAfterConsumption(
           runtime.openRouting,
-          consumedSignalRefs,
+          consumedRoutingRefs,
         );
         runtime.openRouting = released.routing;
-        log(`${loopDef.name}: ${pickDef.name} consumed ${consumedSignalRefs.length} Unassigned duplicate signal(s); ${runtime.primaryDuplicateRefs.length} remain reserved for the primary SBC`);
+        if (released.removedItemCount) {
+          log(`${loopDef.name}: ${pickDef.name} released ${released.removedItemCount} confirmed consumed item(s) from opened-item routing ownership`);
+        }
       }
       refreshRollingPendingUnassignedRefs(runtime);
       const completedContextIndex = pendingContexts.indexOf(context);
@@ -19770,9 +19941,13 @@ function updateLoopControls() {
     runtime.primaryDuplicateRefs = (runtime.primaryDuplicateRefs || []).filter((ref) => (
       !consumedSignalRefs.some((consumedRef) => rollingItemMatchesRef(ref, consumedRef))
     ));
-    if (consumedSignalRefs.length) {
-      const released = releaseRollingRoutingItemsAfterConsumption(runtime.openRouting, consumedSignalRefs);
+    const consumedRoutingRefs = rollingSubmissionConsumptionRefs(result, plan);
+    if (consumedRoutingRefs.length) {
+      const released = releaseRollingRoutingItemsAfterConsumption(runtime.openRouting, consumedRoutingRefs);
       runtime.openRouting = released.routing;
+      if (released.removedItemCount) {
+        log(`${loopDef.name}: ${loaded.sinkDef.name} released ${released.removedItemCount} confirmed consumed item(s) from opened-item routing ownership`);
+      }
     }
     const reconciled = await reconcileRollingRuntime(runtime, `${loaded.sinkDef.name} ${context.targetRating} squad submitted`);
     if (reconciled.status !== 'ready') return reconciled;
@@ -21022,11 +21197,18 @@ function updateLoopControls() {
         ].includes(recoveryMode);
         const ratingExcessStoragePressure = recoveryMode
           === ROLLING_PROVISIONS_RECOVERY_MODES.RATING_EXCESS_STORAGE_PRESSURE;
-        const minimumStorageConsumption = ratingExcessStoragePressure
+        const requiredStorageConsumption = ratingExcessStoragePressure
           ? Math.max(1, Math.min(
               provisionsRequiredCount,
               provisionsRequiredCount - Math.max(0, Number(storageFree || 0)),
             ))
+          : 0;
+        // Rating-excess recovery may need several Storage cards overall. A
+        // single Provisions batch only needs to make one confirmed slot of
+        // progress; the next Rolling iteration re-reads the ledger and plans
+        // another batch if pressure still remains.
+        const minimumStorageConsumption = ratingExcessStoragePressure
+          ? Math.min(1, requiredStorageConsumption)
           : 0;
         const normalProvisionsMaxRating = rollingProvisionsMaxRating(loopDef);
         const pressureProvisionsRatings = rollingProvisionsReserveRatings(loopDef);
@@ -21113,7 +21295,7 @@ function updateLoopControls() {
           ? 'rating-excess emergency'
           : storagePressure ? 'emergency' : duplicateReserve ? 'duplicate-reserve' : 'normal';
         log(`${loopDef.name}: ${recoveryLabel} Provisions recovery (${context.trigger})`);
-        log(`${loopDef.name}: ${storagePressure ? `Pressure Provisions material uses the configured Provision reserve range ${pressureProvisionsMinRating}-${pressureProvisionsMaxRating}` : `Provisions material uses the configured reserve range ${ROLLING_PROVISIONS_RATING_RANGE.min}-${normalProvisionsMaxRating}`}${storagePressureReserveEntries.length ? `; Storage Pressure authorizes ${storagePressureReserveEntries.length} exact matcher-approved group 83 special candidate(s)` : ''}${consumablePendingUnassignedRefs.length ? `; ${consumablePendingUnassignedRefs.length} safe Unassigned ordinary duplicate signal(s) authorized from the same range` : ''}${clubCurrentPoolFallbackEntries.length ? `; normal shortage recovery may use ${clubCurrentPoolFallbackEntries.length} exact Club current-pool non-TOTW special candidate(s) only as a final fallback` : ''}${ratingExcessStoragePressure ? `; requires at least ${minimumStorageConsumption} real Storage card(s) to restore ${provisionsRequiredCount} free slot(s)` : ''}`);
+        log(`${loopDef.name}: ${storagePressure ? `Pressure Provisions material uses the configured Provision reserve range ${pressureProvisionsMinRating}-${pressureProvisionsMaxRating}` : `Provisions material uses the configured reserve range ${ROLLING_PROVISIONS_RATING_RANGE.min}-${normalProvisionsMaxRating}`}${storagePressureReserveEntries.length ? `; Storage Pressure authorizes ${storagePressureReserveEntries.length} exact matcher-approved group 83 special candidate(s)` : ''}${consumablePendingUnassignedRefs.length ? `; ${consumablePendingUnassignedRefs.length} safe Unassigned ordinary duplicate signal(s) authorized from the same range` : ''}${clubCurrentPoolFallbackEntries.length ? `; normal shortage recovery may use ${clubCurrentPoolFallbackEntries.length} exact Club current-pool non-TOTW special candidate(s) only as a final fallback` : ''}${ratingExcessStoragePressure ? `; requires ${requiredStorageConsumption} total Storage release(s), at least ${minimumStorageConsumption} in this batch, to restore ${provisionsRequiredCount} free slot(s)` : ''}`);
         const recoveryPriorityPiles = resolveRollingRecoveryPriorityPiles(loopDef, {
           recoveryMode: storagePressure
             ? 'storage-pressure'
@@ -21134,6 +21316,9 @@ function updateLoopControls() {
             allowedPendingUnassignedRefs: consumablePendingUnassignedRefs,
             allowAuthorizedPendingDuplicateConsumption: storagePressure,
             specialFallbackAfterNormal: storagePressure,
+            minimumPileCounts: minimumStorageConsumption > 0
+              ? { storage: minimumStorageConsumption }
+              : {},
             softProtectClubSpecial: true,
             preferredSignalRefs,
             requirePreferredSignal: duplicateReserve,
@@ -21146,6 +21331,8 @@ function updateLoopControls() {
                   allowIncremental: true,
                   maximumRelease: provisionsRequiredCount,
                   minimumConsumption: minimumStorageConsumption,
+                  totalMinimumConsumption: requiredStorageConsumption,
+                  allowPartialIncremental: ratingExcessStoragePressure,
                   consumedPendingRefs,
                 },
               )
@@ -21174,6 +21361,31 @@ function updateLoopControls() {
           }
         }
         return recovery;
+      },
+      shouldRunStorageRecovery: async ({ source } = {}) => {
+        if (source !== 'primary-rating-excess') return { run: true };
+        // A Storage Sink is a capacity recovery, not a generic way to lower a
+        // primary squad's rating. When shortage Provisions is enabled, use the
+        // same full-batch reserve that recoverProvisions uses; otherwise a
+        // 97/100 Storage can be called pressure-free here and then fail moments
+        // later because the Provisions path correctly requires four slots.
+        const pressure = rollingRatingExcessStorageRequirement(loopDef, runtime);
+        if (!pressure.ok || Number(pressure.minimumConsumption || 0) > 0) {
+          return { run: true };
+        }
+        const reason = 'primary squad rating exceeds target, but current Storage has no pressure to recover';
+        log(`${loopDef.name}: ${reason}; skipping Storage Sink recovery`);
+        return {
+          run: false,
+          reason,
+          reasonCode: 'STORAGE_PRESSURE_NOT_REQUIRED',
+          details: {
+            currentFree: pressure.currentFree,
+            pendingStorageItems: pressure.pendingStorageItems,
+            reserveSlots: pressure.reserveSlots,
+            minimumConsumption: pressure.minimumConsumption,
+          },
+        };
       },
       recoverStorageSink: async () => {
         rollingStoragePressureRequiredSpecialEntries(runtime, loopDef, {
@@ -21387,6 +21599,11 @@ function updateLoopControls() {
           },
         };
       },
+      forecastPrimaryRunway: async ({ plan, recoveryAttempted }) => {
+        return forecastRollingPrimaryRunway(loopDef, runtime, plan, {
+          recoveryAttempted,
+        });
+      },
       planPrimarySquad: async () => {
         runtime.primaryContext = await loadRollingPrimaryContext(loopDef, {
           force: runtime.forceChallengeRefresh,
@@ -21508,6 +21725,8 @@ function updateLoopControls() {
           requireSpecialRoleMatch: allowsAllMatchingSpecials(activeLoopDef),
         });
         let relaxedPrimaryDuplicateRefs = [];
+        let allowAboveTarget = false;
+        const maxAboveTarget = 1;
         let selectionPolicy = null;
         let fill = null;
         while (true) {
@@ -21536,12 +21755,35 @@ function updateLoopControls() {
             dryRun: loopDef.dryRun === true,
             selectionPolicy,
             deferAboveTarget: true,
+            allowAboveTarget,
+            maxAboveTarget,
             skipInventoryRefresh: relaxedPrimaryDuplicateRefs.length > 0
-              || Boolean(duplicateTransactionContext.transaction),
+              || Boolean(duplicateTransactionContext.transaction)
+              || allowAboveTarget,
           });
           if (!fill.ok || Number(fill.optimizedRating || 0) <= Number(model.targetRating || 0)) break;
           const nextRef = relaxationOrder[relaxedPrimaryDuplicateRefs.length];
-          if (!nextRef) break;
+          if (!nextRef) {
+            if (!allowAboveTarget) {
+              const pressure = rollingStorageSinkPressureRequirement(runtime, {
+                reservePickResult: true,
+              });
+              const withinFallbackLimit = Number(fill.optimizedRating || 0)
+                <= Number(model.targetRating || 0) + maxAboveTarget;
+              if (pressure.ok && Number(pressure.minimumConsumption || 0) === 0 && withinFallbackLimit) {
+                allowAboveTarget = true;
+                log(`${loopDef.name}: primary minimum rating remains ${fill.optimizedRating}/${model.targetRating} after duplicate relaxation, but Storage has no pending pressure; accepting the lowest verified above-target squad (fallback cap +${maxAboveTarget})`);
+                continue;
+              }
+              const denial = !pressure.ok
+                ? 'Storage pressure is unknown'
+                : Number(pressure.minimumConsumption || 0) > 0
+                  ? 'Storage pressure is still required'
+                  : `rating exceeds the fallback cap (+${maxAboveTarget})`;
+              log(`${loopDef.name}: primary minimum rating remains ${fill.optimizedRating}/${model.targetRating}; above-target fallback denied because ${denial}`);
+            }
+            break;
+          }
           relaxedPrimaryDuplicateRefs.push(nextRef);
           log(`${loopDef.name}: primary rating ${fill.optimizedRating} exceeds target ${model.targetRating}; replacing duplicate #${nextRef.id || nextRef.definitionId} with lower-rated Storage material`);
         }
@@ -21582,7 +21824,7 @@ function updateLoopControls() {
           };
         }
         const targetRating = Number(model.targetRating || 0);
-        if (Number(fill.optimizedRating || 0) > targetRating) {
+        if (Number(fill.optimizedRating || 0) > targetRating && !allowAboveTarget) {
           return {
             ok: false,
             reason: `primary squad cannot reach target rating ${targetRating} without exceeding it after all primary-pack duplicates are relaxed`,
@@ -21890,6 +22132,8 @@ function updateLoopControls() {
           log(`${loopDef.name}: ${payload.phase} (primary ${payload.completions}/${Number(loopDef.maxCompletions || 0) || 'no limit'})`);
         } else if (event === 'recovery') {
           log(`${loopDef.name}: recovery ${payload.kind} progressed (${payload.trigger || 'unspecified'}); cycle ${payload.cycleRecoveries.total}/${payload.budgets?.total || 'budgeted'}`);
+        } else if (event === 'primary-runway-unavailable') {
+          log(`${loopDef.name}: projected low-fodder runway is exhausted, but no safe Provisions batch is currently available (${payload.recoveryReasonCode || 'PROVISIONS_PREFLIGHT_SHORTAGE'}); submitting the current verified squad once and replanning from the next inventory snapshot`);
         } else if (event === 'progress') {
           log(`${loopDef.name}: primary completions ${payload.completions}; opened ${payload.packsOpened}; bootstrap ${payload.bootstrapSubmissions}`);
         }

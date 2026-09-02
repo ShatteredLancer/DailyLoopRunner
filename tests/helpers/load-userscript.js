@@ -166,6 +166,7 @@ export async function loadUserscript(options = {}) {
       resumeRollingPendingUnassigned,
       buildRollingResumedRouting,
       rollingPendingStorageRoutingState,
+      rollingRatingExcessStorageRequirement,
       validateRollingEmergencyProvisionsSelection,
       rollingRatingRecoveryStoragePressure,
       rollingStorageSinkConsumablePendingRefs,

@@ -372,6 +372,8 @@ describe('current direct side-effect call baseline', () => {
     expect(legacy).toContain('pickSelected: true');
     expect(legacy).toMatch(/await selectPendingRollingStorageSinkPick\([\s\S]*?attempts: 10,[\s\S]*?forceFresh: true/);
     expect(generic).toMatch(/await selectPendingRollingStorageSinkPick\([\s\S]*?attempts: 10,[\s\S]*?forceFresh: true/);
+    expect(legacy).toContain('const consumedRoutingRefs = rollingSubmissionConsumptionRefs(result, plan);');
+    expect(generic).toContain('const consumedRoutingRefs = rollingSubmissionConsumptionRefs(result, plan);');
     expect(legacy).toContain('{ attempts: 1, forceFresh: true, quietMissing: true, failOnUnexpected: true }');
     expect(generic).toContain('{ attempts: 1, forceFresh: true, quietMissing: true, failOnUnexpected: true }');
     expect(source).toMatch(/async function resumePendingRollingStorageSinkReward[\s\S]*?attempts: 2, forceFresh: true/);

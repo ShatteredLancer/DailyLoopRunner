@@ -87,6 +87,36 @@ describe('current inventory selection behavior', () => {
     expect(selection.entries.every((entry) => !entry.signal)).toBe(true);
   });
 
+  it('forwards the emergency minimum Storage quota through the runtime selector', async () => {
+    const storage = [
+      makePlayer({ id: 901, definitionId: 3901, rating: 87, rareflag: 2 }),
+      makePlayer({ id: 902, definitionId: 3902, rating: 88, rareflag: 2 }),
+    ];
+    const club = [
+      makePlayer({ id: 903, definitionId: 3903, rating: 87, rareflag: 0 }),
+      makePlayer({ id: 904, definitionId: 3904, rating: 88, rareflag: 0 }),
+    ];
+    const { api } = await loadUserscript({ storage, club });
+    const selection = api.selectInventoryPlayers({
+      requirements: [{
+        tier: 'gold',
+        count: 4,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+      }],
+      runtimeSbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 88 },
+    }, ['storage', 'club'], {
+      specialFallbackAfterNormal: true,
+      minimumPileCounts: { storage: 2 },
+    });
+
+    expect(selection.ok).toBe(true);
+    expect(selection.stats).toEqual({ storage: 2, club: 2 });
+    expect(selection.selected.map((item) => item.id)).toEqual([901, 902, 903, 904]);
+  });
+
   it.each([false, true])(
     'skips protected high-rated Unassigned material with Storage-first=%s',
     async (runtimeRecoveryStorageFirst) => {

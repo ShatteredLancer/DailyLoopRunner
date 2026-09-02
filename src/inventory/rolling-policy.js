@@ -663,6 +663,16 @@ export function releaseRollingPrimaryDuplicateRefs(primaryRefs = [], releasedRef
   };
 }
 
+// A confirmed Storage Sink submission reports the entities actually consumed;
+// duplicate materialization additionally carries transient Unassigned signals.
+// Keep both exact identity sets so routing ownership is released together.
+export function rollingSubmissionConsumptionRefs(result = {}, plan = {}) {
+  return uniqueRefs([
+    ...(Array.isArray(result?.consumedItemRefs) ? result.consumedItemRefs : []),
+    ...(Array.isArray(plan?.signalRefs) ? plan.signalRefs : []),
+  ]);
+}
+
 export function releaseRollingRoutingItemsAfterConsumption(routing = null, consumedRefs = []) {
   if (!routing || typeof routing !== 'object') {
     return { routing, removedItemCount: 0, removedByField: {} };

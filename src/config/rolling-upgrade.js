@@ -143,6 +143,48 @@ export function shouldQueueRollingProvisionsReward(trigger, loopDef = {}) {
     && loopDef.rollingOpenDuplicateProvisionsRewards === true;
 }
 
+export function evaluateRollingPrimaryRunway(selection = {}, options = {}) {
+  const targetRating = Number(options.targetRating || 0);
+  const maxAboveTarget = Math.max(0, Number(options.maxAboveTarget || 0) || 0);
+  const reasonCode = selection.reasonCode || selection.missing?.code || null;
+  if (selection.ok !== true) {
+    return reasonCode === 'SQUAD_RATING_EXCESS'
+      ? {
+          status: 'recover',
+          reasonCode,
+          targetRating: targetRating || null,
+          projectedRating: Number(selection.rating || 0) || null,
+          maxAboveTarget,
+        }
+      : {
+          status: 'diagnostic',
+          reasonCode: reasonCode || 'PRIMARY_RUNWAY_UNKNOWN',
+          targetRating: targetRating || null,
+          projectedRating: Number(selection.rating || 0) || null,
+          maxAboveTarget,
+        };
+  }
+  const projectedRating = Number(selection.rating || 0);
+  if (!targetRating || !projectedRating) {
+    return {
+      status: 'diagnostic',
+      reasonCode: 'PRIMARY_RUNWAY_RATING_UNKNOWN',
+      targetRating: targetRating || null,
+      projectedRating: projectedRating || null,
+      maxAboveTarget,
+    };
+  }
+  return {
+    status: projectedRating > targetRating + maxAboveTarget ? 'recover' : 'ready',
+    reasonCode: projectedRating > targetRating + maxAboveTarget
+      ? 'SQUAD_RATING_EXCESS'
+      : null,
+    targetRating,
+    projectedRating,
+    maxAboveTarget,
+  };
+}
+
 export const ROLLING_STORAGE_SINK_PICK_SELECTOR = Object.freeze({
   rewardMinRating: 95,
   candidateCount: 3,

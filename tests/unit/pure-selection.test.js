@@ -322,6 +322,134 @@ describe('pure inventory selector', () => {
     expect(plan.selected.map((item) => item.id)).toEqual([1, 20]);
   });
 
+  it('satisfies an explicit minimum Storage consumption before using Club fillers', () => {
+    const adapter = createFakeInventoryAdapter({
+      storage: [
+        makePlayer({ id: 1, definitionId: 101, rating: 87, rareflag: 2 }),
+        makePlayer({ id: 2, definitionId: 102, rating: 88, rareflag: 2 }),
+      ],
+      club: [
+        makePlayer({ id: 3, definitionId: 103, rating: 87, rareflag: 0 }),
+        makePlayer({ id: 4, definitionId: 104, rating: 88, rareflag: 0 }),
+      ],
+    });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 4,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+      }],
+      priorityPiles: ['storage', 'club'],
+      specialFallbackAfterNormal: true,
+      minimumPileCounts: { storage: 2 },
+      fsuPolicy,
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.pileCounts).toEqual({ storage: 2, club: 2 });
+    expect(plan.selected.map((item) => item.id)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('resumes Storage priority after the minimum quota is satisfied', () => {
+    const adapter = createFakeInventoryAdapter({
+      storage: [
+        makePlayer({ id: 21, definitionId: 121, rating: 87, rareflag: 0 }),
+        makePlayer({ id: 22, definitionId: 122, rating: 87, rareflag: 0 }),
+        makePlayer({ id: 23, definitionId: 123, rating: 88, rareflag: 0 }),
+      ],
+      club: [makePlayer({ id: 24, definitionId: 124, rating: 88, rareflag: 0 })],
+    });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 4,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+      }],
+      priorityPiles: ['storage', 'club'],
+      minimumPileCounts: { storage: 2 },
+      fsuPolicy,
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.pileCounts).toEqual({ storage: 3, club: 1 });
+    expect(plan.selected.map((item) => item.id)).toEqual([21, 22, 23, 24]);
+  });
+
+  it('rejects a minimum Storage requirement when too few Storage candidates are eligible', () => {
+    const adapter = createFakeInventoryAdapter({
+      storage: [makePlayer({ id: 1, definitionId: 101, rating: 87, rareflag: 2 })],
+      club: [
+        makePlayer({ id: 2, definitionId: 102, rating: 87, rareflag: 0 }),
+        makePlayer({ id: 3, definitionId: 103, rating: 88, rareflag: 0 }),
+        makePlayer({ id: 4, definitionId: 104, rating: 88, rareflag: 0 }),
+      ],
+    });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 4,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+      }],
+      priorityPiles: ['storage', 'club'],
+      specialFallbackAfterNormal: true,
+      minimumPileCounts: { storage: 2 },
+      fsuPolicy,
+    });
+
+    expect(plan.ok).toBe(false);
+    expect(plan.missing).toMatchObject({
+      code: 'MINIMUM_PILE_COUNT_SHORTAGE',
+      pile: 'storage',
+      minimum: 2,
+      selected: 1,
+      count: 1,
+    });
+  });
+
+  it('counts the resolved Storage counterpart for a duplicate signal quota', () => {
+    const adapter = createFakeInventoryAdapter({
+      unassigned: [makePlayer({
+        id: 12,
+        definitionId: 111,
+        rating: 87,
+        rareflag: 1,
+        duplicate: true,
+        duplicateId: 11,
+      })],
+      storage: [makePlayer({ id: 11, definitionId: 111, rating: 87, rareflag: 1 })],
+    });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 1,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+      }],
+      priorityPiles: ['unassigned'],
+      minimumPileCounts: { storage: 1 },
+      fsuPolicy,
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.pileCounts).toEqual({ unassigned: 1 });
+    expect(plan.selected.map((item) => item.id)).toEqual([11]);
+  });
+
   it('prioritizes a blocked Unassigned duplicate signal without bypassing eligibility', () => {
     const adapter = createFakeInventoryAdapter({
       unassigned: [

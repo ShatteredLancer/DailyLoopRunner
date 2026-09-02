@@ -160,6 +160,11 @@ export function selectInventoryPlayers(input = {}) {
   if (!snapshot?.piles) throw new Error('inventorySnapshot is required');
   const requirements = input.requirements || [];
   const defaultPiles = input.priorityPiles || ['storage', 'transfer', 'club'];
+  const minimumPileCounts = Object.fromEntries(
+    Object.entries(input.minimumPileCounts || {})
+      .map(([pile, count]) => [pile, Math.floor(Number(count))])
+      .filter(([pile, count]) => INVENTORY_PILES.includes(pile) && Number.isFinite(count) && count > 0),
+  );
   const fsuPolicy = input.fsuPolicy || {};
   const protection = {
     consumedItemIds: numberSet(input.consumedItemIds),
@@ -172,6 +177,9 @@ export function selectInventoryPlayers(input = {}) {
   const selected = [];
   const entries = [];
   const pileCounts = {};
+  // Source counts remain useful for diagnostics, but capacity quotas apply to
+  // the real entity submitted after duplicate-signal resolution.
+  const quotaCounts = {};
   const duplicateSignals = [];
   const diagnostics = [];
   const preferredSignalRefs = preferredItemRefs(input.preferredSignalRefs);
@@ -207,7 +215,53 @@ export function selectInventoryPlayers(input = {}) {
             ...pileCandidates.filter(({ candidate }) => candidate.special === true),
           ]
         : pileCandidates;
-      for (const { pileName, candidate } of orderedCandidates) {
+      // A capacity recovery may require consuming a minimum number of cards
+      // from a particular pile. Prefer that pile while its quota is unmet;
+      // ordinary Loop callers omit this option and retain the existing order.
+      const quotaUnmet = Object.keys(minimumPileCounts).some((pile) => (
+        (quotaCounts[pile] || 0) < minimumPileCounts[pile]
+      ));
+      const quotaPileForCandidate = ({ pileName, candidate }) => {
+        const resolved = pileName === 'unassigned' || pileName === 'transfer'
+          ? (candidate.duplicateSignal || candidate.duplicate
+            ? findSubmissionItem(
+              candidate,
+              snapshot,
+              submissionIds,
+              phaseRequirement,
+              fsuPolicy,
+              requirementProtection,
+            )
+            : null)
+          : candidate;
+        const resolvedPile = resolved?.ref?.pile || resolved?.pile;
+        return Object.prototype.hasOwnProperty.call(minimumPileCounts, resolvedPile)
+          ? resolvedPile
+          : null;
+      };
+      const quotaCandidates = quotaUnmet
+        ? orderedCandidates.filter((candidateEntry) => {
+          const quotaPile = quotaPileForCandidate(candidateEntry);
+          return quotaPile && (quotaCounts[quotaPile] || 0) < minimumPileCounts[quotaPile];
+        })
+        : [];
+      const constrainedCandidates = quotaUnmet
+        ? [
+            ...quotaCandidates.map((candidateEntry) => ({ candidateEntry, quotaPhase: true })),
+            // Once every quota is satisfied, resume the original ordering so
+            // the quota does not change ordinary pile preference or ratings.
+            ...orderedCandidates.map((candidateEntry) => ({
+              candidateEntry,
+              quotaPhase: false,
+            })),
+          ]
+        : orderedCandidates.map((candidateEntry) => ({ candidateEntry, quotaPhase: false }));
+      for (const { candidateEntry, quotaPhase } of constrainedCandidates) {
+        const { pileName, candidate } = candidateEntry;
+        if (quotaPhase) {
+          const quotaPile = quotaPileForCandidate(candidateEntry);
+          if (!quotaPile || (quotaCounts[quotaPile] || 0) >= minimumPileCounts[quotaPile]) continue;
+        }
         if (need <= 0) break;
         if (phase.preferredOnly && !isPreferredItem(candidate, preferredSignalRefs)) continue;
         if (selectedIds.has(candidate.id) || selectedDefinitionIds.has(candidate.definitionId)) continue;
@@ -235,6 +289,10 @@ export function selectInventoryPlayers(input = {}) {
         selected.push(item);
         entries.push({ pileName, signalRef: signal?.ref || null, itemRef: item.ref });
         pileCounts[pileName] = (pileCounts[pileName] || 0) + 1;
+        const submittedPile = item?.ref?.pile || item?.pile || pileName;
+        if (INVENTORY_PILES.includes(submittedPile)) {
+          quotaCounts[submittedPile] = (quotaCounts[submittedPile] || 0) + 1;
+        }
         need--;
       }
     }
@@ -251,6 +309,36 @@ export function selectInventoryPlayers(input = {}) {
         diagnostics,
       });
     }
+  }
+
+  const minimumShortages = Object.entries(minimumPileCounts)
+    .map(([pile, minimum]) => ({
+      pile,
+      minimum,
+      selected: quotaCounts[pile] || 0,
+      missing: Math.max(0, minimum - (quotaCounts[pile] || 0)),
+    }))
+    .filter(({ missing }) => missing > 0);
+  if (minimumShortages.length) {
+    const shortage = minimumShortages[0];
+    return createSelectionPlan({
+      ok: false,
+      mode: input.mode || 'requirements',
+      entries,
+      selected,
+      missing: {
+        code: 'MINIMUM_PILE_COUNT_SHORTAGE',
+        count: shortage.missing,
+        pile: shortage.pile,
+        minimum: shortage.minimum,
+        selected: shortage.selected,
+        reason: `selection requires at least ${shortage.minimum} ${shortage.pile} card(s), but only ${shortage.selected} eligible submitted card(s) were selected`,
+      },
+      pileCounts,
+      duplicateSignals,
+      diagnostics,
+      details: { minimumPileCounts, quotaCounts, minimumShortages },
+    });
   }
 
   return createSelectionPlan({

@@ -16,6 +16,7 @@ import {
   ROLLING_STORAGE_FIRST_RECOVERY_PILES,
   ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES,
   resolveRollingProvisionsRecoveryMode,
+  evaluateRollingPrimaryRunway,
   resolveRollingRecoveryPriorityPiles,
   shouldQueueRollingProvisionsReward,
 } from '../../src/config/rolling-upgrade.js';
@@ -332,6 +333,36 @@ describe('Rolling Upgrade configuration contracts', () => {
     expect(shouldQueueRollingProvisionsReward('primary-fodder-shortage', {})).toBe(true);
     expect(shouldQueueRollingProvisionsReward('required-special-fodder-shortage', {})).toBe(true);
     expect(shouldQueueRollingProvisionsReward('unknown', {})).toBe(false);
+  });
+
+  it('requests proactive Provisions only when the projected next squad exceeds the bounded fallback', () => {
+    expect(evaluateRollingPrimaryRunway({ ok: true, rating: 85 }, {
+      targetRating: 84,
+      maxAboveTarget: 1,
+    })).toMatchObject({
+      status: 'ready',
+      targetRating: 84,
+      projectedRating: 85,
+    });
+    expect(evaluateRollingPrimaryRunway({ ok: true, rating: 86 }, {
+      targetRating: 84,
+      maxAboveTarget: 1,
+    })).toMatchObject({
+      status: 'recover',
+      reasonCode: 'SQUAD_RATING_EXCESS',
+      targetRating: 84,
+      projectedRating: 86,
+    });
+    expect(evaluateRollingPrimaryRunway({
+      ok: false,
+      missing: { code: 'PLAYER_COUNT_SHORTAGE' },
+    }, {
+      targetRating: 84,
+      maxAboveTarget: 1,
+    })).toMatchObject({
+      status: 'diagnostic',
+      reasonCode: 'PLAYER_COUNT_SHORTAGE',
+    });
   });
 
   it('keeps an unresolved or exactly tied Rare Gold Pick capability fail-closed', async () => {
