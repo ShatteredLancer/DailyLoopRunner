@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   hasItemViolationConflict,
   inspectItemViolationConflict,
+  isAmbiguousBackgroundSubmitResult,
   isRetryableBackgroundSubmitError,
+  planAmbiguousBackgroundSubmitRetry,
   planChallengeReloadRetry,
   normalizeSubmitErrorCode,
   planBackgroundSubmitRetry,
@@ -87,6 +89,123 @@ describe('background submit retry helpers', () => {
       delayMs: 0,
       reason: 'non-retryable',
     });
+  });
+
+  it('classifies only an empty status-0 transport result as ambiguous', () => {
+    const emptyTransport = {
+      success: false,
+      status: 0,
+      error: { code: 0, message: null, reason: null },
+      response: { status: null },
+      errorResponse: { status: null },
+    };
+    expect(isAmbiguousBackgroundSubmitResult(emptyTransport)).toBe(true);
+    expect(isAmbiguousBackgroundSubmitResult({
+      ...emptyTransport,
+      message: 'EA rejected the squad',
+    })).toBe(false);
+    expect(isAmbiguousBackgroundSubmitResult({
+      ...emptyTransport,
+      error: { code: 429 },
+    })).toBe(false);
+    expect(isAmbiguousBackgroundSubmitResult({ success: false, status: null, error: { code: 0 } }))
+      .toBe(false);
+  });
+
+  it('allows one ambiguous transport result to reach reconciliation, never a blind second retry', () => {
+    const result = { success: false, status: 0, error: { code: 0 } };
+    expect(planBackgroundSubmitRetry({
+      attempt: 1,
+      maxAttempts: 3,
+      detail: 'unknown',
+      result,
+      baseDelayMs: 800,
+    })).toEqual({
+      retry: true,
+      delayMs: 3000,
+      reason: 'ambiguous-transport',
+      requiresNoMutationEvidence: true,
+    });
+    expect(planBackgroundSubmitRetry({
+      attempt: 2,
+      maxAttempts: 3,
+      detail: 'unknown',
+      result,
+      baseDelayMs: 800,
+    })).toEqual({
+      retry: false,
+      delayMs: 0,
+      reason: 'ambiguous-retry-exhausted',
+    });
+  });
+
+  it('retries an ambiguous submit only after fresh evidence proves no server mutation', () => {
+    const item = {
+      id: 101,
+      definitionId: 1001,
+      expectedPile: 'storage',
+      found: true,
+      currentPile: 'storage',
+      rating: 90,
+    };
+    const state = (timesCompleted = 97) => ({
+      set: { id: 1419, timesCompleted },
+      challenge: {
+        id: 4115,
+        status: 'NOT_STARTED',
+        completed: false,
+        isCompleted: false,
+        scalarHints: { timesCompleted },
+      },
+    });
+    const selectedItems = {
+      selectedCount: 1,
+      exactFound: 1,
+      exactMissing: 0,
+      currentPiles: { storage: 1 },
+      items: [item],
+    };
+    const input = {
+      attempt: 1,
+      maxAttempts: 3,
+      refreshOutcome: 'confirmed',
+      reloadOutcome: 'current-challenge-loaded',
+      stateBefore: state(),
+      stateAfter: state(),
+      selectedItemsBefore: selectedItems,
+      selectedItemsAfter: selectedItems,
+      packInventory: { beforeTotal: 20, afterTotal: 20, changed: [], truncated: false },
+    };
+
+    expect(planAmbiguousBackgroundSubmitRetry(input)).toEqual({
+      retry: true,
+      reason: 'no-server-mutation-confirmed',
+    });
+    expect(planAmbiguousBackgroundSubmitRetry({
+      ...input,
+      stateAfter: state(98),
+    })).toEqual({ retry: false, reason: 'completion-counter-changed' });
+    expect(planAmbiguousBackgroundSubmitRetry({
+      ...input,
+      selectedItemsAfter: { ...selectedItems, exactFound: 0, exactMissing: 1, items: [{ ...item, found: false }] },
+    })).toEqual({ retry: false, reason: 'submitted-item-state-changed' });
+    expect(planAmbiguousBackgroundSubmitRetry({
+      ...input,
+      packInventory: {
+        beforeTotal: 20,
+        afterTotal: 21,
+        changed: [{ packId: 1082, before: 0, after: 1, delta: 1 }],
+        truncated: false,
+      },
+    })).toEqual({ retry: false, reason: 'pack-inventory-changed' });
+    expect(planAmbiguousBackgroundSubmitRetry({
+      ...input,
+      reloadOutcome: 'next-challenge-loaded',
+    })).toEqual({ retry: false, reason: 'original-challenge-not-reloaded' });
+    expect(planAmbiguousBackgroundSubmitRetry({
+      ...input,
+      refreshOutcome: 'failed',
+    })).toEqual({ retry: false, reason: 'evidence-refresh-failed' });
   });
 
   it('confirms item violations only when every violating item belongs to the submitted squad', () => {

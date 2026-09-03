@@ -386,6 +386,7 @@ import { createStalePackTracker } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import {
   planBackgroundSubmitRetry,
+  planAmbiguousBackgroundSubmitRetry,
   planChallengeReloadRetry,
   inspectItemViolationConflict,
   planItemViolationOverride,
@@ -8574,6 +8575,7 @@ function updateLoopControls() {
           attempt,
           maxAttempts,
           detail: lastDetail,
+          result: submissionDiagnostic?.result,
           baseDelayMs: Number(CFG.pauseMs) || 800,
         });
         if (!plan.retry) {
@@ -8589,8 +8591,12 @@ function updateLoopControls() {
           stateBefore,
           stateAfter,
           packCountsBefore: attemptPackCountsBefore,
+          requiresNoMutationEvidence: plan.requiresNoMutationEvidence === true,
         };
-        log(`${label}: background submit returned ${lastDetail}; reloading challenge before retry (${attempt}/${maxAttempts})`);
+        const reconciliationNote = plan.requiresNoMutationEvidence === true
+          ? 'refreshing Challenge, packs, and exact submitted items before one possible retry'
+          : 'reloading challenge before retry';
+        log(`${label}: background submit returned ${lastDetail}; ${reconciliationNote} (${attempt}/${maxAttempts})`);
         await sleep(plan.delayMs);
       }
 
@@ -8602,28 +8608,80 @@ function updateLoopControls() {
       const reloadAttempts = [];
       let reloadOutcome = 'unavailable';
       let reloadError = null;
-      try {
-        const reloaded = await loadRatingSbcChallenge(currentChallenge, `${label} submit-retry`, {
-          force: true,
-          onDiagnostic: (diagnostic) => reloadAttempts.push({ source: 'current-challenge', ...diagnostic }),
-        });
-        if (reloaded) {
-          currentChallenge = reloaded;
-          reloadOutcome = 'current-challenge-loaded';
+      let evidenceRefreshOutcome = retryEvidence?.requiresNoMutationEvidence === true
+        ? 'failed'
+        : 'not-required';
+      let evidenceRefreshError = null;
+      const evidenceRefreshSteps = {};
+      if (retryEvidence?.requiresNoMutationEvidence === true) {
+        try {
+          await refreshStorePacks();
+          evidenceRefreshSteps.packs = true;
+          const unassigned = await refreshUnassigned({
+            attempts: 2,
+            allowCacheFallback: false,
+            quiet: true,
+          });
+          evidenceRefreshSteps.unassigned = unassigned?.success === true;
+          evidenceRefreshSteps.club = await refreshPileCacheByCandidates('club', { quiet: true });
+          evidenceRefreshSteps.storage = await refreshPileCacheByCandidates('storage', { quiet: true });
+          evidenceRefreshSteps.transfer = await refreshPileCacheByCandidates('transfer', { quiet: true });
+          if (typeof options.refreshFailureEvidence !== 'function') {
+            throw new Error('exact inventory reconciliation callback is unavailable');
+          }
+          await options.refreshFailureEvidence({
+            label,
+            players,
+            submission: retryEvidence?.submission,
+          });
+          evidenceRefreshSteps.runtime = true;
+          evidenceRefreshOutcome = 'confirmed';
+        } catch (error) {
+          evidenceRefreshError = sanitizeBackgroundSubmitResult({ success: false, error });
+          log(`${label}: ambiguous submit evidence refresh failed: ${error?.message || error}`);
         }
-        else {
-          const nextContext = await findAvailableRatingSbcChallengeContext(
+      }
+      try {
+        if (retryEvidence?.requiresNoMutationEvidence === true) {
+          const freshContext = await findAvailableRatingSbcChallengeContext(
             set,
-            `${label} submit-retry`,
+            `${label} ambiguous submit verification`,
             { force: true },
           );
-          const next = nextContext.challenge;
-          if (next) {
-            currentChallenge = await loadRatingSbcChallenge(next, `${label} submit-retry`, {
+          const fresh = freshContext.challenge;
+          if (fresh) {
+            const originalChallengeId = Number(retryEvidence?.stateBefore?.challenge?.id || 0);
+            currentChallenge = await loadRatingSbcChallenge(fresh, `${label} ambiguous submit verification`, {
               force: true,
-              onDiagnostic: (diagnostic) => reloadAttempts.push({ source: 'next-challenge', ...diagnostic }),
-            }) || next;
-            reloadOutcome = 'next-challenge-loaded';
+              onDiagnostic: (diagnostic) => reloadAttempts.push({ source: 'fresh-challenge', ...diagnostic }),
+            }) || fresh;
+            reloadOutcome = Number(fresh?.id || 0) === originalChallengeId
+              ? 'current-challenge-loaded'
+              : 'next-challenge-loaded';
+          }
+        } else {
+          const reloaded = await loadRatingSbcChallenge(currentChallenge, `${label} submit-retry`, {
+            force: true,
+            onDiagnostic: (diagnostic) => reloadAttempts.push({ source: 'current-challenge', ...diagnostic }),
+          });
+          if (reloaded) {
+            currentChallenge = reloaded;
+            reloadOutcome = 'current-challenge-loaded';
+          }
+          else {
+            const nextContext = await findAvailableRatingSbcChallengeContext(
+              set,
+              `${label} submit-retry`,
+              { force: true },
+            );
+            const next = nextContext.challenge;
+            if (next) {
+              currentChallenge = await loadRatingSbcChallenge(next, `${label} submit-retry`, {
+                force: true,
+                onDiagnostic: (diagnostic) => reloadAttempts.push({ source: 'next-challenge', ...diagnostic }),
+              }) || next;
+              reloadOutcome = 'next-challenge-loaded';
+            }
           }
         }
       } catch (error) {
@@ -8641,6 +8699,7 @@ function updateLoopControls() {
           );
           const next = nextContext.challenge;
           if (next) {
+            const originalChallengeId = Number(retryEvidence?.stateBefore?.challenge?.id || 0);
             currentChallenge = await loadRatingSbcChallenge(
               next,
               `${label} submit-retry fresh challenge`,
@@ -8649,7 +8708,10 @@ function updateLoopControls() {
                 onDiagnostic: (diagnostic) => reloadAttempts.push({ source: 'fresh-challenge', ...diagnostic }),
               },
             ) || next;
-            reloadOutcome = 'next-challenge-loaded';
+            reloadOutcome = retryEvidence?.requiresNoMutationEvidence === true
+              && Number(next?.id || 0) === originalChallengeId
+              ? 'current-challenge-loaded'
+              : 'next-challenge-loaded';
             reloadError = null;
           }
         } catch (fallbackError) {
@@ -8661,6 +8723,33 @@ function updateLoopControls() {
           log(`${label}: fresh challenge reload after submit conflict failed: ${fallbackError?.message || fallbackError}`);
         }
       }
+      const reloadStateAfter = currentBackgroundSubmitState(
+        set,
+        currentChallenge,
+        retryEvidence?.submissionOptions,
+      );
+      const selectedItemsAfterReload = backgroundSubmitItemsAfterFailure(
+        players,
+        options,
+        retryEvidence?.submission,
+      );
+      const packInventoryAfterReload = summarizeBackgroundSubmitPackCounts(
+        retryEvidence?.packCountsBefore || beforePackCounts,
+        getPackCountsById(),
+      );
+      const ambiguityPlan = retryEvidence?.requiresNoMutationEvidence === true
+        ? planAmbiguousBackgroundSubmitRetry({
+            attempt: retryEvidence?.attempt || attempt,
+            maxAttempts,
+            refreshOutcome: evidenceRefreshOutcome,
+            reloadOutcome,
+            stateBefore: retryEvidence?.stateBefore || reloadStateBefore,
+            stateAfter: reloadStateAfter,
+            selectedItemsBefore: retryEvidence?.selectedItemsBefore,
+            selectedItemsAfter: selectedItemsAfterReload,
+            packInventory: packInventoryAfterReload,
+          })
+        : null;
       emitDiagnostic(log, () => `${label}: background submit retry reconciliation diagnostic ${diagnosticJson({
         trigger: {
           attempt: retryEvidence?.attempt || attempt,
@@ -8673,25 +8762,58 @@ function updateLoopControls() {
           attempts: reloadAttempts,
           error: reloadError,
         },
+        evidenceRefresh: {
+          outcome: evidenceRefreshOutcome,
+          steps: evidenceRefreshSteps,
+          error: evidenceRefreshError,
+        },
+        ambiguity: ambiguityPlan,
         state: {
           before: reloadStateBefore,
-          after: currentBackgroundSubmitState(set, currentChallenge, retryEvidence?.submissionOptions),
+          after: reloadStateAfter,
         },
         selectedItems: {
           beforeSubmit: retryEvidence?.selectedItemsBefore || null,
-          afterReload: backgroundSubmitItemsAfterFailure(players, options, retryEvidence?.submission),
+          afterReload: selectedItemsAfterReload,
         },
-        packInventory: summarizeBackgroundSubmitPackCounts(
-          retryEvidence?.packCountsBefore || beforePackCounts,
-          getPackCountsById(),
-        ),
+        packInventory: packInventoryAfterReload,
       })}`);
+      if (ambiguityPlan && !ambiguityPlan.retry) {
+        fail(`${label}: ambiguous background submit stopped after ${ambiguityPlan.reason}; no automatic resubmit was sent`);
+      }
       const reloadPlan = planChallengeReloadRetry({ reloadOutcome });
       if (!reloadPlan.retry) {
         const reloadDetail = reloadError?.error?.message
           || reloadError?.message
           || lastDetail;
         fail(`${label}: background submit aborted after ${reloadPlan.reason}: ${reloadDetail}`);
+      }
+      if (ambiguityPlan?.retry) {
+        if (typeof options.revalidateSubmission !== 'function') {
+          fail(`${label}: ambiguous background submit has no submission revalidation callback; no automatic resubmit was sent`);
+        }
+        let revalidation = null;
+        try {
+          revalidation = await options.revalidateSubmission();
+        } catch (error) {
+          fail(`${label}: submission revalidation before ambiguous retry failed: ${error?.message || error}`);
+        }
+        if (revalidation?.ok === false) {
+          fail(`${label}: submission revalidation before ambiguous retry was rejected: ${revalidation.reason || 'unknown reason'}`);
+        }
+        const originalPlayerIds = players
+          .map((item) => Number(item?.id || 0))
+          .filter(Boolean)
+          .sort((left, right) => left - right);
+        const revalidatedPlayerIds = (revalidation?.players || [])
+          .map((item) => Number(item?.id || 0))
+          .filter(Boolean)
+          .sort((left, right) => left - right);
+        if (originalPlayerIds.length !== revalidatedPlayerIds.length
+          || originalPlayerIds.some((id, index) => id !== revalidatedPlayerIds[index])) {
+          fail(`${label}: submission revalidation changed the saved squad item IDs; no automatic resubmit was sent`);
+        }
+        log(`${label}: fresh Challenge, pack, and exact-item evidence confirmed no server mutation; retrying the same squad once`);
       }
       if (!canSubmit && attempt < maxAttempts) {
         await sleep(Math.min(3000, (Number(CFG.pauseMs) || 800) + attempt * 500));
@@ -15029,6 +15151,9 @@ function updateLoopControls() {
             failureInventoryDiagnostic: ({ players }) => (
               rollingBackgroundSubmitInventoryDiagnostic(runtime, players)
             ),
+            refreshFailureEvidence: ({ label: submitLabel }) => (
+              refreshRollingBackgroundSubmitFailureEvidence(runtime, submitLabel)
+            ),
           },
           onResult: async (submissionResult) => {
             if (submissionResult.submitted) {
@@ -15134,6 +15259,20 @@ function updateLoopControls() {
       resolveItem: (ref) => ledger?.resolveItem?.(ref) || null,
       ledgerSummary: ledger?.summary?.() || {},
     });
+  }
+
+  async function refreshRollingBackgroundSubmitFailureEvidence(runtime, label) {
+    if (typeof runtime?.coordinator?.reconcile !== 'function') {
+      throw new Error('Rolling Inventory Ledger reconciliation is unavailable');
+    }
+    const reconciliation = await runtime.coordinator.reconcile(
+      `${label} ambiguous background submit evidence`,
+      { refreshUnassigned: true },
+    );
+    if (!reconciliation?.ok) {
+      throw new Error(reconciliation?.reason || 'Rolling Inventory Ledger reconciliation failed');
+    }
+    return reconciliation;
   }
 
   async function submitRollingRatingRecoveryAttempt(loopDef, runtime, definition, options = {}) {
@@ -15459,6 +15598,9 @@ function updateLoopControls() {
             allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
             failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
               rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+            ),
+            refreshFailureEvidence: ({ label: submitLabel }) => (
+              refreshRollingBackgroundSubmitFailureEvidence(runtime, submitLabel)
             ),
           },
         );
@@ -18867,6 +19009,9 @@ function updateLoopControls() {
             failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
               rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
             ),
+            refreshFailureEvidence: ({ label: submitLabel }) => (
+              refreshRollingBackgroundSubmitFailureEvidence(runtime, submitLabel)
+            ),
           },
         );
         if (backgroundSubmission?.status === 'replan') return backgroundSubmission;
@@ -22039,6 +22184,9 @@ function updateLoopControls() {
                 allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
                 failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
                   rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+                ),
+                refreshFailureEvidence: ({ label: submitLabel }) => (
+                  refreshRollingBackgroundSubmitFailureEvidence(runtime, submitLabel)
                 ),
               },
             );

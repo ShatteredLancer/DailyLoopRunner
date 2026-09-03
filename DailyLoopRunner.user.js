@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.63
+// @version      0.8.64
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -30,7 +30,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.63",
+    version: "0.8.64",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -27688,6 +27688,58 @@
   // src/sbc/background-submit-retry.js
   var RETRYABLE_SUBMIT_CODES = /* @__PURE__ */ new Set(["409", "426", "429", "512", "521"]);
   var RECOGNIZED_SUBMIT_CODES = [...RETRYABLE_SUBMIT_CODES].join("|");
+  function hasScalar(value) {
+    return value !== void 0 && value !== null && String(value).trim() !== "";
+  }
+  function isZeroScalar(value) {
+    return hasScalar(value) && Number(value) === 0;
+  }
+  function hasMessage(value) {
+    return hasScalar(value) && String(value).trim() !== "0";
+  }
+  function numericScalar(value) {
+    if (!hasScalar(value)) return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  function completionCounter(state) {
+    return numericScalar(state?.challenge?.scalarHints?.timesCompleted) ?? numericScalar(state?.challenge?.timesCompleted) ?? numericScalar(state?.set?.timesCompleted);
+  }
+  function completedChallenge2(state) {
+    const challenge = state?.challenge || {};
+    if (challenge.completed === true || challenge.isCompleted === true) return true;
+    return [challenge.status, challenge.state].some((value) => /^(?:COMPLETED|COMPLETE)$/i.test(String(value || "").trim()));
+  }
+  function unchangedSubmittedItems(before, after) {
+    const selectedCount = Math.max(0, Number(before?.selectedCount || 0));
+    if (!selectedCount || before?.truncated === true || after?.truncated === true) return false;
+    if (Number(before?.exactFound || 0) !== selectedCount || Number(after?.selectedCount || 0) !== selectedCount || Number(after?.exactFound || 0) !== selectedCount || Number(after?.exactMissing || 0) !== 0) return false;
+    const beforeItems = Array.isArray(before?.items) ? before.items : [];
+    const afterItems = new Map((Array.isArray(after?.items) ? after.items : []).map((item) => [Number(item?.id || 0), item]));
+    if (beforeItems.length !== selectedCount || afterItems.size !== selectedCount) return false;
+    return beforeItems.every((item) => {
+      const id = Number(item?.id || 0);
+      const current = afterItems.get(id);
+      const expectedPile = String(item?.expectedPile || "").trim();
+      const originalPile = String(item?.currentPile || "").trim();
+      return id > 0 && item?.found === true && current?.found === true && Number(current?.definitionId || 0) === Number(item?.definitionId || 0) && Boolean(expectedPile) && originalPile === expectedPile && String(current?.expectedPile || "").trim() === expectedPile && String(current?.currentPile || "").trim() === expectedPile;
+    });
+  }
+  function isAmbiguousBackgroundSubmitResult(result = null) {
+    if (!result || result?.success === true) return false;
+    if (!isZeroScalar(result?.status) || !isZeroScalar(result?.error?.code)) return false;
+    const layers = [result, result?.error, result?.response, result?.errorResponse].filter(Boolean);
+    const codeKeys = ["status", "statusCode", "httpStatus", "code", "errorCode"];
+    if (layers.some((layer) => codeKeys.some((key) => hasScalar(layer?.[key]) && !isZeroScalar(layer[key])))) {
+      return false;
+    }
+    const messageKeys = ["message", "reason"];
+    if (layers.some((layer) => messageKeys.some((key) => hasMessage(layer?.[key])))) return false;
+    if (layers.some((layer) => ["data", "body"].some((key) => layer?.[key] !== void 0 && layer[key] !== null))) {
+      return false;
+    }
+    return true;
+  }
   function normalizeSubmitErrorCode(detail) {
     const text = String(detail ?? "").trim();
     if (!text) return "";
@@ -27703,10 +27755,22 @@
     attempt = 1,
     maxAttempts = 3,
     detail = "",
+    result = null,
     baseDelayMs = 800
   } = {}) {
     const max = Math.max(1, Math.min(5, Number(maxAttempts) || 3));
     const current = Math.max(1, Number(attempt) || 1);
+    if (isAmbiguousBackgroundSubmitResult(result)) {
+      if (current > 1 || current >= max) {
+        return { retry: false, delayMs: 0, reason: "ambiguous-retry-exhausted" };
+      }
+      return {
+        retry: true,
+        delayMs: 3e3,
+        reason: "ambiguous-transport",
+        requiresNoMutationEvidence: true
+      };
+    }
     const code = normalizeSubmitErrorCode(detail);
     if (!isRetryableBackgroundSubmitError(code)) {
       return { retry: false, delayMs: 0, reason: "non-retryable" };
@@ -27717,6 +27781,44 @@
     const base = Math.max(200, Math.min(5e3, Number(baseDelayMs) || 800));
     const delayMs = Math.min(3e3, base + current * 500);
     return { retry: true, delayMs, reason: code };
+  }
+  function planAmbiguousBackgroundSubmitRetry({
+    attempt = 1,
+    maxAttempts = 3,
+    refreshOutcome = "failed",
+    reloadOutcome = "unavailable",
+    stateBefore = null,
+    stateAfter = null,
+    selectedItemsBefore = null,
+    selectedItemsAfter = null,
+    packInventory = null
+  } = {}) {
+    const current = Math.max(1, Number(attempt) || 1);
+    const max = Math.max(1, Math.min(5, Number(maxAttempts) || 3));
+    const stop = (reason) => ({ retry: false, reason });
+    if (current > 1 || current >= max) return stop("ambiguous-retry-exhausted");
+    if (refreshOutcome !== "confirmed") return stop("evidence-refresh-failed");
+    if (reloadOutcome !== "current-challenge-loaded") return stop("original-challenge-not-reloaded");
+    const beforeSetId = numericScalar(stateBefore?.set?.id);
+    const afterSetId = numericScalar(stateAfter?.set?.id);
+    const beforeChallengeId = numericScalar(stateBefore?.challenge?.id);
+    const afterChallengeId = numericScalar(stateAfter?.challenge?.id);
+    if (!beforeSetId || beforeSetId !== afterSetId || !beforeChallengeId || beforeChallengeId !== afterChallengeId) {
+      return stop("challenge-identity-changed");
+    }
+    const beforeCounter = completionCounter(stateBefore);
+    const afterCounter = completionCounter(stateAfter);
+    if (beforeCounter === null || afterCounter === null) return stop("completion-counter-unavailable");
+    if (beforeCounter !== afterCounter) return stop("completion-counter-changed");
+    if (completedChallenge2(stateAfter)) return stop("challenge-completed");
+    const changedPacks = Array.isArray(packInventory?.changed) ? packInventory.changed : null;
+    if (!changedPacks || packInventory?.truncated === true || numericScalar(packInventory?.beforeTotal) === null || numericScalar(packInventory?.afterTotal) === null || Number(packInventory.beforeTotal) !== Number(packInventory.afterTotal) || changedPacks.length) {
+      return stop("pack-inventory-changed");
+    }
+    if (!unchangedSubmittedItems(selectedItemsBefore, selectedItemsAfter)) {
+      return stop("submitted-item-state-changed");
+    }
+    return { retry: true, reason: "no-server-mutation-confirmed" };
   }
   function planChallengeReloadRetry({ reloadOutcome = "unavailable" } = {}) {
     const outcome3 = String(reloadOutcome || "").trim();
@@ -48070,6 +48172,7 @@
             attempt,
             maxAttempts,
             detail: lastDetail,
+            result: submissionDiagnostic?.result,
             baseDelayMs: Number(CFG.pauseMs) || 800
           });
           if (!plan.retry) {
@@ -48084,9 +48187,11 @@
             selectedItemsBefore,
             stateBefore,
             stateAfter,
-            packCountsBefore: attemptPackCountsBefore
+            packCountsBefore: attemptPackCountsBefore,
+            requiresNoMutationEvidence: plan.requiresNoMutationEvidence === true
           };
-          log(`${label}: background submit returned ${lastDetail}; reloading challenge before retry (${attempt}/${maxAttempts})`);
+          const reconciliationNote = plan.requiresNoMutationEvidence === true ? "refreshing Challenge, packs, and exact submitted items before one possible retry" : "reloading challenge before retry";
+          log(`${label}: background submit returned ${lastDetail}; ${reconciliationNote} (${attempt}/${maxAttempts})`);
           await sleep(plan.delayMs);
         }
         const reloadStateBefore = currentBackgroundSubmitState(
@@ -48097,27 +48202,75 @@
         const reloadAttempts = [];
         let reloadOutcome = "unavailable";
         let reloadError = null;
+        let evidenceRefreshOutcome = retryEvidence?.requiresNoMutationEvidence === true ? "failed" : "not-required";
+        let evidenceRefreshError = null;
+        const evidenceRefreshSteps = {};
+        if (retryEvidence?.requiresNoMutationEvidence === true) {
+          try {
+            await refreshStorePacks();
+            evidenceRefreshSteps.packs = true;
+            const unassigned = await refreshUnassigned({
+              attempts: 2,
+              allowCacheFallback: false,
+              quiet: true
+            });
+            evidenceRefreshSteps.unassigned = unassigned?.success === true;
+            evidenceRefreshSteps.club = await refreshPileCacheByCandidates("club", { quiet: true });
+            evidenceRefreshSteps.storage = await refreshPileCacheByCandidates("storage", { quiet: true });
+            evidenceRefreshSteps.transfer = await refreshPileCacheByCandidates("transfer", { quiet: true });
+            if (typeof options.refreshFailureEvidence !== "function") {
+              throw new Error("exact inventory reconciliation callback is unavailable");
+            }
+            await options.refreshFailureEvidence({
+              label,
+              players,
+              submission: retryEvidence?.submission
+            });
+            evidenceRefreshSteps.runtime = true;
+            evidenceRefreshOutcome = "confirmed";
+          } catch (error) {
+            evidenceRefreshError = sanitizeBackgroundSubmitResult({ success: false, error });
+            log(`${label}: ambiguous submit evidence refresh failed: ${error?.message || error}`);
+          }
+        }
         try {
-          const reloaded = await loadRatingSbcChallenge(currentChallenge, `${label} submit-retry`, {
-            force: true,
-            onDiagnostic: (diagnostic) => reloadAttempts.push({ source: "current-challenge", ...diagnostic })
-          });
-          if (reloaded) {
-            currentChallenge = reloaded;
-            reloadOutcome = "current-challenge-loaded";
-          } else {
-            const nextContext = await findAvailableRatingSbcChallengeContext(
+          if (retryEvidence?.requiresNoMutationEvidence === true) {
+            const freshContext = await findAvailableRatingSbcChallengeContext(
               set,
-              `${label} submit-retry`,
+              `${label} ambiguous submit verification`,
               { force: true }
             );
-            const next = nextContext.challenge;
-            if (next) {
-              currentChallenge = await loadRatingSbcChallenge(next, `${label} submit-retry`, {
+            const fresh = freshContext.challenge;
+            if (fresh) {
+              const originalChallengeId = Number(retryEvidence?.stateBefore?.challenge?.id || 0);
+              currentChallenge = await loadRatingSbcChallenge(fresh, `${label} ambiguous submit verification`, {
                 force: true,
-                onDiagnostic: (diagnostic) => reloadAttempts.push({ source: "next-challenge", ...diagnostic })
-              }) || next;
-              reloadOutcome = "next-challenge-loaded";
+                onDiagnostic: (diagnostic) => reloadAttempts.push({ source: "fresh-challenge", ...diagnostic })
+              }) || fresh;
+              reloadOutcome = Number(fresh?.id || 0) === originalChallengeId ? "current-challenge-loaded" : "next-challenge-loaded";
+            }
+          } else {
+            const reloaded = await loadRatingSbcChallenge(currentChallenge, `${label} submit-retry`, {
+              force: true,
+              onDiagnostic: (diagnostic) => reloadAttempts.push({ source: "current-challenge", ...diagnostic })
+            });
+            if (reloaded) {
+              currentChallenge = reloaded;
+              reloadOutcome = "current-challenge-loaded";
+            } else {
+              const nextContext = await findAvailableRatingSbcChallengeContext(
+                set,
+                `${label} submit-retry`,
+                { force: true }
+              );
+              const next = nextContext.challenge;
+              if (next) {
+                currentChallenge = await loadRatingSbcChallenge(next, `${label} submit-retry`, {
+                  force: true,
+                  onDiagnostic: (diagnostic) => reloadAttempts.push({ source: "next-challenge", ...diagnostic })
+                }) || next;
+                reloadOutcome = "next-challenge-loaded";
+              }
             }
           }
         } catch (error) {
@@ -48132,6 +48285,7 @@
             );
             const next = nextContext.challenge;
             if (next) {
+              const originalChallengeId = Number(retryEvidence?.stateBefore?.challenge?.id || 0);
               currentChallenge = await loadRatingSbcChallenge(
                 next,
                 `${label} submit-retry fresh challenge`,
@@ -48140,7 +48294,7 @@
                   onDiagnostic: (diagnostic) => reloadAttempts.push({ source: "fresh-challenge", ...diagnostic })
                 }
               ) || next;
-              reloadOutcome = "next-challenge-loaded";
+              reloadOutcome = retryEvidence?.requiresNoMutationEvidence === true && Number(next?.id || 0) === originalChallengeId ? "current-challenge-loaded" : "next-challenge-loaded";
               reloadError = null;
             }
           } catch (fallbackError) {
@@ -48152,6 +48306,31 @@
             log(`${label}: fresh challenge reload after submit conflict failed: ${fallbackError?.message || fallbackError}`);
           }
         }
+        const reloadStateAfter = currentBackgroundSubmitState(
+          set,
+          currentChallenge,
+          retryEvidence?.submissionOptions
+        );
+        const selectedItemsAfterReload = backgroundSubmitItemsAfterFailure(
+          players,
+          options,
+          retryEvidence?.submission
+        );
+        const packInventoryAfterReload = summarizeBackgroundSubmitPackCounts(
+          retryEvidence?.packCountsBefore || beforePackCounts,
+          getPackCountsById()
+        );
+        const ambiguityPlan = retryEvidence?.requiresNoMutationEvidence === true ? planAmbiguousBackgroundSubmitRetry({
+          attempt: retryEvidence?.attempt || attempt,
+          maxAttempts,
+          refreshOutcome: evidenceRefreshOutcome,
+          reloadOutcome,
+          stateBefore: retryEvidence?.stateBefore || reloadStateBefore,
+          stateAfter: reloadStateAfter,
+          selectedItemsBefore: retryEvidence?.selectedItemsBefore,
+          selectedItemsAfter: selectedItemsAfterReload,
+          packInventory: packInventoryAfterReload
+        }) : null;
         emitDiagnostic(log, () => `${label}: background submit retry reconciliation diagnostic ${diagnosticJson({
           trigger: {
             attempt: retryEvidence?.attempt || attempt,
@@ -48164,23 +48343,49 @@
             attempts: reloadAttempts,
             error: reloadError
           },
+          evidenceRefresh: {
+            outcome: evidenceRefreshOutcome,
+            steps: evidenceRefreshSteps,
+            error: evidenceRefreshError
+          },
+          ambiguity: ambiguityPlan,
           state: {
             before: reloadStateBefore,
-            after: currentBackgroundSubmitState(set, currentChallenge, retryEvidence?.submissionOptions)
+            after: reloadStateAfter
           },
           selectedItems: {
             beforeSubmit: retryEvidence?.selectedItemsBefore || null,
-            afterReload: backgroundSubmitItemsAfterFailure(players, options, retryEvidence?.submission)
+            afterReload: selectedItemsAfterReload
           },
-          packInventory: summarizeBackgroundSubmitPackCounts(
-            retryEvidence?.packCountsBefore || beforePackCounts,
-            getPackCountsById()
-          )
+          packInventory: packInventoryAfterReload
         })}`);
+        if (ambiguityPlan && !ambiguityPlan.retry) {
+          fail2(`${label}: ambiguous background submit stopped after ${ambiguityPlan.reason}; no automatic resubmit was sent`);
+        }
         const reloadPlan = planChallengeReloadRetry({ reloadOutcome });
         if (!reloadPlan.retry) {
           const reloadDetail = reloadError?.error?.message || reloadError?.message || lastDetail;
           fail2(`${label}: background submit aborted after ${reloadPlan.reason}: ${reloadDetail}`);
+        }
+        if (ambiguityPlan?.retry) {
+          if (typeof options.revalidateSubmission !== "function") {
+            fail2(`${label}: ambiguous background submit has no submission revalidation callback; no automatic resubmit was sent`);
+          }
+          let revalidation = null;
+          try {
+            revalidation = await options.revalidateSubmission();
+          } catch (error) {
+            fail2(`${label}: submission revalidation before ambiguous retry failed: ${error?.message || error}`);
+          }
+          if (revalidation?.ok === false) {
+            fail2(`${label}: submission revalidation before ambiguous retry was rejected: ${revalidation.reason || "unknown reason"}`);
+          }
+          const originalPlayerIds = players.map((item) => Number(item?.id || 0)).filter(Boolean).sort((left, right) => left - right);
+          const revalidatedPlayerIds = (revalidation?.players || []).map((item) => Number(item?.id || 0)).filter(Boolean).sort((left, right) => left - right);
+          if (originalPlayerIds.length !== revalidatedPlayerIds.length || originalPlayerIds.some((id, index) => id !== revalidatedPlayerIds[index])) {
+            fail2(`${label}: submission revalidation changed the saved squad item IDs; no automatic resubmit was sent`);
+          }
+          log(`${label}: fresh Challenge, pack, and exact-item evidence confirmed no server mutation; retrying the same squad once`);
         }
         if (!canSubmit && attempt < maxAttempts) {
           await sleep(Math.min(3e3, (Number(CFG.pauseMs) || 800) + attempt * 500));
@@ -53768,7 +53973,8 @@
                 conflict
               ),
               allowKnownRewardFallback: Number(activeDef.dynamicChallengeCount || 1) <= 1,
-              failureInventoryDiagnostic: ({ players }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, players)
+              failureInventoryDiagnostic: ({ players }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, players),
+              refreshFailureEvidence: ({ label: submitLabel }) => refreshRollingBackgroundSubmitFailureEvidence(runtime, submitLabel)
             },
             onResult: async (submissionResult) => {
               if (submissionResult.submitted) {
@@ -53868,6 +54074,19 @@
         resolveItem: (ref) => ledger?.resolveItem?.(ref) || null,
         ledgerSummary: ledger?.summary?.() || {}
       });
+    }
+    async function refreshRollingBackgroundSubmitFailureEvidence(runtime, label) {
+      if (typeof runtime?.coordinator?.reconcile !== "function") {
+        throw new Error("Rolling Inventory Ledger reconciliation is unavailable");
+      }
+      const reconciliation = await runtime.coordinator.reconcile(
+        `${label} ambiguous background submit evidence`,
+        { refreshUnassigned: true }
+      );
+      if (!reconciliation?.ok) {
+        throw new Error(reconciliation?.reason || "Rolling Inventory Ledger reconciliation failed");
+      }
+      return reconciliation;
     }
     async function submitRollingRatingRecoveryAttempt(loopDef, runtime, definition, options = {}) {
       const recoveryDef = rollingRecoveryDef(definition, loopDef, {
@@ -54167,7 +54386,8 @@
                 ),
                 revalidateSubmission: context.revalidateSubmission,
                 allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
-                failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+                failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers),
+                refreshFailureEvidence: ({ label: submitLabel }) => refreshRollingBackgroundSubmitFailureEvidence(runtime, submitLabel)
               }
             );
             if (backgroundSubmission?.status === "replan") return backgroundSubmission;
@@ -57082,7 +57302,8 @@
                 revalidateSubmission: submitContext.revalidateSubmission,
                 rewardObservationAttempts: 1,
                 allowKnownRewardFallback: false,
-                failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+                failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers),
+                refreshFailureEvidence: ({ label: submitLabel }) => refreshRollingBackgroundSubmitFailureEvidence(runtime, submitLabel)
               }
             );
             if (backgroundSubmission?.status === "replan") return backgroundSubmission;
@@ -59910,7 +60131,8 @@
                       ),
                       revalidateSubmission: context.revalidateSubmission,
                       allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
-                      failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+                      failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers),
+                      refreshFailureEvidence: ({ label: submitLabel }) => refreshRollingBackgroundSubmitFailureEvidence(runtime, submitLabel)
                     }
                   );
                   if (backgroundSubmission?.status === "replan") return backgroundSubmission;

@@ -6,6 +6,87 @@
 const RETRYABLE_SUBMIT_CODES = new Set(['409', '426', '429', '512', '521']);
 const RECOGNIZED_SUBMIT_CODES = [...RETRYABLE_SUBMIT_CODES].join('|');
 
+function hasScalar(value) {
+  return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function isZeroScalar(value) {
+  return hasScalar(value) && Number(value) === 0;
+}
+
+function hasMessage(value) {
+  return hasScalar(value) && String(value).trim() !== '0';
+}
+
+function numericScalar(value) {
+  if (!hasScalar(value)) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function completionCounter(state) {
+  return numericScalar(state?.challenge?.scalarHints?.timesCompleted)
+    ?? numericScalar(state?.challenge?.timesCompleted)
+    ?? numericScalar(state?.set?.timesCompleted);
+}
+
+function completedChallenge(state) {
+  const challenge = state?.challenge || {};
+  if (challenge.completed === true || challenge.isCompleted === true) return true;
+  return [challenge.status, challenge.state]
+    .some((value) => /^(?:COMPLETED|COMPLETE)$/i.test(String(value || '').trim()));
+}
+
+function unchangedSubmittedItems(before, after) {
+  const selectedCount = Math.max(0, Number(before?.selectedCount || 0));
+  if (!selectedCount || before?.truncated === true || after?.truncated === true) return false;
+  if (Number(before?.exactFound || 0) !== selectedCount
+    || Number(after?.selectedCount || 0) !== selectedCount
+    || Number(after?.exactFound || 0) !== selectedCount
+    || Number(after?.exactMissing || 0) !== 0) return false;
+
+  const beforeItems = Array.isArray(before?.items) ? before.items : [];
+  const afterItems = new Map((Array.isArray(after?.items) ? after.items : [])
+    .map((item) => [Number(item?.id || 0), item]));
+  if (beforeItems.length !== selectedCount || afterItems.size !== selectedCount) return false;
+  return beforeItems.every((item) => {
+    const id = Number(item?.id || 0);
+    const current = afterItems.get(id);
+    const expectedPile = String(item?.expectedPile || '').trim();
+    const originalPile = String(item?.currentPile || '').trim();
+    return id > 0
+      && item?.found === true
+      && current?.found === true
+      && Number(current?.definitionId || 0) === Number(item?.definitionId || 0)
+      && Boolean(expectedPile)
+      && originalPile === expectedPile
+      && String(current?.expectedPile || '').trim() === expectedPile
+      && String(current?.currentPile || '').trim() === expectedPile;
+  });
+}
+
+/**
+ * EA occasionally returns UTServerErrorVO { code: 0 } after the transport
+ * observer times out, without an HTTP status, service code, or message. That
+ * shape is ambiguous rather than a normal retryable service error.
+ */
+export function isAmbiguousBackgroundSubmitResult(result = null) {
+  if (!result || result?.success === true) return false;
+  if (!isZeroScalar(result?.status) || !isZeroScalar(result?.error?.code)) return false;
+
+  const layers = [result, result?.error, result?.response, result?.errorResponse].filter(Boolean);
+  const codeKeys = ['status', 'statusCode', 'httpStatus', 'code', 'errorCode'];
+  if (layers.some((layer) => codeKeys.some((key) => hasScalar(layer?.[key]) && !isZeroScalar(layer[key])))) {
+    return false;
+  }
+  const messageKeys = ['message', 'reason'];
+  if (layers.some((layer) => messageKeys.some((key) => hasMessage(layer?.[key])))) return false;
+  if (layers.some((layer) => ['data', 'body'].some((key) => layer?.[key] !== undefined && layer[key] !== null))) {
+    return false;
+  }
+  return true;
+}
+
 export function normalizeSubmitErrorCode(detail) {
   const text = String(detail ?? '').trim();
   if (!text) return '';
@@ -26,10 +107,22 @@ export function planBackgroundSubmitRetry({
   attempt = 1,
   maxAttempts = 3,
   detail = '',
+  result = null,
   baseDelayMs = 800,
 } = {}) {
   const max = Math.max(1, Math.min(5, Number(maxAttempts) || 3));
   const current = Math.max(1, Number(attempt) || 1);
+  if (isAmbiguousBackgroundSubmitResult(result)) {
+    if (current > 1 || current >= max) {
+      return { retry: false, delayMs: 0, reason: 'ambiguous-retry-exhausted' };
+    }
+    return {
+      retry: true,
+      delayMs: 3000,
+      reason: 'ambiguous-transport',
+      requiresNoMutationEvidence: true,
+    };
+  }
   const code = normalizeSubmitErrorCode(detail);
   if (!isRetryableBackgroundSubmitError(code)) {
     return { retry: false, delayMs: 0, reason: 'non-retryable' };
@@ -40,6 +133,58 @@ export function planBackgroundSubmitRetry({
   const base = Math.max(200, Math.min(5000, Number(baseDelayMs) || 800));
   const delayMs = Math.min(3000, base + current * 500);
   return { retry: true, delayMs, reason: code };
+}
+
+/**
+ * Allows one retry after an ambiguous status-0 result only when independently
+ * refreshed Challenge, pack, and exact-item evidence all prove that the first
+ * request did not mutate server state.
+ */
+export function planAmbiguousBackgroundSubmitRetry({
+  attempt = 1,
+  maxAttempts = 3,
+  refreshOutcome = 'failed',
+  reloadOutcome = 'unavailable',
+  stateBefore = null,
+  stateAfter = null,
+  selectedItemsBefore = null,
+  selectedItemsAfter = null,
+  packInventory = null,
+} = {}) {
+  const current = Math.max(1, Number(attempt) || 1);
+  const max = Math.max(1, Math.min(5, Number(maxAttempts) || 3));
+  const stop = (reason) => ({ retry: false, reason });
+  if (current > 1 || current >= max) return stop('ambiguous-retry-exhausted');
+  if (refreshOutcome !== 'confirmed') return stop('evidence-refresh-failed');
+  if (reloadOutcome !== 'current-challenge-loaded') return stop('original-challenge-not-reloaded');
+
+  const beforeSetId = numericScalar(stateBefore?.set?.id);
+  const afterSetId = numericScalar(stateAfter?.set?.id);
+  const beforeChallengeId = numericScalar(stateBefore?.challenge?.id);
+  const afterChallengeId = numericScalar(stateAfter?.challenge?.id);
+  if (!beforeSetId || beforeSetId !== afterSetId
+    || !beforeChallengeId || beforeChallengeId !== afterChallengeId) {
+    return stop('challenge-identity-changed');
+  }
+  const beforeCounter = completionCounter(stateBefore);
+  const afterCounter = completionCounter(stateAfter);
+  if (beforeCounter === null || afterCounter === null) return stop('completion-counter-unavailable');
+  if (beforeCounter !== afterCounter) return stop('completion-counter-changed');
+  if (completedChallenge(stateAfter)) return stop('challenge-completed');
+
+  const changedPacks = Array.isArray(packInventory?.changed) ? packInventory.changed : null;
+  if (!changedPacks
+    || packInventory?.truncated === true
+    || numericScalar(packInventory?.beforeTotal) === null
+    || numericScalar(packInventory?.afterTotal) === null
+    || Number(packInventory.beforeTotal) !== Number(packInventory.afterTotal)
+    || changedPacks.length) {
+    return stop('pack-inventory-changed');
+  }
+  if (!unchangedSubmittedItems(selectedItemsBefore, selectedItemsAfter)) {
+    return stop('submitted-item-state-changed');
+  }
+  return { retry: true, reason: 'no-server-mutation-confirmed' };
 }
 
 /**

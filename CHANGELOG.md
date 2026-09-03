@@ -5,6 +5,24 @@ All notable user-facing changes are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.8.64] - 2026-09-03
+
+### Fixed
+
+- Forecast the next Rolling primary squad before submitting the current valid
+  squad, but treat Provisions preflight as advisory. If no safe Provisions
+  batch can be built, the Runner records the shortage and submits the already
+  validated current squad once instead of entering an unrelated Storage
+  recovery or stopping before useful work is completed.
+- Treat EA's empty background-submit `status:0` / `UTServerErrorVO code:0`
+  result as an ambiguous transport timeout rather than an ordinary error. The
+  Runner now waits, refreshes My Packs and Unassigned, reloads the Challenge
+  from a fresh Challenge-list request, reconciles the Rolling Inventory
+  Ledger, reruns every submission validator, and retries the same squad once
+  only when the completion counter, pack inventory, and every exact submitted
+  item prove that the first request caused no server mutation. Any changed or
+  incomplete evidence still stops without resubmitting.
+
 ## [0.8.63] - 2026-08-31
 
 ### Fixed

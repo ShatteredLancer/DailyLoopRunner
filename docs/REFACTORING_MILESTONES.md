@@ -2,12 +2,14 @@
 
 当前开发修正：Rolling 在每套已验证主阵提交前，从不可变 Inventory Ledger snapshot 精确扣除该阵的 item/signal，复用当前 Challenge 的 Required Special matcher、唯一 definition、FSU/Lock/Evolution/Active Squad 和评分 Selection Policy 预演下一阵。只有下一阵最低合法评分明确超过目标 `+1` 时，才在当前阵尚未提交前优先打开已有 Provisions 奖励，否则制作至多一批 Provisions 并重新读取库存；无法组成安全 Provisions 阵时记录 `PROVISIONS_PREFLIGHT_SHORTAGE`，只提交当前已验证合法阵容一次，避免循环恢复或放宽保护。该预测仅在 `rollingProvisionsShortageRecoveryEnabled` 显式开启时运行，不恢复默认关闭的 surplus crafting。
 
+当前开发修正：EA 后台 SBC 提交返回空 `status:0` / `UTServerErrorVO code:0` 时，不再直接按 `unknown` 停止，也不盲目重发。Runner 等待 3 秒后强制刷新 My Packs 与 Unassigned，从新的 Challenge list 读取同一 Challenge，并重新对账 Rolling Inventory Ledger；仅当 Challenge/Set identity 与完成次数未变、没有新增或减少 Pack、全部精确提交 item 仍留在原 pile，且整套提交 validator 重新通过时允许重试一次。任一证据变化、刷新失败、Challenge 已切换或第二次仍为 status 0 都停止，不发送额外提交。
+
 本文档用于追踪 Daily Loop Runner 从单文件、流程型实现迁移到可测试、可组合架构的全过程。
 
 当前基线：
 
-- Userscript 版本：`0.8.60`
-- Git 基线：`main` delayed Player Pick recovery + dynamic Rolling primary-stage planning
+- Userscript 版本：`0.8.64`
+- Git 基线：`main` Rolling runway preflight + evidence-gated ambiguous background-submit retry
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -69,6 +71,8 @@ Storage-first 顺序。待处理 Unassigned 重复卡仍强制 Unassigned-first�
 pressure 与 maintenance 仍使用专用 Storage-first 及净释放校验。Provisions reserve
 上限可选 `88/89/90/91`，默认 `88`，已有较高保存值继续有效。该修正取代下方
 `0.8.20` 发布记录中的全局 Storage-first 和新安装默认 `91` 行为。
+
+`0.8.64` 发布记录：Rolling 会在当前合法主阵提交前预演下一阵，并在明确缺少低分材料时先尝试复用或制作一批 Provisions；若安全 Provisions 阵不可用，则保留当前阵并只提交一次。后台提交遇到无 HTTP/业务错误信息的 `status:0` 时，只有新的 Challenge list、完成次数、Pack inventory、精确 item pile 与 Rolling Ledger 共同确认服务器没有变化，才重试同一阵一次；其余状态继续 fail closed。
 
 `0.8.48` 发布记录：Rolling 主阵评分求解结果高于 EA 目标评分时，只保留规划结果，
 不再先清空、保存或改写当前 EA 阵容。当前主阵只有在 Storage 容量已知、无待释放
