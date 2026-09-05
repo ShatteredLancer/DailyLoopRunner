@@ -74,6 +74,14 @@ pressure 与 maintenance 仍使用专用 Storage-first 及净释放校验。Prov
 
 `0.8.64` 发布记录：Rolling 会在当前合法主阵提交前预演下一阵，并在明确缺少低分材料时先尝试复用或制作一批 Provisions；若安全 Provisions 阵不可用，则保留当前阵并只提交一次。后台提交遇到无 HTTP/业务错误信息的 `status:0` 时，只有新的 Challenge list、完成次数、Pack inventory、精确 item pile 与 Rolling Ledger 共同确认服务器没有变化，才重试同一阵一次；其余状态继续 fail closed。
 
+当前开发修正：Rolling 主阵提交前的低分材料 runway 从单阵扩展为连续三阵预测。
+预测从当前不可变 Inventory snapshot 扣除已验证的当前阵，再逐阵重新构造候选、求解并
+扣除精确 item/duplicate signal；不猜测尚未打开的主包内容。主包、Provisions 奖励或其它
+已确认库存变更完成对账后，旧预测立即失效并基于新 snapshot 重算。任一预测阵最低评分
+超过目标 `+1` 时提前规划 Provisions；没有现成奖励且无法组成安全 Provisions 阵，或一次
+有界 Provisions 恢复后仍无法恢复三阵 runway 时，以 `RECOVERY_MATERIAL_SHORTAGE` 或
+`PROVISIONS_PREFLIGHT_RUNWAY_EXHAUSTED` 停止，保留当前已验证主阵且不提交。
+
 `0.8.48` 发布记录：Rolling 主阵评分求解结果高于 EA 目标评分时，只保留规划结果，
 不再先清空、保存或改写当前 EA 阵容。当前主阵只有在 Storage 容量已知、无待释放
 Storage 压力且最低可行评分不超过目标 `+1` 时，才允许显式兜底保存（例如 84 阵的

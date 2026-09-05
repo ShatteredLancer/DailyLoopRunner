@@ -1140,6 +1140,28 @@ export async function runRollingUpgradeWorkflow(options = {}) {
             recoveryReasonCode: reasonCode(failure) || 'PROVISIONS_PREFLIGHT_SHORTAGE',
           };
           await emit(options, 'primary-runway-unavailable', result.details.primaryRunway);
+          return finishRecoveryFailure(
+            failure,
+            'primary runway Provisions material is unavailable; the current squad was preserved',
+            'PROVISIONS_PREFLIGHT_SHORTAGE',
+          );
+        }
+        if (runway?.status === 'recover' && primaryRunwayProvisionsAttempted) {
+          result.details.primaryRunway = {
+            ...runway,
+            recoveryReason: 'the bounded Provisions preflight did not restore the forecast runway',
+            recoveryReasonCode: 'PROVISIONS_PREFLIGHT_RUNWAY_EXHAUSTED',
+          };
+          await emit(options, 'primary-runway-unavailable', result.details.primaryRunway);
+          return finishRecoveryFailure(
+            {
+              status: 'unavailable',
+              reason: 'the forecast primary runway remains exhausted after bounded Provisions recovery; the current squad was preserved',
+              reasonCode: 'PROVISIONS_PREFLIGHT_RUNWAY_EXHAUSTED',
+            },
+            'primary runway remains exhausted after bounded Provisions recovery',
+            'PROVISIONS_PREFLIGHT_RUNWAY_EXHAUSTED',
+          );
         }
         resetPressureEvent();
         plan = planned;

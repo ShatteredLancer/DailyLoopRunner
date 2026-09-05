@@ -122,6 +122,20 @@ function matchesRef(item = {}, ref = {}) {
   return definitionId > 0 && Number(source.definitionId || 0) === definitionId;
 }
 
+function matchesExactRef(item = {}, ref = {}) {
+  const source = item?.ref || item || {};
+  const refSource = ref?.ref || ref || {};
+  const itemId = Number(source.id || 0);
+  const refId = Number(refSource.id || 0);
+  const itemDefinitionId = Number(source.definitionId || 0);
+  const refDefinitionId = Number(refSource.definitionId || 0);
+  return itemId > 0
+    && refId > 0
+    && itemId === refId
+    && refDefinitionId > 0
+    && itemDefinitionId === refDefinitionId;
+}
+
 function partitionPrimaryUnassignedEntries(entries = [], options = {}) {
   const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
   const primaryRefs = options.primaryRefs || [];
@@ -225,14 +239,31 @@ export function selectStorageSinkClubFallbackEntries(entries = [], options = {})
     .map(Number)
     .filter((index) => Number.isInteger(index) && index >= 0));
   const protectedItems = options.protectedItems || [];
+  const requiredItems = (options.requiredItems || []).filter((ref) => (
+    Number(ref?.id || ref?.ref?.id || 0) > 0
+  ));
   const matchesRequiredSpecial = (entry) => [...requiredConstraintIndexes]
     .some((index) => entry.requirementMatches?.[index] === true);
-  return entries
+  const requiredEntries = requiredItems
+    .map((ref) => entries.find((entry) => {
+      const rating = Number(entry.item?.rating || 0);
+      return entry.pileName === 'club'
+        && rating <= maxRating
+        && !protectedItems.some((protectedRef) => matchesRef(entry.item, protectedRef))
+        && matchesExactRef(entry.item, ref);
+    }))
+    .filter(Boolean)
+    .filter((entry, index, values) => values.findIndex((candidate) => (
+      Number(candidate.item?.id || 0) === Number(entry.item?.id || 0)
+    )) === index);
+  const requiredIds = new Set(requiredEntries.map((entry) => Number(entry.item?.id || 0)));
+  const eligible = entries
     .filter((entry) => {
       const rating = Number(entry.item?.rating || 0);
       const requiredSpecial = matchesRequiredSpecial(entry);
       return entry.pileName === 'club'
         && rating <= maxRating
+        && !requiredIds.has(Number(entry.item?.id || 0))
         && !protectedItems.some((ref) => matchesRef(entry.item, ref))
         && (
           requiredSpecial
@@ -247,8 +278,13 @@ export function selectStorageSinkClubFallbackEntries(entries = [], options = {})
       Number(matchesRequiredSpecial(right)) - Number(matchesRequiredSpecial(left))
         || Number(right.item?.rating || 0) - Number(left.item?.rating || 0)
         || Number(left.item?.id || 0) - Number(right.item?.id || 0)
-    ))
-    .slice(0, count);
+    ));
+  if (!requiredItems.length) return eligible.slice(0, count);
+
+  // Materialized duplicate transactions carry exact, already-verified Club
+  // consume refs. They are mandatory regardless of ordinary filler ranking;
+  // `count` remains the cap for ordinary Club fillers only.
+  return [...requiredEntries, ...eligible.slice(0, count)];
 }
 
 export function createStorageSinkClubFillRole(maxClubCount = 0) {
@@ -371,6 +407,85 @@ export async function planMultiSquadRatingSelections(input = {}) {
       squadCount: plans.length,
       challengeRatings: plans.map(({ context }) => targetRating(context)),
     },
+  };
+}
+
+export async function forecastRatingSquadWindow(input = {}) {
+  if (!input.snapshot?.piles) throw new TypeError('inventory snapshot is required');
+  if (typeof input.selectSquad !== 'function') throw new TypeError('selectSquad is required');
+  if (typeof input.evaluateSelection !== 'function') {
+    throw new TypeError('evaluateSelection is required');
+  }
+  const forecastDepth = Math.max(1, Math.min(10, Math.floor(Number(input.depth || 1)) || 1));
+  let projectedSnapshot = input.snapshot;
+  const projections = [];
+
+  for (let index = 0; index < forecastDepth; index++) {
+    const depth = index + 1;
+    const selection = await input.selectSquad(projectedSnapshot, {
+      depth,
+      projections: [...projections],
+    });
+    const evaluated = input.evaluateSelection(selection, { depth }) || {};
+    const evaluation = evaluated.status
+      ? evaluated
+      : {
+          ...evaluated,
+          status: 'diagnostic',
+          reasonCode: evaluated.reasonCode || 'PRIMARY_RUNWAY_UNKNOWN',
+        };
+    const projection = {
+      depth,
+      projectedRating: Number(evaluation.projectedRating || selection?.rating || 0) || null,
+      playerRatings: [...(selection?.ratings || [])],
+      status: evaluation.status || 'diagnostic',
+      reasonCode: evaluation.reasonCode || null,
+    };
+    projections.push(projection);
+
+    if (evaluation.status !== 'ready') {
+      return {
+        ...evaluation,
+        forecastDepth,
+        triggerDepth: depth,
+        projectedSquadRatings: projections.map((entry) => entry.projectedRating),
+        projections,
+      };
+    }
+
+    const nextSnapshot = removeInventorySelection(
+      projectedSnapshot,
+      selection,
+      { includeSignals: true },
+    );
+    if (!nextSnapshot) {
+      return {
+        status: 'diagnostic',
+        reason: `forecast squad ${depth} could not be deducted from the inventory snapshot`,
+        reasonCode: 'PRIMARY_RUNWAY_SNAPSHOT_MISMATCH',
+        targetRating: evaluation.targetRating || null,
+        projectedRating: projection.projectedRating,
+        maxAboveTarget: evaluation.maxAboveTarget || 0,
+        forecastDepth,
+        triggerDepth: depth,
+        projectedSquadRatings: projections.map((entry) => entry.projectedRating),
+        projections,
+      };
+    }
+    projectedSnapshot = nextSnapshot;
+  }
+
+  const last = projections.at(-1) || {};
+  return {
+    status: 'ready',
+    reasonCode: null,
+    targetRating: Number(input.targetRating || 0) || null,
+    projectedRating: last.projectedRating || null,
+    maxAboveTarget: Math.max(0, Number(input.maxAboveTarget || 0) || 0),
+    forecastDepth,
+    triggerDepth: null,
+    projectedSquadRatings: projections.map((entry) => entry.projectedRating),
+    projections,
   };
 }
 

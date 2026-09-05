@@ -4,6 +4,7 @@ import { selectInventoryPlayers } from '../../src/selection/index.js';
 import {
   createStoragePressureRole,
   createStorageSinkClubFillRole,
+  forecastRatingSquadWindow,
   genericStorageSinkSquadSourceStrategy,
   nextGenericStorageSinkContext,
   nextStorageSinkContext,
@@ -667,6 +668,44 @@ describe('multi-squad rating planner', () => {
     }).map((entry) => entry.item.id)).toEqual([5, 1, 4]);
   });
 
+  it('keeps an exact materialized duplicate Club consume item outside the filler cap', () => {
+    const entries = [
+      { item: player(1, 101, 89, 'club'), pileName: 'club', special: false, requirementMatches: [] },
+      { item: player(2, 102, 88, 'club'), pileName: 'club', special: false, requirementMatches: [] },
+      { item: player(3, 103, 87, 'club'), pileName: 'club', special: false, requirementMatches: [] },
+      { item: player(4, 104, 88, 'club'), pileName: 'club', special: false, requirementMatches: [] },
+    ];
+
+    expect(selectStorageSinkClubFallbackEntries(entries, {
+      count: 3,
+      maxCount: 3,
+      maxRating: 95,
+      requiredItems: [{ id: 4, definitionId: 104, pile: 'club' }],
+    }).map((entry) => entry.item.id)).toEqual([4, 1, 2, 3]);
+  });
+
+  it('keeps a required special Club consume item even when ordinary Club fillers reject specials', () => {
+    const requiredSpecial = {
+      item: player(9, 109, 88, 'club'),
+      pileName: 'club',
+      special: true,
+      requirementMatches: [false],
+    };
+    const ordinary = {
+      item: player(10, 110, 87, 'club'),
+      pileName: 'club',
+      special: false,
+      requirementMatches: [false],
+    };
+
+    expect(selectStorageSinkClubFallbackEntries([requiredSpecial, ordinary], {
+      count: 0,
+      maxCount: 3,
+      maxRating: 95,
+      requiredItems: [{ id: 9, definitionId: 109, pile: 'club' }],
+    }).map((entry) => entry.item.id)).toEqual([9]);
+  });
+
   it('plans the harder squad first and removes its item and signal refs before the next plan', async () => {
     const selectChallenge = vi.fn(async (working, context) => {
       if (context.targetRating === 89) {
@@ -697,6 +736,57 @@ describe('multi-squad rating planner', () => {
       details: { squadCount: 2, challengeRatings: [89, 88] },
     });
     expect(selectChallenge).toHaveBeenCalledTimes(2);
+  });
+
+  it('forecasts three consecutive rating squads and reports the first unsafe depth', async () => {
+    const forecastSnapshot = createInventorySnapshot({
+      piles: {
+        unassigned: [],
+        storage: [
+          player(21, 221, 84),
+          player(22, 222, 85),
+          player(23, 223, 86),
+        ],
+        transfer: [],
+        club: [],
+      },
+      capacities: { storage: { used: 3, max: 100 } },
+    });
+    const seenIds = [];
+
+    const result = await forecastRatingSquadWindow({
+      snapshot: forecastSnapshot,
+      depth: 3,
+      selectSquad: vi.fn(async (working) => {
+        const item = working.piles.storage[0];
+        seenIds.push(working.piles.storage.map((entry) => entry.id));
+        return {
+          ...selection([{
+            itemRef: item.ref,
+            pileName: 'storage',
+          }]),
+          rating: item.rating,
+          ratings: [item.rating],
+        };
+      }),
+      evaluateSelection: (selected) => ({
+        status: selected.rating > 85 ? 'recover' : 'ready',
+        reasonCode: selected.rating > 85 ? 'SQUAD_RATING_EXCESS' : null,
+        targetRating: 84,
+        projectedRating: selected.rating,
+        maxAboveTarget: 1,
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: 'recover',
+      reasonCode: 'SQUAD_RATING_EXCESS',
+      forecastDepth: 3,
+      triggerDepth: 3,
+      projectedRating: 86,
+      projectedSquadRatings: [84, 85, 86],
+    });
+    expect(seenIds).toEqual([[21, 22, 23], [22, 23], [23]]);
   });
 
   it('fails before returning any plan when the second squad is infeasible', async () => {

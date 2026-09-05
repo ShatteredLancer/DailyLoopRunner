@@ -155,7 +155,7 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.planPrimarySquad).toHaveBeenCalledTimes(2);
   });
 
-  it('submits the current safe squad once when forecast Provisions material is unavailable', async () => {
+  it('preserves the current safe squad when forecast Provisions material is unavailable', async () => {
     const events = [];
     const options = harness({
       forecastPrimaryRunway: vi.fn(async () => ({
@@ -175,8 +175,10 @@ describe('10x85+ Rolling workflow', () => {
     });
 
     expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
-      status: 'completed',
-      completions: 1,
+      status: 'unavailable',
+      completions: 0,
+      reason: 'four unique eligible Provisions definitions are unavailable',
+      reasonCode: 'RECOVERY_MATERIAL_SHORTAGE',
       details: {
         primaryRunway: {
           projectedRating: 86,
@@ -187,8 +189,39 @@ describe('10x85+ Rolling workflow', () => {
     });
     expect(options.recoverProvisions).toHaveBeenCalledOnce();
     expect(options.planPrimarySquad).toHaveBeenCalledOnce();
-    expect(options.submitPrimary).toHaveBeenCalledOnce();
+    expect(options.submitPrimary).not.toHaveBeenCalled();
     expect(events.some(([event]) => event === 'primary-runway-unavailable')).toBe(true);
+  });
+
+  it('does not bypass an exhausted runway after one successful Provisions recovery', async () => {
+    let inventoryVersion = 1;
+    const options = harness({
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      forecastPrimaryRunway: vi.fn(async () => ({
+        status: 'recover',
+        reasonCode: 'SQUAD_RATING_EXCESS',
+        forecastDepth: 3,
+        triggerDepth: 3,
+        projectedRating: 86,
+        projectedSquadRatings: [84, 85, 86],
+        targetRating: 84,
+      })),
+      processLeftoverRecoveryReward: vi.fn(async () => ({ status: 'skipped' })),
+      shouldRunStorageRecovery: vi.fn(async () => ({ run: false })),
+      recoverProvisions: vi.fn(async () => {
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'unavailable',
+      completions: 0,
+      reasonCode: 'PROVISIONS_PREFLIGHT_RUNWAY_EXHAUSTED',
+    });
+    expect(options.recoverProvisions).toHaveBeenCalledOnce();
+    expect(options.planPrimarySquad).toHaveBeenCalledTimes(2);
+    expect(options.submitPrimary).not.toHaveBeenCalled();
   });
 
   it('refreshes the active primary stage before looking up each iteration reward', async () => {
@@ -210,6 +243,34 @@ describe('10x85+ Rolling workflow', () => {
       completions: 2,
     });
     expect(calls).toEqual(['stage:1', 'pack:1', 'stage:2', 'pack:2']);
+  });
+
+  it('recomputes the primary runway after each newly opened primary reward', async () => {
+    let inventoryVersion = 0;
+    const forecastVersions = [];
+    const options = harness({
+      maxCompletions: 2,
+      openPrimaryPack: vi.fn(async ({ pack }) => {
+        inventoryVersion = pack.id;
+        return {
+          status: 'opened',
+          packRef: { id: pack.id },
+          openedItems: [{ id: 100 + pack.id }],
+        };
+      }),
+      forecastPrimaryRunway: vi.fn(async () => {
+        forecastVersions.push(inventoryVersion);
+        return { status: 'ready', projectedRating: 84, targetRating: 84 };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      completions: 2,
+      packsOpened: 2,
+    });
+    expect(forecastVersions).toEqual([1, 2]);
+    expect(options.forecastPrimaryRunway).toHaveBeenCalledTimes(2);
   });
 
   it('stops before reward lookup when the active primary stage is ambiguous', async () => {

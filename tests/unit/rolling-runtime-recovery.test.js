@@ -4151,6 +4151,66 @@ describe('Rolling runtime recovery helpers', () => {
     });
   });
 
+  it('loads a fresh DAO Challenge before planning a live generic Storage Sink', async () => {
+    const { api, window } = await loadUserscript({ pageReady: true, fastTimers: true });
+    const set = { id: 1419, name: '1 of 4 96+ FUTTIES Player Pick' };
+    const staleChallenge = {
+      id: 4115,
+      status: 'NOT_STARTED',
+      requiredPlayerCount: 11,
+      eligibilityRequirements: [{ key: 'TEAM_RATING', values: [89], count: -1 }],
+      isInProgress: () => false,
+    };
+    const freshChallenge = {
+      id: 4115,
+      status: 'IN_PROGRESS',
+      requiredPlayerCount: 11,
+      eligibilityRequirements: [{ key: 'TEAM_RATING', values: [89], count: -1 }],
+      isInProgress: () => true,
+    };
+    const squad = { getPlayers: () => [] };
+    const requestChallengesForSet = vi.fn(() => successfulObservable({
+      success: true,
+      status: 200,
+      data: { challenges: [staleChallenge] },
+    }));
+    const getChallengesForSet = vi.fn(() => successfulObservable({
+      success: true,
+      status: 200,
+      response: { challenges: [freshChallenge] },
+    }));
+    const loadChallenge = vi.fn((challengeId, inProgress) => successfulObservable({
+      success: true,
+      status: 200,
+      response: { squad },
+    }));
+    window.services.SBC.repository = { sets: { _collection: [set] } };
+    window.services.SBC.requestChallengesForSet = requestChallengesForSet;
+    window.services.SBC.sbcDAO = { getChallengesForSet, loadChallenge };
+
+    const loaded = await api.loadRollingGenericStorageSinkContexts(
+      { name: '10x85+ Rolling Loop', dryRun: false },
+      {
+        setId: 1419,
+        setName: set.name,
+        loop: {
+          name: set.name,
+          strategy: 'storagePressureSbc',
+          sbcSetIds: [1419],
+          sbcNames: [set.name],
+        },
+      },
+    );
+
+    expect(loaded).toMatchObject({
+      status: 'ready',
+      contexts: [{ challenge: freshChallenge, challengeId: 4115, targetRating: 89 }],
+    });
+    expect(requestChallengesForSet).not.toHaveBeenCalled();
+    expect(getChallengesForSet).toHaveBeenCalledWith(1419);
+    expect(loadChallenge).toHaveBeenCalledWith(4115, true);
+  });
+
   it('marks Cornet exhausted only when both live challenges are complete', async () => {
     const { api, window } = await loadUserscript({ pageReady: true, fastTimers: true });
     const set = { id: 1382, name: 'Maxwel Cornet' };

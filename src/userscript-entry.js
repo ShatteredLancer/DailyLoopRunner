@@ -120,6 +120,7 @@ import {
   bindRollingPlayerPickCapabilities,
   buildRollingStorageSinkCatalog,
   evaluateRollingPrimaryRunway,
+  ROLLING_PRIMARY_RUNWAY_FORECAST_DEPTH,
   ROLLING_PROVISIONS_RATING_RANGE,
   ROLLING_PROVISIONS_RECOVERY_MODES,
   resolveRollingRecoveryPriorityPiles,
@@ -216,6 +217,7 @@ import {
 } from './selection/rating-candidates.js';
 import {
   createStoragePressureRole,
+  forecastRatingSquadWindow,
   genericStorageSinkSquadSourceStrategy,
   nextGenericStorageSinkContext,
   nextStorageSinkContext,
@@ -18568,21 +18570,42 @@ function updateLoopControls() {
       }),
       candidateFilter: requiredSpecialSourceFilter,
     };
-    const candidates = buildRatingSbcCandidateEntries(
-      activeLoopDef,
-      model,
-      selectionPolicy,
-      projectedSnapshot,
-    );
-    const projectedSelection = await findOptimalRatingSbcSelection(
-      candidates.entries,
-      model,
-      candidates.piles,
-      { selectionPolicy },
-    );
-    const runway = evaluateRollingPrimaryRunway(projectedSelection, {
+    const projectedSquads = [];
+    const runway = await forecastRatingSquadWindow({
+      snapshot: projectedSnapshot,
+      depth: ROLLING_PRIMARY_RUNWAY_FORECAST_DEPTH,
       targetRating: model.targetRating,
       maxAboveTarget: 1,
+      selectSquad: async (workingSnapshot, { depth }) => {
+        const candidates = buildRatingSbcCandidateEntries(
+          activeLoopDef,
+          model,
+          selectionPolicy,
+          workingSnapshot,
+        );
+        const projectedSelection = await findOptimalRatingSbcSelection(
+          candidates.entries,
+          model,
+          candidates.piles,
+          { selectionPolicy },
+        );
+        projectedSquads.push({
+          depth,
+          projectedRating: Number(projectedSelection.rating || 0) || null,
+          playerRatings: projectedSelection.ratings || [],
+          candidateDefinitions: candidates.entries.length,
+          lowFodderConsumed: (projectedSelection.selected || [])
+            .filter((item) => Number(item?.rating || 0) < 85).length,
+        });
+        return projectedSelection;
+      },
+      evaluateSelection: (projectedSelection) => evaluateRollingPrimaryRunway(
+        projectedSelection,
+        {
+          targetRating: model.targetRating,
+          maxAboveTarget: 1,
+        },
+      ),
     });
     const currentRatings = (selection.selected || [])
       .map((item) => Number(item?.rating || 0))
@@ -18591,27 +18614,31 @@ function updateLoopControls() {
       targetRating: runway.targetRating || Number(model.targetRating || 0) || null,
       projectedRating: runway.projectedRating,
       maxAboveTarget: runway.maxAboveTarget,
-      projectedRatings: projectedSelection.ratings || [],
+      forecastDepth: runway.forecastDepth,
+      triggerDepth: runway.triggerDepth,
+      projectedSquadRatings: runway.projectedSquadRatings || [],
+      projectedRatings: projectedSquads.at(-1)?.playerRatings || [],
+      projectedSquads,
       currentLowFodderConsumed: currentRatings.filter((rating) => rating < 85).length,
-      projectedCandidateDefinitions: candidates.entries.length,
+      projectedCandidateDefinitions: projectedSquads.at(-1)?.candidateDefinitions || 0,
       projectedReasonCode: runway.reasonCode,
     };
     if (runway.status === 'recover') {
       const action = options.recoveryAttempted === true
-        ? 'the bounded Provisions preflight was already attempted, so the current verified squad will submit once before the next inventory snapshot is forecast'
+        ? 'the bounded Provisions preflight did not restore the full runway; preserving the current squad'
         : 'planning Provisions before submitting the current squad';
-      log(`${loopDef.name}: primary runway forecast projects the next minimum squad at ${runway.projectedRating || '?'}/${runway.targetRating || '?'} after the current submission, above the +${runway.maxAboveTarget} cap; ${action}`);
+      log(`${loopDef.name}: ${runway.forecastDepth}-squad primary runway forecast reaches ${runway.projectedRating || '?'}/${runway.targetRating || '?'} at projected squad ${runway.triggerDepth || '?'}, above the +${runway.maxAboveTarget} cap; ${action}`);
       return {
         ...runway,
-        reason: 'projected next primary squad would exceed the allowed rating fallback',
+        reason: `projected primary squad ${runway.triggerDepth || '?'} would exceed the allowed rating fallback`,
         reasonCode: runway.reasonCode || 'SQUAD_RATING_EXCESS',
         details,
       };
     }
     if (runway.status === 'diagnostic') {
-      log(`${loopDef.name}: primary runway forecast is inconclusive (${runway.reasonCode || 'unknown'}); keeping the current safe submission plan`);
+      log(`${loopDef.name}: ${runway.forecastDepth || ROLLING_PRIMARY_RUNWAY_FORECAST_DEPTH}-squad primary runway forecast is inconclusive at projected squad ${runway.triggerDepth || '?'} (${runway.reasonCode || 'unknown'}); keeping the current safe submission plan`);
     } else {
-      log(`${loopDef.name}: primary runway forecast remains within the +${runway.maxAboveTarget} cap (${runway.projectedRating}/${runway.targetRating}) after the current submission`);
+      log(`${loopDef.name}: ${runway.forecastDepth}-squad primary runway forecast remains within the +${runway.maxAboveTarget} cap (${(runway.projectedSquadRatings || []).join(' -> ')}/${runway.targetRating}) after the current submission`);
     }
     return { ...runway, details };
   }
@@ -19390,7 +19417,14 @@ function updateLoopControls() {
       };
     }
     const set = await findSbcSetForLoopDef(sinkDef, sinkDef.name);
-    const challenges = await requestSbcChallenges(set, sinkDef.name, { attempts: 3 });
+    // Live Storage sink submits must not plan from a stale NOT_STARTED cache object.
+    const challenges = sinkDef.dryRun
+      ? await requestSbcChallenges(set, sinkDef.name, { attempts: 3 })
+      : await requestRatingSbcChallenges(
+        set,
+        `${sinkDef.name} Storage pressure fresh challenge`,
+        { force: true },
+      );
     const incomplete = challenges.filter((challenge) => !isCompletedChallenge(challenge));
     if (!incomplete.length) {
       return completedRollingStorageSinkUnavailable(sinkDef, set, challenges);
@@ -19400,7 +19434,7 @@ function updateLoopControls() {
     for (const sourceChallenge of incomplete) {
       const challenge = sinkDef.dryRun
         ? sourceChallenge
-        : await loadRatingSbcChallengeForSet(set, sourceChallenge, sinkDef.name);
+        : await loadRatingSbcChallengeForSet(set, sourceChallenge, sinkDef.name, { force: true });
       if (!challenge) {
         return {
           status: 'blocked',
@@ -19613,8 +19647,8 @@ function updateLoopControls() {
       requestedPressure,
       strategy,
     );
-    const clubEntries = selectStorageSinkClubFallbackEntries(candidates.entries, {
-      count: clubBoosterPolicy.maxClubCount,
+    const clubSelectionOptions = {
+      count: 0,
       maxCount: clubBoosterPolicy.maxClubCount,
       maxRating,
       ordinaryMinRating: clubBoosterPolicy.ordinaryMinRating,
@@ -19622,20 +19656,32 @@ function updateLoopControls() {
       requiredConstraintIndexes: storageSinkRequiredSpecialRoles(context.model)
         .map((role) => role.constraintIndex),
       protectedItems: basePolicy.protectedItems,
-    });
+      requiredItems: duplicateTransactionContext.consumeRefs,
+    };
     let lastFailure = null;
     let bestFeasible = null;
     let requiredDiagnostic = null;
     const attemptDiagnostics = [];
     for (let minimumPressure = requestedPressure; minimumPressure >= 0; minimumPressure--) {
       for (let clubCount = 0; clubCount <= clubBoosterPolicy.maxClubCount; clubCount++) {
-        if (clubCount > clubEntries.length) break;
+        const clubEntries = selectStorageSinkClubFallbackEntries(candidates.entries, {
+          ...clubSelectionOptions,
+          count: clubCount,
+        });
+        const requiredClubCount = duplicateTransactionContext.consumeRefs.filter((ref) => (
+          clubEntries.some((entry) => rollingExactItemMatchesRef(entry.item, ref))
+        )).length;
+        if (clubCount > clubBoosterPolicy.maxClubCount
+          || requiredClubCount > Number(context.model.requiredPlayerCount || 11)) break;
         const prepared = prepareGenericStorageSinkCandidates(candidates.entries, {
           primaryRefs: runtime.primaryDuplicateRefs || [],
           pendingStorageRefs: options.pendingStorageRefs || [],
           maxRating,
           requiredPlayerCount: context.model.requiredPlayerCount,
-          clubEntries: clubEntries.slice(0, clubCount),
+          // `clubEntries` already contains every exact materialized consume
+          // item plus at most `clubCount` ordinary fillers. Do not slice it
+          // again, or a required transaction card disappears at count 0..N.
+          clubEntries,
           protectedItems: basePolicy.protectedItems,
         });
         if (!requiredDiagnostic) {
@@ -20019,10 +20065,10 @@ function updateLoopControls() {
     log(`${loopDef.name}: ${loaded.sinkDef.name} next live Challenge #${context.challengeId || '?'} target:${context.targetRating}, Required Special:${requiredSpecialRoles.map((role) => role.label).join('/') || 'none'}`);
     const finalChallenge = loaded.incompleteCount === 1;
     const reservePickResult = finalChallenge && Number(capability.rewardReserveSlots || 0) > 0;
-    const pressure = rollingStorageSinkPressureRequirement(runtime, { reservePickResult });
+    let pressure = rollingStorageSinkPressureRequirement(runtime, { reservePickResult });
     if (!pressure.ok) return { status: 'unavailable', ...pressure };
     log(`${loopDef.name}: ${loaded.sinkDef.name} Storage pressure requires at least ${pressure.minimumConsumption} consuming card(s) before planning; pending:${pressure.pendingStorageItems}, free:${pressure.currentFree}, reward reserve:${pressure.reserveSlots}`);
-    const consumablePendingStorageRefs = rollingStorageSinkConsumablePendingRefs(
+    let consumablePendingStorageRefs = rollingStorageSinkConsumablePendingRefs(
       runtime,
       pressure.pendingRefs,
     );
@@ -20046,6 +20092,23 @@ function updateLoopControls() {
       `${loopDef.name} -> ${loaded.sinkDef.name} ${context.targetRating} squad`,
       async ({ replan }) => {
         if (replan > 0) {
+          // Swap materialization changes the live inventory and pending
+          // duplicate state. Re-read pressure before rebuilding the squad so
+          // the local replan never relies on the pre-swap requirement.
+          pressure = rollingStorageSinkPressureRequirement(runtime, { reservePickResult });
+          if (!pressure.ok) {
+            return {
+              status: 'blocked',
+              submitted: false,
+              reason: pressure.reason || 'Storage pressure became unknown during transaction-local replanning',
+              reasonCode: pressure.reasonCode || 'STORAGE_CAPACITY_UNKNOWN',
+            };
+          }
+          consumablePendingStorageRefs = rollingStorageSinkConsumablePendingRefs(
+            runtime,
+            pressure.pendingRefs,
+          );
+          log(`${loopDef.name}: ${loaded.sinkDef.name} refreshed Storage pressure after duplicate materialization; required:${pressure.minimumConsumption}, pending:${pressure.pendingStorageItems}, free:${pressure.currentFree}`);
           squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context, {
             minimumPressureConsumption: pressure.minimumConsumption,
             pendingStorageRefs: consumablePendingStorageRefs,
@@ -22281,7 +22344,7 @@ function updateLoopControls() {
         } else if (event === 'recovery') {
           log(`${loopDef.name}: recovery ${payload.kind} progressed (${payload.trigger || 'unspecified'}); cycle ${payload.cycleRecoveries.total}/${payload.budgets?.total || 'budgeted'}`);
         } else if (event === 'primary-runway-unavailable') {
-          log(`${loopDef.name}: projected low-fodder runway is exhausted, but no safe Provisions batch is currently available (${payload.recoveryReasonCode || 'PROVISIONS_PREFLIGHT_SHORTAGE'}); submitting the current verified squad once and replanning from the next inventory snapshot`);
+          log(`${loopDef.name}: projected ${payload.forecastDepth || ROLLING_PRIMARY_RUNWAY_FORECAST_DEPTH}-squad low-fodder runway is exhausted and Provisions could not restore it (${payload.recoveryReasonCode || 'PROVISIONS_PREFLIGHT_SHORTAGE'}); preserving the current verified squad without submission`);
         } else if (event === 'progress') {
           log(`${loopDef.name}: primary completions ${payload.completions}; opened ${payload.packsOpened}; bootstrap ${payload.bootstrapSubmissions}`);
         }
